@@ -1,0 +1,12 @@
+{
+  "name": "vault-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server (registry name 'vault') that embeds the Claude Agent SDK to run headless ingest/query sessions over the domain-split vault wiki (work/life). KNOWLEDGE ONLY — never writes the board.",
+  "bin": { "vault-mcp": "server.mjs" },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.165",
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

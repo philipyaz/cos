@@ -1,0 +1,124 @@
+site_name: Cos — your chief of staff
+site_description: >-
+  Cos is a personal "chief of staff": a writable board, a knowledge vault, a
+  fail-closed prompt-injection guard, semantic search, and the MCP servers that
+  expose it all to agents.
+site_url: https://philipyaz.github.io/cos/
+site_author: Philip Yazdani
+
+repo_name: philipyaz/cos
+repo_url: https://github.com/philipyaz/cos
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 Philip Yazdani — MIT licensed
+
+# docs_dir defaults to ./docs. Build output (site/) is gitignored.
+strict: true
+
+theme:
+  name: material
+  language: en
+  logo: assets/cos-logo.svg
+  favicon: assets/cos-logo.svg
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep orange
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep orange
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.mark
+  - pymdownx.tilde
+  - pymdownx.keys
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/philipyaz/cos
+      name: Cos on GitHub
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - Spec: architecture/spec.md
+      - Hierarchy: architecture/hierarchy.md
+  - Features:
+      - Board: features/board.md
+      - Calendar: features/calendar.md
+      - Reminders: features/reminders.md
+      - Activity: features/activity.md
+      - Priorities: features/priorities.md
+  - Security:
+      - Guard: security/guard.md
+  - Reference:
+      - Deep feature tour: reference/deep-features.md
+      - Search: reference/search.md
+      - Labels: reference/labels.md
+      - Migration: reference/migration.md
+      - Troubleshooting: reference/troubleshooting.md

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ____________________________________________________________________________
+     TEMPLATE for the guard sidecar LaunchAgent (com.chiefofstaff.mcp-guardsvc).
+
+     This is the COMMITTED template. The INSTALLED copy lives at
+       ~/Library/LaunchAgents/com.chiefofstaff.mcp-guardsvc.plist
+     and is NOT version-controlled. Install it by substituting the repo path
+     placeholder __REPO__ with this checkout's ABSOLUTE path, e.g.:
+
+       REPO="$(cd "$(dirname "$0")/../.." && pwd)"   # from guard/deploy/
+       sed "s|__REPO__|$REPO|g" \
+         guard/deploy/com.chiefofstaff.mcp-guardsvc.plist.template \
+         > ~/Library/LaunchAgents/com.chiefofstaff.mcp-guardsvc.plist
+
+     Then load + start it (see the manage-commands block at the bottom).
+     See docs/security/guard.md and the guard-setup skill for the full install walkthrough
+     (HF access, `hf download` prefetch, then `uv sync` with the model extra).
+
+     The prompt-injection / jailbreak classifier sidecar (guard/sidecar.py, run by
+     uv) sits behind the guard MCP bridge (:8004) and serves FastAPI on :8009. It is
+     NOT a stdio MCP server, so it does NOT go in .mcp.json (same as the search
+     sidecar). launchd supervises it the same way as the bridges.
+     ____________________________________________________________________________ -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.chiefofstaff.mcp-guardsvc</string>
+  <key>ProgramArguments</key><array>
+    <string>/opt/homebrew/bin/uv</string>
+    <string>run</string>
+    <!-- The "extra model" flags below include the torch+transformers extra so the
+         REAL gated Llama-Prompt-Guard-2 classifier is available at runtime. Without
+         them, `uv run` prunes the venv to default deps and the sidecar drops to the
+         heuristic fallback. Provision the extra once with `uv sync` (model extra)
+         in __REPO__/guard. -->
+    <string>--extra</string><string>model</string>
+    <string>--directory</string><string>__REPO__/guard</string>
+    <string>uvicorn</string><string>sidecar:app</string>
+    <string>--host</string><string>127.0.0.1</string>
+    <string>--port</string><string>8009</string>
+  </array>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- ABSOLUTE — the trust/whitelist store is the sidecar's writable state;
+         pin it so it doesn't depend on the launchd cwd. -->
+    <key>COS_GUARD_TRUST_FILE</key><string>__REPO__/guard/data/trusted-senders.json</string>
+    <!-- ABSOLUTE — the quarantine log (every FLAGGED scan, persisted for review) is the
+         sidecar's SECOND writable state; pin it for the same reason. -->
+    <key>COS_GUARD_QUARANTINE_FILE</key><string>__REPO__/guard/data/quarantine.json</string>
+    <!-- MODEL SELECTION: the named preset key for the DEFAULT model,
+         meta-llama/Llama-Prompt-Guard-2-86M (gated; resolves to threshold 0.5).
+         resolve_model_config() matches preset keys case-insensitively; you may also
+         set the raw HF id (meta-llama/Llama-Prompt-Guard-2-86M) for the same result,
+         or another preset key ('qualifire' = the public English-only ModernBERT head,
+         'heuristic-only' = dependency-free regex fallback). This is GATED: you must
+         accept the Llama license on Hugging Face and prefetch it once — see the
+         guard-setup skill / docs/security/guard.md. (You could even drop this line entirely: with
+         COS_GUARD_MODEL unset the sidecar already defaults to this same preset.) -->
+    <key>COS_GUARD_MODEL</key><string>llama-prompt-guard-2-86m</string>
+    <!-- DECISION THRESHOLD: 0.5 is the in-code default and the Llama-Prompt-Guard-2-86M
+         preset's recommended threshold. Separation is wide (benign mail ~0.001 vs.
+         injections ~0.99 across EN/FR/DE), so 0.5 is safe. COS_GUARD_THRESHOLD ALWAYS
+         overrides the preset/default threshold when present. Lower for more sensitivity,
+         raise toward 0.8+ to trim borderline false positives. -->
+    <key>COS_GUARD_THRESHOLD</key><string>0.5</string>
+    <!-- HF_HUB_OFFLINE=1: skip Hugging Face network calls at load time so a flaky network
+         can't stall startup — the model is read straight from ~/.cache/huggingface.
+         SAFE ONLY AFTER the one-time prefetch (`hf auth login` then
+         `hf download meta-llama/Llama-Prompt-Guard-2-86M`; see the guard-setup skill).
+         If you have NOT prefetched the gated model yet, REMOVE this key+value pair so
+         the sidecar can fetch it on first load — otherwise it will fail to load the
+         model and (with COS_GUARD_CLASSIFIER=auto) drop to the heuristic fallback. -->
+    <key>HF_HUB_OFFLINE</key><string>1</string>
+  </dict>
+  <key>WorkingDirectory</key><string>__REPO__/guard</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>__REPO__/mcp/logs/guardsvc.out.log</string>
+  <key>StandardErrorPath</key><string>__REPO__/mcp/logs/guardsvc.err.log</string>
+</dict></plist>
+<!-- ____________________________________________________________________________
+     MANAGE COMMANDS (run after substituting __REPO__ and writing the installed copy
+     to ~/Library/LaunchAgents/com.chiefofstaff.mcp-guardsvc.plist):
+
+       U=$(id -u)
+
+       # load (bootstrap) — register the agent with launchd; RunAtLoad starts it
+       launchctl bootstrap gui/$U ~/Library/LaunchAgents/com.chiefofstaff.mcp-guardsvc.plist
+
+       # start / restart now (kickstart with -k = kill + restart; picks up edits)
+       launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-guardsvc
+
+       # stop + unload (bootout) — needed before re-bootstrapping after a plist edit
+       launchctl bootout gui/$U/com.chiefofstaff.mcp-guardsvc
+
+       # health check (greens only once the classifier is warm)
+       curl -s http://127.0.0.1:8009/healthz
+
+     Note: ensure-bridges.sh bootstraps + kickstarts this agent on `npm dev/start`,
+     but launchd owns its lifecycle (RunAtLoad + KeepAlive).
+     ____________________________________________________________________________ -->

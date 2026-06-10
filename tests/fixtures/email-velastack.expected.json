@@ -1,0 +1,58 @@
+{
+  "fixture": "email-velastack",
+  "input": "fixtures/email-velastack.md",
+  "channel": "gmail",
+  "note": "Structural invariants only. This email lands on an OPEN matter — the dedup/entity-resolution contract must update the existing VelaStack case, never spawn a duplicate.",
+  "routing": "both",
+  "invariants": [
+    {
+      "id": "no-duplicate-thread",
+      "kind": "no-duplicate-thread",
+      "where": "board",
+      "thread": "VelaStack / Packwright engagement",
+      "matches_vaultLink": "VelaStack",
+      "expect_count": 1,
+      "assert": "exactly one case carries vaultLink 'VelaStack' — CASE-2 is reused, no new case is created for this email"
+    },
+    {
+      "id": "message-linked-to-existing-case",
+      "kind": "message-linked",
+      "where": "board",
+      "case_matches_vaultLink": "VelaStack",
+      "message_from": "theo.markovic@velastack.dev",
+      "assert": "a message (source gmail, from theo.markovic@velastack.dev) is linked onto the existing VelaStack case; the case's messageIds includes it and the message.caseId points back"
+    },
+    {
+      "id": "case-stays-work-board",
+      "kind": "case-in-domain-lane",
+      "where": "board",
+      "domain": "work",
+      "lane_in": ["todo", "urgent"],
+      "matches_vaultLink": "VelaStack",
+      "assert": "the updated case is still in domain 'work' and an active lane (not moved to done by an inbound email)"
+    },
+    {
+      "id": "case-vaultlinks-velastack-context",
+      "kind": "vaultLink-present",
+      "where": "board",
+      "case_matches_vaultLink": "VelaStack",
+      "vaultLink": "VelaStack",
+      "assert": "the case still carries its VelaStack context vaultLinks (VelaStack, Theo Markovic, Packwright, Lena Visser ...)"
+    },
+    {
+      "id": "vault-velastack-source-added",
+      "kind": "page-exists",
+      "where": "vault",
+      "section": "wiki/sources",
+      "of": "this email (Theo Markovic, June availability)",
+      "assert": "a source page for this email exists in wiki/sources/ (vault context for VelaStack is updated, not just the board)"
+    },
+    {
+      "id": "vault-velastack-entity-linked",
+      "kind": "entity-links-case",
+      "where": "vault",
+      "entity": "VelaStack",
+      "assert": "the VelaStack entity/concept context links the existing board case (reciprocal case <-> vault link maintained)"
+    }
+  ]
+}

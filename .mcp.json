@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "board": {
+      "type": "http",
+      "url": "http://localhost:8001/mcp"
+    },
+    "openwhispr": {
+      "type": "http",
+      "url": "http://localhost:8002/mcp"
+    },
+    "calendar": {
+      "type": "http",
+      "url": "http://localhost:8003/mcp"
+    },
+    "guard": {
+      "type": "http",
+      "url": "http://localhost:8004/mcp"
+    },
+    "vault": {
+      "type": "http",
+      "url": "http://localhost:8005/mcp"
+    },
+    "whatsapp": {
+      "type": "http",
+      "url": "http://localhost:8006/mcp"
+    }
+  }
+}

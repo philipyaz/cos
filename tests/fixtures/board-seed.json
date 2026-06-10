@@ -1,0 +1,1039 @@
+{
+  "schemaVersion": 8,
+  "version": 1,
+  "cases": [
+    {
+      "id": "CASE-1",
+      "title": "Set up CI pipeline for the API",
+      "summary": "Wire GitHub Actions to run the test suite on every PR and block merge on red.",
+      "status": "in_progress",
+      "domain": "work",
+      "client": "Platform",
+      "tags": [
+        "ci",
+        "tooling"
+      ],
+      "labels": [
+        "waiting-on"
+      ],
+      "tasks": [
+        {
+          "id": "CASE-1-T1",
+          "title": "Add the test workflow yaml",
+          "status": "open",
+          "createdAt": "2026-01-15T09:00:00.000Z"
+        }
+      ],
+      "messageIds": [
+        "M-1"
+      ],
+      "createdAt": "2026-01-15T09:00:00.000Z",
+      "updatedAt": "2026-01-15T09:00:00.000Z",
+      "priority": "P2",
+      "activity": [
+        {
+          "ts": "2026-01-15T09:00:00.000Z",
+          "actor": "agent",
+          "verb": "created"
+        }
+      ]
+    },
+    {
+      "id": "CASE-2",
+      "title": "Renew the team domain name",
+      "summary": "The shared dev domain expires next month; renew for two years.",
+      "status": "todo",
+      "domain": "work",
+      "client": "Platform",
+      "tags": [
+        "admin"
+      ],
+      "labels": [],
+      "tasks": [],
+      "messageIds": [],
+      "createdAt": "2026-01-15T09:00:00.000Z",
+      "updatedAt": "2026-01-15T09:00:00.000Z",
+      "priority": "P3",
+      "activity": [
+        {
+          "ts": "2026-01-15T09:00:00.000Z",
+          "actor": "agent",
+          "verb": "created"
+        }
+      ]
+    },
+    {
+      "id": "CASE-3",
+      "title": "Plan the Q3 team offsite",
+      "summary": "Pick dates + venue for a two-day planning offsite.",
+      "status": "waiting_for_input",
+      "domain": "work",
+      "client": "Team",
+      "tags": [
+        "planning"
+      ],
+      "labels": [
+        "approval-needed"
+      ],
+      "tasks": [],
+      "messageIds": [],
+      "createdAt": "2026-01-15T09:00:00.000Z",
+      "updatedAt": "2026-01-15T09:00:00.000Z",
+      "priority": "P3",
+      "activity": [
+        {
+          "ts": "2026-01-15T09:00:00.000Z",
+          "actor": "agent",
+          "verb": "created"
+        }
+      ]
+    },
+    {
+      "id": "CASE-4",
+      "title": "Book a dentist appointment",
+      "summary": "Routine 6-month checkup.",
+      "status": "todo",
+      "domain": "life",
+      "client": "",
+      "tags": [
+        "health"
+      ],
+      "labels": [],
+      "tasks": [],
+      "messageIds": [],
+      "createdAt": "2026-01-15T09:00:00.000Z",
+      "updatedAt": "2026-01-15T09:00:00.000Z",
+      "priority": "P3",
+      "activity": [
+        {
+          "ts": "2026-01-15T09:00:00.000Z",
+          "actor": "agent",
+          "verb": "created"
+        }
+      ]
+    }
+  ],
+  "messages": [
+    {
+      "id": "M-1",
+      "source": "gmail",
+      "from": "ci@example.com",
+      "to": [
+        "sam@example.com"
+      ],
+      "subject": "PR checks failing on main",
+      "preview": "The build is red on main after the last merge.",
+      "body": "The build is red on main after the last merge — see the run log.",
+      "receivedAt": "2026-01-15T09:00:00.000Z",
+      "read": false,
+      "caseId": "CASE-1"
+    }
+  ],
+  "events": [
+    {
+      "id": "EVT-1",
+      "title": "Q3 offsite (tentative)",
+      "date": "2026-02-10",
+      "start": "09:00",
+      "end": "17:00",
+      "caseId": "CASE-3",
+      "createdAt": "2026-01-15T09:00:00.000Z"
+    }
+  ],
+  "reminders": [
+    {
+      "id": "REM-1",
+      "title": "Renew domain before it lapses",
+      "status": "open",
+      "domain": "work",
+      "dueAt": "2026-02-01",
+      "caseId": "CASE-2",
+      "createdAt": "2026-01-15T09:00:00.000Z"
+    }
+  ],
+  "priorities": [],
+  "pending": [],
+  "views": [],
+  "labels": [
+    {
+      "id": "waiting-on",
+      "title": "Waiting on someone",
+      "description": "Apply when the next step is owned by another person and you are stalled until they reply, deliver, or decide.",
+      "color": "amber",
+      "domain": "work",
+      "bundle": "universal"
+    },
+    {
+      "id": "blocked",
+      "title": "Blocked",
+      "description": "Apply when work cannot proceed because of a missing dependency, access, decision, or unresolved problem.",
+      "color": "red",
+      "domain": "work",
+      "bundle": "universal"
+    },
+    {
+      "id": "at-risk",
+      "title": "At risk",
+      "description": "Apply when a deadline, commitment, or outcome is in jeopardy and will slip or fail without intervention.",
+      "color": "red",
+      "domain": "work",
+      "bundle": "universal"
+    },
+    {
+      "id": "needs-decision",
+      "title": "Needs a decision",
+      "description": "Apply when the demand is stuck pending a choice you must make before anything else can move forward.",
+      "color": "violet",
+      "domain": "work",
+      "bundle": "universal"
+    },
+    {
+      "id": "deep-work",
+      "title": "Deep work",
+      "description": "Apply when the task requires a long, uninterrupted focus block rather than a quick reactive reply.",
+      "color": "indigo",
+      "domain": "work",
+      "bundle": "universal"
+    },
+    {
+      "id": "quick-win",
+      "title": "Quick win",
+      "description": "Apply when the task can be fully finished in a few minutes with little effort or context.",
+      "color": "green",
+      "domain": "work",
+      "bundle": "universal"
+    },
+    {
+      "id": "delegated",
+      "title": "Delegated",
+      "description": "Apply when you have handed the work off to someone else and are only tracking it to completion.",
+      "color": "teal",
+      "domain": "work",
+      "bundle": "universal"
+    },
+    {
+      "id": "follow-up",
+      "title": "Follow-up",
+      "description": "Apply when this is a reminder to circle back, chase a reply, or check in on something already in motion.",
+      "color": "sky",
+      "domain": "work",
+      "bundle": "universal"
+    },
+    {
+      "id": "scheduled",
+      "title": "Scheduled",
+      "description": "Apply when the item is locked to a specific date or time, like a meeting, appointment, or hard-dated commitment.",
+      "color": "blue",
+      "domain": "work",
+      "bundle": "universal"
+    },
+    {
+      "id": "snoozed",
+      "title": "Snoozed / deferred",
+      "description": "Apply when the item is intentionally parked until a later date and should not resurface or be acted on before then.",
+      "color": "orange",
+      "domain": "work",
+      "bundle": "universal"
+    },
+    {
+      "id": "reference",
+      "title": "Reference / saved",
+      "description": "Apply when the item is kept for lookup or context rather than action, such as a doc, link, or saved detail.",
+      "color": "gray",
+      "domain": "work",
+      "bundle": "universal"
+    },
+    {
+      "id": "approval-needed",
+      "title": "Approval needed",
+      "description": "Apply when a request awaits your manager sign-off, such as a PR, expense, contract, PTO request, or access grant.",
+      "color": "amber",
+      "domain": "work",
+      "bundle": "manager"
+    },
+    {
+      "id": "one-on-one",
+      "title": "1-1 prep",
+      "description": "Apply when the item is preparing for, scheduling, or following up on a recurring 1-1 with a direct report.",
+      "color": "blue",
+      "domain": "work",
+      "bundle": "manager"
+    },
+    {
+      "id": "time-off",
+      "title": "Time off / coverage",
+      "description": "Apply when a report requests PTO, sick, or parental leave, or you must arrange coverage for someone away.",
+      "color": "sky",
+      "domain": "work",
+      "bundle": "manager"
+    },
+    {
+      "id": "hiring",
+      "title": "Hiring",
+      "description": "Apply when the item is a job req, candidate review, interview, debrief, or offer for an open role on your team.",
+      "color": "teal",
+      "domain": "work",
+      "bundle": "manager"
+    },
+    {
+      "id": "performance",
+      "title": "Performance",
+      "description": "Apply when the item involves a review cycle, calibration, promotion case, PIP, or feedback you must give a report.",
+      "color": "violet",
+      "domain": "work",
+      "bundle": "manager"
+    },
+    {
+      "id": "team-blocker",
+      "title": "Team blocker",
+      "description": "Apply when a report is stuck and needs you to unblock them, remove a dependency, or make a call to keep work moving.",
+      "color": "red",
+      "domain": "work",
+      "bundle": "manager"
+    },
+    {
+      "id": "escalation",
+      "title": "Escalation",
+      "description": "Apply when a stakeholder, exec, or customer escalates an issue to you that demands a same-day response or resolution.",
+      "color": "red",
+      "domain": "work",
+      "bundle": "manager"
+    },
+    {
+      "id": "people-conflict",
+      "title": "People issue",
+      "description": "Apply when the item concerns interpersonal conflict, morale, attrition risk, or an HR-sensitive matter on your team.",
+      "color": "fuchsia",
+      "domain": "work",
+      "bundle": "manager"
+    },
+    {
+      "id": "budget-headcount",
+      "title": "Budget / headcount",
+      "description": "Apply when the item touches team budget, vendor spend, headcount planning, or a forecast you own.",
+      "color": "orange",
+      "domain": "work",
+      "bundle": "manager"
+    },
+    {
+      "id": "appointment-booking",
+      "title": "Appointment",
+      "description": "Apply when the item is scheduling, confirming, rescheduling, or preparing for a doctor, dentist, specialist, or therapy visit.",
+      "color": "sky",
+      "domain": "life",
+      "bundle": "life-health-wellness"
+    },
+    {
+      "id": "prescription-refill",
+      "title": "Prescription",
+      "description": "Apply when the item involves refilling, picking up, renewing, or adjusting a medication or a pharmacy request.",
+      "color": "blue",
+      "domain": "life",
+      "bundle": "life-health-wellness"
+    },
+    {
+      "id": "test-results",
+      "title": "Test results",
+      "description": "Apply when lab work, imaging, screenings, or other clinical results have arrived and need review or follow-up action.",
+      "color": "violet",
+      "domain": "life",
+      "bundle": "life-health-wellness"
+    },
+    {
+      "id": "symptom-concern",
+      "title": "Symptom / concern",
+      "description": "Apply when a new or worsening symptom, injury, or acute health worry needs assessment or a same-week medical decision.",
+      "color": "red",
+      "domain": "life",
+      "bundle": "life-health-wellness"
+    },
+    {
+      "id": "preventive-checkup",
+      "title": "Preventive care",
+      "description": "Apply when the item is a routine physical, dental cleaning, vaccination, or recommended screening that is due or overdue.",
+      "color": "teal",
+      "domain": "life",
+      "bundle": "life-health-wellness"
+    },
+    {
+      "id": "insurance-billing",
+      "title": "Insurance / billing",
+      "description": "Apply when the item is a medical bill, claim, pre-authorization, EOB, or coverage question to pay or dispute.",
+      "color": "amber",
+      "domain": "life",
+      "bundle": "life-health-wellness"
+    },
+    {
+      "id": "fitness-training",
+      "title": "Fitness",
+      "description": "Apply when the item is a workout plan, training session, class booking, or physical-activity goal to schedule or log.",
+      "color": "green",
+      "domain": "life",
+      "bundle": "life-health-wellness"
+    },
+    {
+      "id": "mental-health",
+      "title": "Mental health",
+      "description": "Apply when the item relates to a therapy session, mood, stress, sleep, or a mindfulness or self-care practice to act on.",
+      "color": "indigo",
+      "domain": "life",
+      "bundle": "life-health-wellness"
+    },
+    {
+      "id": "nutrition-diet",
+      "title": "Nutrition",
+      "description": "Apply when the item is about meal planning, dietary changes, supplements, or tracking food and hydration.",
+      "color": "orange",
+      "domain": "life",
+      "bundle": "life-health-wellness"
+    },
+    {
+      "id": "care-coordination",
+      "title": "Care coordination",
+      "description": "Apply when the item involves managing care for a dependent or coordinating referrals, records, or providers across parties.",
+      "color": "fuchsia",
+      "domain": "life",
+      "bundle": "life-health-wellness"
+    },
+    {
+      "id": "bill-to-pay",
+      "title": "Bill to pay",
+      "description": "Apply when an invoice, statement, or payment request has arrived and money must be sent or scheduled by a due date.",
+      "color": "red",
+      "domain": "life",
+      "bundle": "life-household-admin"
+    },
+    {
+      "id": "renewal-due",
+      "title": "Renewal due",
+      "description": "Apply when a subscription, membership, licence, passport, or domain is expiring and must be renewed or cancelled.",
+      "color": "amber",
+      "domain": "life",
+      "bundle": "life-household-admin"
+    },
+    {
+      "id": "insurance",
+      "title": "Insurance",
+      "description": "Apply when the item concerns a policy, quote, claim, or coverage change for home, auto, health, life, or contents.",
+      "color": "indigo",
+      "domain": "life",
+      "bundle": "life-household-admin"
+    },
+    {
+      "id": "appointment",
+      "title": "Appointment",
+      "description": "Apply when something needs a slot booked, confirmed, or rescheduled: doctor, dentist, vet, salon, viewing, or service.",
+      "color": "sky",
+      "domain": "life",
+      "bundle": "life-household-admin"
+    },
+    {
+      "id": "form-to-file",
+      "title": "Form to file",
+      "description": "Apply when a form, application, or government/school/bank submission must be completed and sent to meet a deadline.",
+      "color": "violet",
+      "domain": "life",
+      "bundle": "life-household-admin"
+    },
+    {
+      "id": "document-needed",
+      "title": "Document needed",
+      "description": "Apply when you must locate, request, scan, sign, or file a document like a contract, certificate, or proof of address.",
+      "color": "blue",
+      "domain": "life",
+      "bundle": "life-household-admin"
+    },
+    {
+      "id": "delivery-tracking",
+      "title": "Delivery / return",
+      "description": "Apply when a parcel, order, or shipment needs tracking, collecting, accepting at home, or returning.",
+      "color": "teal",
+      "domain": "life",
+      "bundle": "life-household-admin"
+    },
+    {
+      "id": "repair-maintenance",
+      "title": "Repair / upkeep",
+      "description": "Apply when something at home is broken or due for maintenance and needs a tradesperson, part, or scheduled service.",
+      "color": "orange",
+      "domain": "life",
+      "bundle": "life-household-admin"
+    },
+    {
+      "id": "utilities-account",
+      "title": "Utilities / account",
+      "description": "Apply when setting up, switching, disputing, or changing an account with a utility, telecom, bank, or service provider.",
+      "color": "gray",
+      "domain": "life",
+      "bundle": "life-household-admin"
+    },
+    {
+      "id": "warranty-claim",
+      "title": "Warranty / dispute",
+      "description": "Apply when chasing a refund, warranty repair, overcharge, or billing error with a vendor or service.",
+      "color": "fuchsia",
+      "domain": "life",
+      "bundle": "life-household-admin"
+    },
+    {
+      "id": "bill-due",
+      "title": "Bill due",
+      "description": "Apply when a bill, loan payment, or invoice has a hard due date and risks a late fee or service cutoff if missed.",
+      "color": "red",
+      "domain": "life",
+      "bundle": "life-personal-finance"
+    },
+    {
+      "id": "tax-filing",
+      "title": "Tax filing",
+      "description": "Apply when the item is filing returns, quarterly estimates, deductions, document collection, or any tax-deadline task.",
+      "color": "orange",
+      "domain": "life",
+      "bundle": "life-personal-finance"
+    },
+    {
+      "id": "fraud-dispute",
+      "title": "Fraud or dispute",
+      "description": "Apply when reviewing a suspicious charge, disputing a transaction, freezing a card, or responding to a breach alert.",
+      "color": "pink",
+      "domain": "life",
+      "bundle": "life-personal-finance"
+    },
+    {
+      "id": "budget-review",
+      "title": "Budget review",
+      "description": "Apply when reconciling accounts, categorizing spend, or checking whether spending is on track against the budget.",
+      "color": "blue",
+      "domain": "life",
+      "bundle": "life-personal-finance"
+    },
+    {
+      "id": "subscription-audit",
+      "title": "Subscription audit",
+      "description": "Apply when a recurring subscription or membership is renewing, raising its price, or up for a cancel/keep decision.",
+      "color": "sky",
+      "domain": "life",
+      "bundle": "life-personal-finance"
+    },
+    {
+      "id": "debt-paydown",
+      "title": "Debt paydown",
+      "description": "Apply when the task is paying down or refinancing a credit card, loan, or mortgage, or weighing a payoff strategy.",
+      "color": "amber",
+      "domain": "life",
+      "bundle": "life-personal-finance"
+    },
+    {
+      "id": "invest-rebalance",
+      "title": "Invest & rebalance",
+      "description": "Apply when reviewing a portfolio, rebalancing allocations, deciding a buy/sell, or acting on a market-driven move.",
+      "color": "violet",
+      "domain": "life",
+      "bundle": "life-personal-finance"
+    },
+    {
+      "id": "retirement-contrib",
+      "title": "Retirement & savings",
+      "description": "Apply when funding a 401k/IRA, hitting a contribution or match deadline, or moving money into savings.",
+      "color": "teal",
+      "domain": "life",
+      "bundle": "life-personal-finance"
+    },
+    {
+      "id": "big-purchase",
+      "title": "Big purchase",
+      "description": "Apply when researching, saving for, or deciding on a major one-off purchase like a car, home, appliance, or trip.",
+      "color": "indigo",
+      "domain": "life",
+      "bundle": "life-personal-finance"
+    },
+    {
+      "id": "insurance-renewal",
+      "title": "Insurance & coverage",
+      "description": "Apply when an insurance policy is renewing, a claim is in flight, or coverage needs to be compared or updated.",
+      "color": "green",
+      "domain": "life",
+      "bundle": "life-personal-finance"
+    },
+    {
+      "id": "money-admin",
+      "title": "Account admin",
+      "description": "Apply for routine financial paperwork: opening/closing accounts, updating beneficiaries, statements, or KYC requests.",
+      "color": "gray",
+      "domain": "life",
+      "bundle": "life-personal-finance"
+    },
+    {
+      "id": "flight-booking",
+      "title": "Flight booking",
+      "description": "Apply when the demand is to search, choose, book, or change a flight: fares, seats, layovers, or award redemptions.",
+      "color": "blue",
+      "domain": "life",
+      "bundle": "life-travel"
+    },
+    {
+      "id": "lodging",
+      "title": "Lodging",
+      "description": "Apply when the demand is to find, book, modify, or cancel a place to stay like a hotel, Airbnb, or hostel.",
+      "color": "sky",
+      "domain": "life",
+      "bundle": "life-travel"
+    },
+    {
+      "id": "ground-transport",
+      "title": "Ground transport",
+      "description": "Apply when arranging on-the-ground travel: rental car, train, ferry, airport transfer, or rideshare.",
+      "color": "teal",
+      "domain": "life",
+      "bundle": "life-travel"
+    },
+    {
+      "id": "itinerary",
+      "title": "Itinerary",
+      "description": "Apply when building or adjusting the day-by-day plan: routes, daily schedule, reservations, and activity sequencing.",
+      "color": "indigo",
+      "domain": "life",
+      "bundle": "life-travel"
+    },
+    {
+      "id": "visa-entry",
+      "title": "Visa & entry",
+      "description": "Apply when the task involves a visa, ESTA/eTA, passport validity, vaccination proof, or any border-entry requirement.",
+      "color": "red",
+      "domain": "life",
+      "bundle": "life-travel"
+    },
+    {
+      "id": "trip-deadline",
+      "title": "Trip deadline",
+      "description": "Apply when an item is time-locked by departure or a booking window like check-in opening, a fare hold, or a refund cutoff.",
+      "color": "orange",
+      "domain": "life",
+      "bundle": "life-travel"
+    },
+    {
+      "id": "packing",
+      "title": "Packing",
+      "description": "Apply when the demand is to prepare what to bring: a packing list, gear, luggage limits, clothing, or chargers/adapters.",
+      "color": "amber",
+      "domain": "life",
+      "bundle": "life-travel"
+    },
+    {
+      "id": "travel-docs",
+      "title": "Travel docs",
+      "description": "Apply when gathering or storing confirmations, boarding passes, e-tickets, reservation numbers, and insurance details.",
+      "color": "violet",
+      "domain": "life",
+      "bundle": "life-travel"
+    },
+    {
+      "id": "trip-budget",
+      "title": "Trip budget",
+      "description": "Apply when the item concerns trip money: setting a budget, comparing prices, expense splitting, currency, or shared costs.",
+      "color": "green",
+      "domain": "life",
+      "bundle": "life-travel"
+    },
+    {
+      "id": "destination-research",
+      "title": "Destination research",
+      "description": "Apply when researching a place before committing: things to do, neighborhoods, dates/seasons, safety, or local logistics.",
+      "color": "fuchsia",
+      "domain": "life",
+      "bundle": "life-travel"
+    },
+    {
+      "id": "urgent-repair",
+      "title": "Urgent repair",
+      "description": "Apply when something is broken in a way that risks safety, damage, or livability and needs fixing now, like a leak or no heat.",
+      "color": "red",
+      "domain": "life",
+      "bundle": "life-home-maintenance"
+    },
+    {
+      "id": "routine-repair",
+      "title": "Routine repair",
+      "description": "Apply when a non-urgent fix-it task comes in for something worn, loose, or partly broken that can wait until convenient.",
+      "color": "orange",
+      "domain": "life",
+      "bundle": "life-home-maintenance"
+    },
+    {
+      "id": "appliance",
+      "title": "Appliance",
+      "description": "Apply when the demand concerns a household appliance or system like the fridge, washer, boiler, or HVAC needing service.",
+      "color": "amber",
+      "domain": "life",
+      "bundle": "life-home-maintenance"
+    },
+    {
+      "id": "contractor",
+      "title": "Contractor & quotes",
+      "description": "Apply when you need to find, vet, schedule, quote, or pay a tradesperson like a plumber, electrician, or handyman.",
+      "color": "violet",
+      "domain": "life",
+      "bundle": "life-home-maintenance"
+    },
+    {
+      "id": "renovation",
+      "title": "Renovation project",
+      "description": "Apply when the item is part of a larger multi-step home improvement effort like a kitchen redo, repaint, or new flooring.",
+      "color": "indigo",
+      "domain": "life",
+      "bundle": "life-home-maintenance"
+    },
+    {
+      "id": "cleaning",
+      "title": "Cleaning & chores",
+      "description": "Apply when the task is recurring upkeep or deep cleaning: decluttering, laundry, scrubbing, or booking a cleaner.",
+      "color": "sky",
+      "domain": "life",
+      "bundle": "life-home-maintenance"
+    },
+    {
+      "id": "garden-outdoor",
+      "title": "Garden & outdoor",
+      "description": "Apply when the demand involves the yard, garden, lawn, plants, or exterior like the patio, fence, gutters, or driveway.",
+      "color": "green",
+      "domain": "life",
+      "bundle": "life-home-maintenance"
+    },
+    {
+      "id": "seasonal-maintenance",
+      "title": "Seasonal upkeep",
+      "description": "Apply when it is preventive, calendar-driven maintenance like winterizing pipes, servicing the furnace, or swapping filters.",
+      "color": "teal",
+      "domain": "life",
+      "bundle": "life-home-maintenance"
+    },
+    {
+      "id": "supplies-shopping",
+      "title": "Supplies & shopping",
+      "description": "Apply when you need to buy, order, return, or restock materials, tools, parts, or furnishings for the home.",
+      "color": "blue",
+      "domain": "life",
+      "bundle": "life-home-maintenance"
+    },
+    {
+      "id": "move-logistics",
+      "title": "Move & logistics",
+      "description": "Apply when the task relates to moving, packing, storage, deliveries, or transferring utilities and home services.",
+      "color": "fuchsia",
+      "domain": "life",
+      "bundle": "life-home-maintenance"
+    },
+    {
+      "id": "home-admin",
+      "title": "Home admin",
+      "description": "Apply when it is paperwork or recurring obligations for the home: insurance, property tax, HOA dues, warranties, or permits.",
+      "color": "gray",
+      "domain": "life",
+      "bundle": "life-home-maintenance"
+    },
+    {
+      "id": "kids-logistics",
+      "title": "Kids logistics",
+      "description": "Apply when the demand involves a child's schedule, transport, pickups, activities, playdates, or daily care coordination.",
+      "color": "sky",
+      "domain": "life",
+      "bundle": "life-family-relationships"
+    },
+    {
+      "id": "school",
+      "title": "School",
+      "description": "Apply when the item concerns school: forms, permission slips, teacher messages, meetings, tuition, homework, or enrollment.",
+      "color": "blue",
+      "domain": "life",
+      "bundle": "life-family-relationships"
+    },
+    {
+      "id": "partner",
+      "title": "Partner",
+      "description": "Apply when the demand is about your spouse or partner: shared decisions, date plans, their asks, or relationship check-ins.",
+      "color": "pink",
+      "domain": "life",
+      "bundle": "life-family-relationships"
+    },
+    {
+      "id": "parents-elders",
+      "title": "Parents & elders",
+      "description": "Apply when the item concerns aging parents or older relatives: their needs, requests, visits, or coordinating help.",
+      "color": "violet",
+      "domain": "life",
+      "bundle": "life-family-relationships"
+    },
+    {
+      "id": "caregiving",
+      "title": "Caregiving",
+      "description": "Apply when the demand is hands-on care for a dependent: meds, appointments, doctor coordination, or arranging caregivers.",
+      "color": "indigo",
+      "domain": "life",
+      "bundle": "life-family-relationships"
+    },
+    {
+      "id": "health-appointment",
+      "title": "Health appointment",
+      "description": "Apply when the item is booking, prepping for, or following up on a medical, dental, or wellness visit for a family member.",
+      "color": "teal",
+      "domain": "life",
+      "bundle": "life-family-relationships"
+    },
+    {
+      "id": "social-plans",
+      "title": "Social plans",
+      "description": "Apply when the demand is organizing or responding to get-togethers with friends or family: dinners, trips, or hosting.",
+      "color": "amber",
+      "domain": "life",
+      "bundle": "life-family-relationships"
+    },
+    {
+      "id": "celebration",
+      "title": "Celebration",
+      "description": "Apply when the item is a birthday, anniversary, holiday, gift, card, or party that needs planning or remembering.",
+      "color": "fuchsia",
+      "domain": "life",
+      "bundle": "life-family-relationships"
+    },
+    {
+      "id": "household",
+      "title": "Household",
+      "description": "Apply when the demand is running the shared home: chores, repairs, groceries, bills, or coordinating contractors.",
+      "color": "green",
+      "domain": "life",
+      "bundle": "life-family-relationships"
+    },
+    {
+      "id": "stay-in-touch",
+      "title": "Stay in touch",
+      "description": "Apply when someone deserves a reach-out you owe: a friend you've lost touch with, a thank-you, or an overdue reply.",
+      "color": "orange",
+      "domain": "life",
+      "bundle": "life-family-relationships"
+    },
+    {
+      "id": "family-tension",
+      "title": "Family tension",
+      "description": "Apply when the item is a sensitive conflict, disagreement, or hard conversation with a family member or friend.",
+      "color": "red",
+      "domain": "life",
+      "bundle": "life-family-relationships"
+    },
+    {
+      "id": "course-coursework",
+      "title": "Course",
+      "description": "Apply when the demand is enrolling in, watching lectures for, or completing assignments in a structured course or class.",
+      "color": "blue",
+      "domain": "life",
+      "bundle": "life-learning-growth"
+    },
+    {
+      "id": "reading-list",
+      "title": "Reading list",
+      "description": "Apply when something is a book, article, or paper to read or finish, including a recommendation to add to the queue.",
+      "color": "sky",
+      "domain": "life",
+      "bundle": "life-learning-growth"
+    },
+    {
+      "id": "skill-practice",
+      "title": "Skill practice",
+      "description": "Apply when the task is a repeatable practice session to drill a skill like an instrument, language, code kata, or drawing.",
+      "color": "teal",
+      "domain": "life",
+      "bundle": "life-learning-growth"
+    },
+    {
+      "id": "hobby-project",
+      "title": "Hobby project",
+      "description": "Apply when working on a personal creative or maker project pursued for enjoyment like a side build, craft, or game.",
+      "color": "green",
+      "domain": "life",
+      "bundle": "life-learning-growth"
+    },
+    {
+      "id": "certification",
+      "title": "Certification",
+      "description": "Apply when the item is preparing for, scheduling, or sitting an exam or credential, or renewing one that is expiring.",
+      "color": "amber",
+      "domain": "life",
+      "bundle": "life-learning-growth"
+    },
+    {
+      "id": "deadline-cohort",
+      "title": "Deadline / cohort",
+      "description": "Apply when a learning item has a hard external date: an application window, assignment due date, or cohort start.",
+      "color": "red",
+      "domain": "life",
+      "bundle": "life-learning-growth"
+    },
+    {
+      "id": "mentor-coach",
+      "title": "Mentor / coach",
+      "description": "Apply when scheduling or prepping for a session with a teacher, coach, mentor, or study partner, or acting on feedback.",
+      "color": "violet",
+      "domain": "life",
+      "bundle": "life-learning-growth"
+    },
+    {
+      "id": "notes-review",
+      "title": "Notes & review",
+      "description": "Apply when the task is capturing notes, summarizing what you learned, or revisiting flashcards or material for retention.",
+      "color": "indigo",
+      "domain": "life",
+      "bundle": "life-learning-growth"
+    },
+    {
+      "id": "tools-resources",
+      "title": "Tools & resources",
+      "description": "Apply when buying, renewing, or setting up the gear, software, subscription, or supplies needed to learn or practice.",
+      "color": "orange",
+      "domain": "life",
+      "bundle": "life-learning-growth"
+    },
+    {
+      "id": "goal-milestone",
+      "title": "Goal & milestone",
+      "description": "Apply when setting, tracking, or reflecting on a learning goal, streak, or growth milestone rather than a single task.",
+      "color": "fuchsia",
+      "domain": "life",
+      "bundle": "life-learning-growth"
+    },
+    {
+      "id": "renewal-charge",
+      "title": "Renewal coming up",
+      "description": "Apply when a subscription or plan is about to auto-renew or just billed and you must decide to keep, downgrade, or cancel.",
+      "color": "amber",
+      "domain": "life",
+      "bundle": "life-digital-subscriptions"
+    },
+    {
+      "id": "cancel-trial",
+      "title": "Cancel before trial",
+      "description": "Apply when a free trial or promo is ending and you must cancel or opt out before it converts to a paid charge.",
+      "color": "red",
+      "domain": "life",
+      "bundle": "life-digital-subscriptions"
+    },
+    {
+      "id": "price-increase",
+      "title": "Price change",
+      "description": "Apply when a service announces a price rise or plan change so you can reassess whether it is still worth keeping.",
+      "color": "orange",
+      "domain": "life",
+      "bundle": "life-digital-subscriptions"
+    },
+    {
+      "id": "account-security",
+      "title": "Account security",
+      "description": "Apply when there is a suspicious login, breach notice, leaked-password alert, or a 2FA/MFA setup to lock down an account.",
+      "color": "red",
+      "domain": "life",
+      "bundle": "life-digital-subscriptions"
+    },
+    {
+      "id": "password-credential",
+      "title": "Password & login fix",
+      "description": "Apply when you need to reset, rotate, or store a password, recover account access, or clean up your password manager.",
+      "color": "violet",
+      "domain": "life",
+      "bundle": "life-digital-subscriptions"
+    },
+    {
+      "id": "device-upgrade",
+      "title": "Device & hardware",
+      "description": "Apply when a phone, laptop, or device needs setup, repair, replacement, an OS update, or a warranty/insurance action.",
+      "color": "sky",
+      "domain": "life",
+      "bundle": "life-digital-subscriptions"
+    },
+    {
+      "id": "backup-sync",
+      "title": "Backup & storage",
+      "description": "Apply when cloud storage is full, a backup failed or is overdue, or you must verify photos or files are safely synced.",
+      "color": "teal",
+      "domain": "life",
+      "bundle": "life-digital-subscriptions"
+    },
+    {
+      "id": "privacy-data",
+      "title": "Privacy & data",
+      "description": "Apply when adjusting privacy or tracking settings, handling a data-deletion or unsubscribe, or a consent/terms update.",
+      "color": "indigo",
+      "domain": "life",
+      "bundle": "life-digital-subscriptions"
+    },
+    {
+      "id": "duplicate-unused",
+      "title": "Unused subscription",
+      "description": "Apply when you spot a subscription you no longer use, a duplicate service, or overlapping plans worth consolidating.",
+      "color": "fuchsia",
+      "domain": "life",
+      "bundle": "life-digital-subscriptions"
+    },
+    {
+      "id": "refund-billing",
+      "title": "Billing dispute",
+      "description": "Apply when wrongly charged, owed a refund, hit by a failed payment, or needing to fix a card or billing error.",
+      "color": "pink",
+      "domain": "life",
+      "bundle": "life-digital-subscriptions"
+    },
+    {
+      "id": "application",
+      "title": "Application",
+      "description": "Apply when a job needs a tailored application, resume, cover letter, or submission before its closing date.",
+      "color": "blue",
+      "domain": "life",
+      "bundle": "life-job-search"
+    },
+    {
+      "id": "lead-opportunity",
+      "title": "Lead / opening",
+      "description": "Apply when a new role, posting, or opportunity is spotted and needs reviewing or saving to pursue.",
+      "color": "sky",
+      "domain": "life",
+      "bundle": "life-job-search"
+    },
+    {
+      "id": "interview-prep",
+      "title": "Interview",
+      "description": "Apply when an interview must be scheduled, prepped for, attended, or followed up on with a thank-you.",
+      "color": "violet",
+      "domain": "life",
+      "bundle": "life-job-search"
+    },
+    {
+      "id": "networking",
+      "title": "Networking",
+      "description": "Apply when a contact, referral, intro, or coffee chat could advance the search and needs a reach-out.",
+      "color": "teal",
+      "domain": "life",
+      "bundle": "life-job-search"
+    },
+    {
+      "id": "offer-decision",
+      "title": "Offer / decision",
+      "description": "Apply when an offer arrives and needs evaluating, negotiating, comparing, or accepting or declining.",
+      "color": "green",
+      "domain": "life",
+      "bundle": "life-job-search"
+    },
+    {
+      "id": "materials",
+      "title": "Materials / profile",
+      "description": "Apply when resume, portfolio, LinkedIn, or other application materials need creating, updating, or polishing.",
+      "color": "indigo",
+      "domain": "life",
+      "bundle": "life-job-search"
+    },
+    {
+      "id": "deadline",
+      "title": "Deadline",
+      "description": "Apply when an application window, assessment, or response is time-locked and risks closing if missed.",
+      "color": "red",
+      "domain": "life",
+      "bundle": "life-job-search"
+    }
+  ]
+}

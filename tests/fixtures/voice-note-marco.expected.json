@@ -1,0 +1,57 @@
+{
+  "fixture": "voice-note-marco",
+  "input": "fixtures/voice-note-marco.md",
+  "channel": "openwhispr",
+  "note": "Structural invariants only — assert on shape, never on prose (LLM output varies). Each invariant names a machine-checkable predicate against the post-ingest vault + board.",
+  "routing": "both",
+  "invariants": [
+    {
+      "id": "vault-source-exists",
+      "kind": "page-exists",
+      "where": "vault",
+      "section": "wiki/sources",
+      "of": "this transcript (ow-2026-05-31-0907)",
+      "assert": "a single source page exists in wiki/sources/ derived from this transcript"
+    },
+    {
+      "id": "entity-marco-exists",
+      "kind": "page-exists",
+      "where": "vault",
+      "section": "wiki/entities",
+      "title": "Marco Rivera",
+      "assert": "the [[Marco Rivera]] entity page exists"
+    },
+    {
+      "id": "entity-links-case",
+      "kind": "entity-links-case",
+      "where": "vault",
+      "entity": "Marco Rivera",
+      "assert": "the Marco Rivera entity page links the board case via its 'cases:' frontmatter (case → entity link is reciprocated)"
+    },
+    {
+      "id": "case-in-domain-lane",
+      "kind": "case-in-domain-lane",
+      "where": "board",
+      "domain": "work",
+      "lane_in": ["todo", "urgent"],
+      "matches_title": "co-maintainer",
+      "assert": "a board case about the Marco co-maintainer talk exists in domain 'work', in lane todo or urgent"
+    },
+    {
+      "id": "case-vaultlink-marco",
+      "kind": "vaultLink-present",
+      "where": "board",
+      "case_matches_title": "co-maintainer",
+      "vaultLink": "Marco Rivera",
+      "assert": "the case's vaultLinks array includes 'Marco Rivera'"
+    },
+    {
+      "id": "no-duplicate-thread",
+      "kind": "no-duplicate-thread",
+      "where": "board",
+      "thread": "Marco Rivera co-maintainer conversation",
+      "expect_count": 1,
+      "assert": "exactly one open case covers this thread — the existing CASE-1 is reused/updated, not duplicated"
+    }
+  ]
+}

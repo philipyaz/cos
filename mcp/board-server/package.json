@@ -1,0 +1,11 @@
+{
+  "name": "board-mcp",
+  "version": "3.3.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server that opens and maintains cases on the Cos board.",
+  "bin": { "board-mcp": "server.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
