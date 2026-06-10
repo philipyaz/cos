@@ -164,7 +164,10 @@ step fixes: **(a)** a fresh `vault/<name>` is unknown to Obsidian until you open
 **(b)** if another registered vault shares the basename (e.g. an older copy elsewhere on disk),
 a name-based link is **ambiguous** and opens the wrong one. So we register the folder and record
 its **unique ID** into `config/settings.json` — the board reads it via `board/lib/vault-config.ts`
-and builds the deep-link from the ID, which is unambiguous.
+and builds the deep-link from the ID, which is unambiguous. Note the board also **self-heals**:
+when `settings.json` has no id, `vault-config.ts` reads it *through* from `obsidian.json` by
+realpath — so **opening the vault in Obsidian is already enough** for deep-links and the /vault
+"Registered with Obsidian" check; the capture below just **persists** it (and lets it override).
 
 > Registration is a **manual GUI action** a skill cannot perform: Obsidian has no headless
 > "register a folder" command, and `obsidian://open?path=…` only searches ALREADY-registered
@@ -179,43 +182,51 @@ echo "  $REPO_ROOT/vault/$name"
 ```
 If Obsidian is not installed, skip to the **Fallback** at the end of this step.
 
-**2. Capture the vault ID + name into `config/settings.json`** (after the user confirms they
-opened it). This reads Obsidian's registry, finds the entry whose path matches THIS vault
-(realpath-compared, trailing-slash tolerant), and writes `obsidianVaultId` + `obsidianVaultName`
-without touching other keys (creates `settings.json` from the example if absent):
+**2. Capture the vault ID + name into `config/settings.json`.** This **polls** Obsidian's registry
+(up to ~60s — so you can start it and THEN do Open-folder-as-vault), finds the entry whose path
+matches THIS vault (realpath-compared, trailing-slash tolerant), and writes `obsidianVaultId` +
+`obsidianVaultName` without touching other keys (creates `settings.json` from the example if absent).
+The poll is the fix for the classic failure mode — running the capture ONCE, before the vault was
+opened, silently recorded a **blank** id and the skill moved on:
 ```sh
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # gives $REPO_ROOT, $NODE_BIN (fresh shell)
 name="<name>"   # the literal slug from STEP 1
 case "$name" in (*[!a-z0-9-]*|"") echo "bad slug"; exit 1;; esac
 [ -f "$REPO_ROOT/config/settings.json" ] || cp "$REPO_ROOT/config/settings.example.json" "$REPO_ROOT/config/settings.json"
-VAULT_PATH="$REPO_ROOT/vault/$name" \
-SETTINGS="$REPO_ROOT/config/settings.json" \
-OBSIDIAN_JSON="$HOME/Library/Application Support/obsidian/obsidian.json" \
-"$NODE_BIN" -e '
-  const fs = require("fs"), path = require("path");
-  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-  const want = real(process.env.VAULT_PATH);
-  let id = null, vname = path.basename(want);
-  try {
-    const reg = JSON.parse(fs.readFileSync(process.env.OBSIDIAN_JSON, "utf8")).vaults || {};
-    for (const [k, v] of Object.entries(reg)) {
-      if (v && typeof v.path === "string" && real(v.path) === want) { id = k; vname = path.basename(v.path); break; }
-    }
-  } catch (e) { console.error("Could not read obsidian.json:", e.message); }
-  let s = {};
-  try { s = JSON.parse(fs.readFileSync(process.env.SETTINGS, "utf8")); } catch {}
-  s.obsidianVaultName = vname;
-  if (id) s.obsidianVaultId = id; else if (!("obsidianVaultId" in s)) s.obsidianVaultId = "";
-  fs.writeFileSync(process.env.SETTINGS, JSON.stringify(s, null, 2) + "\n");
-  console.log(id
-    ? `OK: obsidianVaultId=${id}  obsidianVaultName=${vname}  → settings.json`
-    : `WARN: this vault was not found in obsidian.json — wrote obsidianVaultName=${vname} only. The ↗ deep-link is DISABLED until an ID is captured; re-run this step after Open-folder-as-vault.`);
-'
+echo "Waiting for Obsidian to register  $REPO_ROOT/vault/$name  (do File → Open Vault → Open folder as vault now)…"
+for i in $(seq 1 30); do
+  VAULT_PATH="$REPO_ROOT/vault/$name" \
+  SETTINGS="$REPO_ROOT/config/settings.json" \
+  OBSIDIAN_JSON="$HOME/Library/Application Support/obsidian/obsidian.json" \
+  "$NODE_BIN" -e '
+    const fs = require("fs"), path = require("path");
+    const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+    const want = real(process.env.VAULT_PATH);
+    let id = null, vname = path.basename(want);
+    try {
+      const reg = JSON.parse(fs.readFileSync(process.env.OBSIDIAN_JSON, "utf8")).vaults || {};
+      for (const [k, v] of Object.entries(reg)) {
+        if (v && typeof v.path === "string" && real(v.path) === want) { id = k; vname = path.basename(v.path); break; }
+      }
+    } catch {}
+    let s = {};
+    try { s = JSON.parse(fs.readFileSync(process.env.SETTINGS, "utf8")); } catch {}
+    s.obsidianVaultName = vname;
+    if (id) s.obsidianVaultId = id; else if (!("obsidianVaultId" in s)) s.obsidianVaultId = "";
+    fs.writeFileSync(process.env.SETTINGS, JSON.stringify(s, null, 2) + "\n");
+    if (id) { console.log(`OK: obsidianVaultId=${id}  obsidianVaultName=${vname}  → settings.json`); process.exit(0); }
+    process.exit(1);   // not registered yet → keep polling
+  ' && break
+  sleep 2
+done
 grep -E 'obsidianVault(Id|Name)' "$REPO_ROOT/config/settings.json"   # confirm both keys
 ```
-A 16-char hex `obsidianVaultId` = deep-links are unambiguous. A **blank** id (the WARN path)
-means Obsidian isn't aware of the folder yet — the board renders the ↗ arrow **disabled** (with a
-tooltip) rather than emit a wrong-vault link; re-run step 2 after opening the folder as a vault.
+A 16-char hex `obsidianVaultId` = deep-links are unambiguous and persisted per-machine. If the loop
+times out with a **blank** id, Obsidian still isn't aware of the folder — but this is no longer a
+dead end: the board **self-detects** the id by reading it through from `obsidian.json` (realpath
+match) the moment you Open-folder-as-vault, so the ↗ link and the /vault check start working on the
+next **Refresh** even before it's persisted. Re-run this block any time to write the id into
+`settings.json` (the canonical override that also survives an Obsidian registry reset).
 
 > The vault ID is **per-registration**: if the user removes and re-adds the vault in Obsidian, a
 > new ID is minted — re-run step 2 to re-capture it. `settings.json` is gitignored + per-machine

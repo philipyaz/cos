@@ -18,7 +18,7 @@
 [![MCP servers](https://img.shields.io/badge/MCP%20servers-5%20core%20%2B%20WhatsApp-8a3ffc.svg)](#architecture)
 [![Docs](https://img.shields.io/badge/docs-Material%20for%20MkDocs-526CFE.svg)](https://philipyaz.github.io/cos/)
 
-*Demo (coming soon): a noisy inbox collapses into one triaged board card and a linked vault page — noise in, signal out.*
+*[See it ↓](#a-look-inside) — screenshots of every view. Animated demo (coming soon): a noisy inbox collapses into one triaged board card and a linked vault page — noise in, signal out.*
 
 ---
 
@@ -37,10 +37,52 @@ And it's **lightweight by design.** Cos is a layer on **Claude Cowork**, not a n
 - **🗂️ Work and life on one board.** The quarterly plan and the dentist, the client thread and your mum's message — one writable kanban of *what's left to do*, not two systems and a head full of the gaps between.
 - **📥 Every channel, one triage.** Cos reads your **Gmail, WhatsApp, calendar, and voice notes**, resolves each message to the person and history behind it, and turns the handful that genuinely need you into board cards. The noise gets filtered down — you can always see the full feed, you just don't have to live in it.
 - **🧠 A second brain that compounds.** Every source you feed it gets read and *re-synthesized* into a private, interlinked wiki — one note can rewrite a dozen connected pages, so people, deals, and decisions stay consistent and current over time. Context survives between sessions instead of evaporating; Cos walks into every conversation already briefed.
-- **✋ You stay in control.** The agent *proposes*, you *approve*. Nothing is sent, moved, or deleted silently — outward actions go through an approval queue (`propose → approve → commit`), and every change is attributed to `human` or `agent`.
+- **✋ You stay in control.** Cos keeps an append-only **activity log** of every change to the board — one feed you can filter by `human` / `agent` / `system`, so you can always see what the agent did, when, and tell its edits from your own. When a change should have you in the loop, the agent **proposes** it instead of acting — you approve or reject from the board (`propose → approve → commit`).
 - **🔒 Private and safe by default.** Your email, messages, voice notes, and second brain stay **on your machine** — local, gitignored, never committed. Untrusted mail is scanned for prompt-injection *before* any agent reads it, and the scanner **fails closed**: a down guard treats content as untrusted, never a false all-clear.
 
 > 🔬 **Want the engineering depth** — on-device semantic search (turbovec + model2vec), the Llama-Prompt-Guard injection gate, AES-256-GCM off-site backups, a schema-versioned store, 60+ MCP tools? **[→ The deep feature tour](docs/reference/deep-features.md).**
+
+## A look inside
+
+One local-first board where work and life meet — with a live activity log, a private vault, and the triage that feeds them.
+
+<p align="center">
+  <img src="./assets/screenshots/home.png" alt="The Cos board — work and life on one kanban" width="820" />
+</p>
+
+<details>
+<summary><b>More screens</b> — priorities, inbox triage, calendar, reminders, vault, security, backups, activity, trash, and Cos driven from Claude Cowork</summary>
+
+<br/>
+
+<table width="100%">
+  <tr>
+    <td width="50%"><img src="./assets/screenshots/priorities.png" alt="Priorities view" /><br/><b>Priorities</b> — what actually needs you, today</td>
+    <td width="50%"><img src="./assets/screenshots/inbox.png" alt="Inbox triage" /><br/><b>Inbox</b> — Gmail, WhatsApp &amp; voice notes, one triage</td>
+  </tr>
+  <tr>
+    <td><img src="./assets/screenshots/calendar.png" alt="Calendar view" /><br/><b>Calendar</b> — the week at a glance</td>
+    <td><img src="./assets/screenshots/reminders.png" alt="Reminders view" /><br/><b>Reminders</b> — time-based nudges</td>
+  </tr>
+  <tr>
+    <td><img src="./assets/screenshots/vault.png" alt="Vault view" /><br/><b>Vault</b> — the private, interlinked second brain</td>
+    <td><img src="./assets/screenshots/activity.png" alt="Activity log" /><br/><b>Activity</b> — every change: human / agent / system</td>
+  </tr>
+  <tr>
+    <td><img src="./assets/screenshots/security.png" alt="Security view" /><br/><b>Security</b> — the prompt-injection Guard &amp; quarantine</td>
+    <td><img src="./assets/screenshots/backups.png" alt="Backups view" /><br/><b>Backups</b> — encrypted, off-site snapshots</td>
+  </tr>
+  <tr>
+    <td><img src="./assets/screenshots/trash.png" alt="Trash view" /><br/><b>Trash</b> — soft-delete with 7-day retention</td>
+    <td><img src="./assets/screenshots/cowork-priorities.png" alt="Cos inside Claude Cowork" /><br/><b>In Claude Cowork</b> — drive the board by chat</td>
+  </tr>
+  <tr>
+    <td><img src="./assets/screenshots/cowork-meet-prep.png" alt="Meeting prep in Cowork" /><br/><b>Meeting prep</b> — Cos briefs you from the vault</td>
+    <td></td>
+  </tr>
+</table>
+
+</details>
 
 ## Architecture
 
@@ -111,7 +153,7 @@ Setup is the boring half; the fun is what you make of it. Cowork runs [**schedul
 - **🗂️ Weekly board strategy** · *Sunday evening* — *"Regroup loose cases into the right workstreams and initiatives, re-check P0–P3 priorities against what's actually moving, flag anything stuck waiting-for-input too long, and queue the changes for my approval."*
 - **🧠 Vault upkeep** · *Fridays* — *"Ingest this week's resolved cases, notes, and voice transcripts, and re-synthesize the people and deal pages so the second brain stays current."*
 
-The same guardrails hold on a timer as in person: untrusted mail is scanned **before** it's read, and anything outbound goes through the approval queue (`propose → approve`) — scheduled or not, nothing is sent silently. Scheduled tasks run while your machine is awake and Cowork is open; miss a window and the run catches up next time.
+The same guardrails hold on a timer as in person: untrusted mail is scanned **before** it's read (the scanner fails closed), and every change a scheduled run makes lands in the same **activity log** — attributed to `agent` — for you to review, with anything that should have you in the loop **proposed** rather than done. Scheduled tasks run while your machine is awake and Cowork is open; miss a window and the run catches up next time.
 
 Each recipe is just a prompt over the same **board** and **vault** — which is the whole point. The two compound until Cos is two things at once: **an efficient context layer for your agents, and a clarity layer for you.**
 

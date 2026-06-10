@@ -162,12 +162,16 @@ fi
   git -C "$REPO_ROOT" check-ignore "vault/$VAULT_NAME" && echo "gitignored OK"   # prints the path = ignored
   grep -q "vault/$VAULT_NAME" "$REPO_ROOT/backup/config.mjs" && echo "in backup SCOPE OK"
   ```
-  Plus, for board deep-links to open the right vault: `config/settings.json` should carry a 16-char
-  `obsidianVaultId` (setup-vault STEP 3.5). A **blank** id is non-fatal — the in-app vault preview
-  still works and the board disables the ↗ "open in Obsidian" arrow — but flag it so the user can
-  Open-folder-as-vault in Obsidian and re-run STEP 3.5 to enable deep-links:
+  Plus, for board deep-links to open the right vault: `config/settings.json` may carry a 16-char
+  `obsidianVaultId` (setup-vault STEP 3.5). A **blank** id is non-fatal and now **self-heals** — the
+  board reads the id *through* from Obsidian's own registry (`vault-config.ts` realpath-matches
+  `obsidian.json`) the moment the vault has been Open-folder-as-vault'd, so the ↗ deep-link and the
+  /vault "Registered with Obsidian" check light up on the next **Refresh** without re-running
+  anything; the in-app vault preview works regardless. So only flag the case where the vault is in
+  **neither** place (no id AND never opened in Obsidian):
   ```sh
-  grep -o '"obsidianVaultId": *"[^"]*"' "$REPO_ROOT/config/settings.json" || echo "WARN: no obsidianVaultId — ↗ deep-links disabled until setup-vault STEP 3.5"
+  grep -o '"obsidianVaultId": *"[0-9a-f]\{16\}"' "$REPO_ROOT/config/settings.json" && echo "obsidianVaultId OK" \
+    || echo "note: no obsidianVaultId in settings.json — fine IF you've opened vault/$VAULT_NAME in Obsidian (the board self-detects it); otherwise do File → Open Vault → Open folder as vault to enable the ↗ deep-link"
   ```
 
 ### Step 2 — guard-setup (the prompt-injection classifier model)
