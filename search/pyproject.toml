@@ -10,7 +10,7 @@ dependencies = [
   "fastapi>=0.110",
   "uvicorn>=0.29",
   "numpy>=1.26",
-  "turbovec>=0.7,<0.8",
+  "turbovec>=0.8.0,<0.9",
   "model2vec>=0.8,<0.9",
 ]
 
