@@ -103,22 +103,28 @@ extra:
       link: https://github.com/philipyaz/cos
       name: Cos on GitHub
 
+validation:
+  nav:
+    omitted_files: info
+  links:
+    not_found: warn
+    anchors: warn
+
 nav:
   - Home: index.md
   - Architecture:
-      - Spec: architecture/spec.md
-      - Hierarchy: architecture/hierarchy.md
-  - Features:
-      - Board: features/board.md
-      - Calendar: features/calendar.md
-      - Reminders: features/reminders.md
-      - Activity: features/activity.md
-      - Priorities: features/priorities.md
+      - Overview: architecture/overview.md
+      - The vault agent: architecture/vault-agent.md
+      - Triage skills: architecture/triage-skills.md
+      - MCP servers: architecture/mcp-servers.md
+      - Platform API: architecture/platform-api.md
+      - Case hierarchy: architecture/hierarchy.md
   - Security:
-      - Guard: security/guard.md
+      - Prompt-injection guard: security/guard.md
+  - Subsystems:
+      - Semantic search: reference/search.md
+      - Encrypted backup: reference/backup.md
   - Reference:
       - Deep feature tour: reference/deep-features.md
-      - Search: reference/search.md
       - Labels: reference/labels.md
-      - Migration: reference/migration.md
       - Troubleshooting: reference/troubleshooting.md
