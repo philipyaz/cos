@@ -88,7 +88,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "torch", marker = "extra == 'model'", specifier = ">=2.2" },
-    { name = "transformers", marker = "extra == 'model'", specifier = ">=4.40" },
+    { name = "transformers", marker = "extra == 'model'", specifier = ">=5.11.0" },
     { name = "uvicorn", specifier = ">=0.29" },
 ]
 provides-extras = ["model", "dev"]
@@ -1144,7 +1144,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "5.10.1"
+version = "5.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -1157,9 +1157,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/65/d3/5b7c2f1a52ff0e57355efdc21554aab7e4602f6592ab4582a34c988ab956/transformers-5.10.1.tar.gz", hash = "sha256:31112d1dcdfcf9934242acbba891f44e2279ff74b9b8ba4595640e0e04195a3a", size = 8798372, upload-time = "2026-06-03T15:37:03.289Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/4a/2ee05f9a06bb2dd34cac951548553738a826762fb7adfa7ce256daeaeac8/transformers-5.11.0.tar.gz", hash = "sha256:1dbecade5b8a09bdf3e9e8fdfc9d312cb9eccf5a201080dc894b373f0f3eb5f4", size = 8874363, upload-time = "2026-06-10T16:31:52.441Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/8c/3119596c7fcd9b8b8d924d5b5ba1bfdfafd6d8738bdd81ca09c60b4a38b3/transformers-5.10.1-py3-none-any.whl", hash = "sha256:ccb919ea1b77338b44d0d45d23f7472081906b1bb6ed8e5f5cf4d692d1da03d4", size = 11003770, upload-time = "2026-06-03T15:37:00.433Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/40/30fdefda9b8aff8d36054dbb37d8e1464cc1130c29623403c3c2147bdee1/transformers-5.11.0-py3-none-any.whl", hash = "sha256:06d0a34eab529955f8e704b530663c7d6bd6f9c7a9e47a05cddb4a44e7b6566b", size = 11094597, upload-time = "2026-06-10T16:31:49.08Z" },
 ]
 
 [[package]]
