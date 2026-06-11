@@ -1,12 +1,8 @@
 name: Deploy docs to GitHub Pages
 
+# Manual-only: this never runs on push. Trigger it from the Actions tab
+# ("Run workflow") or with `gh workflow run docs.yml` when you want to publish.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - ".github/workflows/docs.yml"
   workflow_dispatch: {}
 
 # Least-privilege token scoped for the Pages deployment.

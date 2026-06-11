@@ -101,7 +101,7 @@ as `additionalDirectories` so `Read` can reach them (in-vault paths are already 
 | `ANTHROPIC_API_KEY` | **yes** | — | The embedded SDK calls the Anthropic API. Without it, sessions fail and the tool returns a clean error. |
 | `COS_VAULT_DIR` | **yes** | — | Absolute vault root. Missing/nonexistent → every tool returns a clear error (the process still boots so KeepAlive stays calm). |
 | `COS_VAULT_MODEL` | no | `claude-sonnet-4-6` | Model for the embedded Agent SDK session (single model, no fallback). |
-| `COS_VAULT_MAX_TURNS` | no | `12` | Max agent turns per session. |
+| `COS_VAULT_MAX_TURNS` | no | `30` | Max agent turns per session. |
 | `COS_VAULT_TIMEOUT_MS` | no | `180000` | Per-call timeout; on expiry the session is aborted and the tool returns a timeout error. |
 | `COS_VAULT_ATTACH_DIRS` | no | _(empty)_ | Colon-separated allowlist of dirs **outside** the vault from which `ingest.files` may be read. |
 | `COS_VAULT_CONCURRENCY` | no | `2` | Max embedded sessions running at once (the semaphore). |

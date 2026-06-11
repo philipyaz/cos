@@ -266,14 +266,14 @@ function buildChecks(args: {
       label: "Registered with Obsidian (by name)",
       status: "warn",
       detail: obsidianName,
-      fix: "Registered by name only — deep-links work but are ambiguous if two vaults share a basename. Re-run the setup-vault skill to capture the unique vault ID for an unambiguous deep-link.",
+      fix: `Registered by name only — deep-links work but are ambiguous if two vaults share a basename. Open ${dir} as a vault in Obsidian (File → Open Vault → Open folder as vault) and click Refresh: the board reads the unique vault ID straight from Obsidian's registry. (The setup-vault skill does the same and also records it in config/settings.json.)`,
     });
   } else {
     checks.push({
       id: "obsidian-registration",
       label: "Registered with Obsidian",
       status: "warn",
-      fix: `Not registered with Obsidian, so the "Open in Obsidian" button is disabled. Fix it one of two ways: (1) re-run the setup-vault skill — it registers the vault and captures its unique ID; or (2) in Obsidian, choose "Open folder as vault" and select ${dir}. Then Refresh.`,
+      fix: `Not registered with Obsidian, so the "Open in Obsidian" button is disabled. In Obsidian, choose File → Open Vault → "Open folder as vault" and select ${dir}, then click Refresh — the board reads this vault's ID straight from Obsidian's registry, so opening it there is all it takes. (Running the setup-vault skill does the same and also records the ID in config/settings.json.)`,
     });
   }
 
