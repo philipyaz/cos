@@ -1,0 +1,63 @@
+# --- tooling / build artifacts ----------------------------------------------
+node_modules/
+.next/
+out/
+# Environment secrets — never commit a real .env, at the repo root OR in any
+# component. Broad on purpose; only *.example templates stay tracked.
+.env
+*.env
+.env.*
+!*.example
+config/secrets.env
+config/cos.env
+.DS_Store
+*.log
+.vercel
+next-env.d.ts
+*.tsbuildinfo
+*.sse
+
+# python sidecars (uv venvs + caches; broad so guard/ + search/ are both covered)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# MCP HTTP-bridge logs (supergateway under launchd)
+mcp/logs/
+
+# MkDocs build output (the docs site is published by CI, not committed)
+/site/
+.cache/
+
+# Live data stores — whole-folder ignore. NEVER list precise files here: a precise
+# pattern (cases.json, prefs.json, …) lets a NEW store type slip through and get
+# committed with real personal data. The apps recreate these dirs on first write
+# (board/lib/store.ts, guard/sidecar.py), so no committed placeholder is needed.
+board/data/
+guard/data/
+
+# config stuff
+config/settings.json
+config/whatsapp-triage-state.json
+
+# encrypted-backup local logs (the snapshots themselves live in the private repo)
+backup/logs/
+
+# anonymization scratch (never publish)
+.anon/
+
+# agent scratch (design docs / one-off output an agent drops at the repo root — never publish)
+output/
+
+# transient locks
+.claude/scheduled_tasks.lock
+# local Claude Code overrides (personal permissions / machine-specific settings)
+.claude/settings.local.json
+
+# Personal knowledge vaults are PRIVATE (real data). Ignore EVERY vault directory EXCEPT the
+# shareable template (example-vault); setup-vault copies the template to vault/<name>, which this
+# auto-ignores in a fresh public tree. Real-vault durability is backup/ (encrypted, off-site).
+# (gitignore never UNtracks files already tracked in THIS private repo — see the note above.)
+/vault/*
+!/vault/example-vault/

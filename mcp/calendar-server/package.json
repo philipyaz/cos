@@ -1,0 +1,11 @@
+{
+  "name": "calendar-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server that creates and maintains calendar events on the Cos board, preferring to link each appointment to an existing case.",
+  "bin": { "calendar-mcp": "server.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

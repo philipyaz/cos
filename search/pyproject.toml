@@ -1,0 +1,21 @@
+[project]
+name = "cos-search"
+version = "0.1.0"
+description = "Local-first semantic search sidecar for the chief-of-staff kanban board."
+requires-python = ">=3.11"
+# turbovec + model2vec ship prebuilt wheels (no Rust, no torch). The hash fallback
+# embedder + the brute-force backend need NEITHER, so the offline test suite runs
+# even on an arch where those wheels are absent (the turbo param importorskips).
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "numpy>=1.26",
+  "turbovec>=0.7,<0.8",
+  "model2vec>=0.8,<0.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false

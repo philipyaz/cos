@@ -1,0 +1,16 @@
+{
+  "name": "cos",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "author": "Philip Yazdani",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/philipyaz/cos.git"
+  },
+  "description": "Workspace root for the JS-side MCP servers + the shared mcp-kit helper. Scoped to the MCP servers (not the Next.js board, which has a disjoint dep tree and manages its own install) so the single shared dep — @modelcontextprotocol/sdk — hoists to one root node_modules + one lockfile instead of being duplicated once per server.",
+  "workspaces": [
+    "mcp/*-server",
+    "packages/*"
+  ]
+}

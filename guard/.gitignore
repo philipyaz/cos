@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Runtime state — sender whitelist, the quarantine log (which may hold REAL / MALICIOUS
+# email bodies), guard-config, and any FUTURE store. Whole-folder ignore so nothing new
+# can slip through; the sidecar recreates the dir + an empty store on first write.
+data/
+# launchd: the *.template under deploy/ IS tracked (committed source of truth).
+# Only the INSTALLED, __REPO__-substituted copy is machine-local — and it lives in
+# ~/Library/LaunchAgents, never here. As belt-and-suspenders, ignore any concrete
+# plist accidentally dropped into deploy/ while keeping the template tracked.
+deploy/*.plist
+!deploy/*.plist.template

@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+  background: #ffffff;
+  color: #0f1115;
+}
+
+body {
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Thin native-ish scrollbars on the board area */
+.board-scroll::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+.board-scroll::-webkit-scrollbar-thumb {
+  background: rgba(15, 17, 21, 0.12);
+  border-radius: 10px;
+}
+.board-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 17, 21, 0.22);
+}
+.board-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}

@@ -1,0 +1,16 @@
+{
+  "name": "openwhispr-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local stdio MCP server exposing OpenWhispr voice transcripts (list/get) with a server-owned watermark for idempotent ingestion.",
+  "bin": { "openwhispr-mcp": "server.mjs" },
+  "scripts": {
+    "test": "OPENWHISPR_FIXTURES=./fixtures node test-client.mjs && node test-sqlite.mjs",
+    "test:fixtures": "OPENWHISPR_FIXTURES=./fixtures node test-client.mjs",
+    "test:sqlite": "node test-sqlite.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

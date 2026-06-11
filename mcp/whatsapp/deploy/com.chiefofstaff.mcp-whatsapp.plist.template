@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ____________________________________________________________________________
+     TEMPLATE for the WhatsApp MCP bridge LaunchAgent (com.chiefofstaff.mcp-whatsapp).
+
+     MCP bridge: the EXTERNAL whatsapp-mcp Python stdio server
+     (uv run --directory <whatsapp-mcp>/whatsapp-mcp-server main.py)
+     -> Streamable HTTP on :8006 via supergateway, for Claude Code (HTTP via
+     .mcp.json) and the Desktop Connector UI. Managed by launchd
+     (pm2 6.x cannot fork on this machine).
+
+     This MCP exposes the READ + send tools of whatsapp-mcp; the cos
+     whatsapp-triage skill uses only the READ subset. It talks to the Go
+     whatsmeow bridge SIDECAR (see the -whatsappbridge twin) via WHATSAPP_API_URL.
+
+     This is the COMMITTED template. The INSTALLED copy lives at
+       ~/Library/LaunchAgents/com.chiefofstaff.mcp-whatsapp.plist
+     and is NOT version-controlled. It carries these substitution placeholders,
+     filled by the installer (sed) from the loader (config/load-config.sh),
+     because launchd cannot expand $VARS itself:
+       __BREW_PREFIX__               Homebrew prefix (e.g. /opt/homebrew) — $BREW_PREFIX
+       __REPO__                      this cos checkout's ABSOLUTE path — $REPO_ROOT
+                                     (used only for the log paths under mcp/logs)
+       __WHATSAPP_MCP_DIR__          the EXTERNAL whatsapp-mcp checkout — $WHATSAPP_MCP_DIR
+       __WHATSAPP_MCP_BRIDGE_PORT__  the supergateway HTTP port (8006) — $WHATSAPP_MCP_BRIDGE_PORT
+       __WHATSAPP_GO_PORT__          the Go whatsmeow bridge REST port — $WHATSAPP_GO_PORT
+
+     NOTE: there is NO bearer-token placeholder. The Python server resolves the
+     token from <whatsapp-mcp>/whatsapp-bridge/store/.bridge-token (computed
+     relative to its own __file__), so the live secret never lands in the
+     installed plist — matching the vault template's "no secret in LaunchAgents" rule.
+
+     Install it by substituting all placeholders, e.g.:
+
+       source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+       sed -e "s#__BREW_PREFIX__#$BREW_PREFIX#g" \
+           -e "s#__REPO__#$REPO_ROOT#g" \
+           -e "s#__WHATSAPP_MCP_DIR__#$WHATSAPP_MCP_DIR#g" \
+           -e "s#__WHATSAPP_MCP_BRIDGE_PORT__#$WHATSAPP_MCP_BRIDGE_PORT#g" \
+           -e "s#__WHATSAPP_GO_PORT__#$WHATSAPP_GO_PORT#g" \
+         "$REPO_ROOT/mcp/whatsapp/deploy/com.chiefofstaff.mcp-whatsapp.plist.template" \
+         > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-whatsapp.plist"
+
+     See the /whatsapp-mcp-setup skill for the full runbook.
+     ____________________________________________________________________________ -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.chiefofstaff.mcp-whatsapp</string>
+
+  <!-- supergateway wraps the whatsapp-mcp Python stdio server (uv) and serves it
+       over Streamable HTTP on the supergateway port, path /mcp. The --stdio value
+       is ONE array element (a single string supergateway parses + spawns); use
+       ABSOLUTE paths (launchd's PATH lacks Homebrew and can't see an nvm/asdf shim). -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BREW_PREFIX__/bin/supergateway</string>
+    <string>--stdio</string>
+    <string>__BREW_PREFIX__/bin/uv run --directory __WHATSAPP_MCP_DIR__/whatsapp-mcp-server main.py</string>
+    <string>--outputTransport</string>
+    <string>streamableHttp</string>
+    <string>--streamableHttpPath</string>
+    <string>/mcp</string>
+    <string>--port</string>
+    <string>__WHATSAPP_MCP_BRIDGE_PORT__</string>
+    <string>--cors</string>
+    <string>--logLevel</string>
+    <string>info</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- __BREW_PREFIX__/bin is required: supergateway's `#!/usr/bin/env node`
+         shebang and the `uv` child both resolve via PATH, and launchd's default
+         PATH does not include Homebrew. -->
+    <key>PATH</key>
+    <string>__BREW_PREFIX__/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+
+    <!-- ABSOLUTE DB paths — the MCP server reads messages.db directly (source of
+         truth for READ ops; it does NOT depend on the Go bridge being up to read)
+         and whatsapp.db for LID <-> phone resolution. -->
+    <key>WHATSAPP_DB_PATH</key>
+    <string>__WHATSAPP_MCP_DIR__/whatsapp-bridge/store/messages.db</string>
+    <key>WHATSMEOW_DB_PATH</key>
+    <string>__WHATSAPP_MCP_DIR__/whatsapp-bridge/store/whatsapp.db</string>
+
+    <!-- The ONLY thing that points the Python MCP at the Go whatsmeow bridge. The
+         server's default is :8080; we pin it to the Go sidecar's actual port
+         (__WHATSAPP_GO_PORT__) because :8080 is often taken on this machine. -->
+    <key>WHATSAPP_API_URL</key>
+    <string>http://localhost:__WHATSAPP_GO_PORT__/api</string>
+
+    <!-- ========================== WHY NO WHATSAPP_BRIDGE_PORT HERE ==========================
+         WHATSAPP_BRIDGE_PORT is read ONLY by the GO whatsmeow bridge (main.go) — it is
+         the port that process BINDS. The Python MCP server NEVER reads it (it reaches the
+         Go bridge solely via WHATSAPP_API_URL above). So setting it in THIS plist would be
+         a silent no-op that misleads a reader into thinking the port is configurable here.
+
+         Keep them clearly separate:
+           * This supergateway bridge's HTTP port is set by the --port flag above
+             (cos-side name: WHATSAPP_MCP_BRIDGE_PORT, default 8006).
+           * The Go bridge's bind port is WHATSAPP_BRIDGE_PORT, set in the -whatsappbridge
+             plist (cos-side name: WHATSAPP_GO_PORT). WHATSAPP_API_URL points here at it.
+         The cos-side names are deliberately distinct so WHATSAPP_BRIDGE_PORT only ever
+         appears in the GO sidecar's plist.
+         ===================================================================================== -->
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>__WHATSAPP_MCP_DIR__/whatsapp-mcp-server</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__REPO__/mcp/logs/whatsapp.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__REPO__/mcp/logs/whatsapp.err.log</string>
+</dict>
+</plist>
+<!-- ____________________________________________________________________________
+     MANAGE COMMANDS (run after substituting the placeholders and writing the
+     installed copy to ~/Library/LaunchAgents/com.chiefofstaff.mcp-whatsapp.plist).
+     Ports below show the defaults (8006 bridge / 8010 Go sidecar) — use your
+     resolved $WHATSAPP_MCP_BRIDGE_PORT / $WHATSAPP_GO_PORT:
+
+       U=$(id -u)
+
+       # stop + unload (bootout) — needed before re-bootstrapping after a plist edit
+       launchctl bootout gui/$U/com.chiefofstaff.mcp-whatsapp 2>/dev/null || true
+
+       # load (bootstrap) — register the agent with launchd; RunAtLoad starts it
+       launchctl bootstrap gui/$U ~/Library/LaunchAgents/com.chiefofstaff.mcp-whatsapp.plist
+
+       # start / restart now (kickstart with -k = kill + restart; picks up edits)
+       launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-whatsapp
+
+       # health check (the supergateway HTTP bridge on :8006)
+       curl -s -X POST http://127.0.0.1:8006/mcp \
+         -H 'Content-Type: application/json' \
+         -H 'Accept: application/json, text/event-stream' \
+         -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}'
+
+     This bridge needs the Go whatsmeow SIDECAR (com.chiefofstaff.mcp-whatsappbridge)
+     up for tool CALLS that hit the REST API; the read-only DB queries work without
+     it. launchd owns the lifecycle of both (RunAtLoad + KeepAlive).
+     ____________________________________________________________________________ -->

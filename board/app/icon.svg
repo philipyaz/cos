@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
+  <!--
+    Browser-tab favicon — the sidebar brand badge (components/sidebar.tsx).
+    bg-gradient-to-br from-ink-800 (#1a1d23) to-violet-600 (#7c3aed), rounded-lg,
+    white inset ring, and the white IconBrand "C" arc + centre dot
+    (components/icons.tsx). Next.js App Router auto-serves app/icon.svg and
+    injects <link rel="icon" type="image/svg+xml">; SVG keeps it crisp at any size.
+    The glyph is the 16-unit IconBrand drawn at 18px (scale 1.125), centred in the
+    28px badge (offset 5) — matching the rendered badge exactly.
+  -->
+  <defs>
+    <linearGradient id="cosBadge" x1="0" y1="0" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1a1d23"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <rect width="28" height="28" rx="8" fill="url(#cosBadge)"/>
+  <rect x="0.5" y="0.5" width="27" height="27" rx="7.5" fill="none" stroke="#ffffff" stroke-opacity="0.1"/>
+  <g transform="translate(5,5) scale(1.125)" fill="none" stroke="#ffffff" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11.5 4.4A5 5 0 1 0 11.5 11.6"/>
+    <circle cx="8" cy="8" r="1.15" fill="#ffffff" stroke="none"/>
+  </g>
+</svg>

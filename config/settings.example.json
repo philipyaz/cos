@@ -1,0 +1,10 @@
+{
+  "autoSync": true,
+  "defaultDomain": "work",
+  "theme": "light",
+  "wipLimits": {},
+  "principalEmail": "you@example.com",
+  "trashRetentionDays": 7,
+  "obsidianVaultId": "",
+  "obsidianVaultName": ""
+}

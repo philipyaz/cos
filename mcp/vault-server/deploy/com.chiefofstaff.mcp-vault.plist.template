@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ____________________________________________________________________________
+     TEMPLATE for the vault MCP bridge LaunchAgent (com.chiefofstaff.mcp-vault).
+
+     Layer-2 MCP bridge: the vault stdio server (node, mcp/vault-server/server.mjs)
+     -> Streamable HTTP on :8005 via supergateway, for Claude Cowork Desktop and
+     Claude Code. Managed by launchd (pm2 6.x cannot fork on this machine).
+
+     This is the COMMITTED template. The INSTALLED copy lives at
+       ~/Library/LaunchAgents/com.chiefofstaff.mcp-vault.plist
+     and is NOT version-controlled. It carries TWO substitution placeholders:
+       __REPO__              this checkout's ABSOLUTE path (see below)
+       __VAULT_NAME__        the chosen vault directory name under vault/ — the
+                             committed template MUST NOT hardcode a specific vault;
+                             setup-vault (or the installer) substitutes the name.
+     Install it by substituting both placeholders, e.g.:
+
+       REPO="$(cd "$(dirname "$0")/../../.." && pwd)"   # from mcp/vault-server/deploy/
+       sed -e "s#__REPO__#$REPO#g" -e "s#__VAULT_NAME__#my-vault#g" \
+         mcp/vault-server/deploy/com.chiefofstaff.mcp-vault.plist.template \
+         > ~/Library/LaunchAgents/com.chiefofstaff.mcp-vault.plist
+
+     SECRET — this bridge differs from board/calendar: the vault server makes
+     OUTBOUND LLM calls, so it needs an ANTHROPIC_API_KEY. The key is NOT baked into
+     this plist. Instead ProgramArguments runs the launch wrapper
+     (mcp/vault-server/launch.sh), which sources the gitignored config/secrets.env at
+     startup and exports the key before exec'ing supergateway. So the secret lives in
+     exactly ONE machine-local file (config/secrets.env, copied from
+     config/secrets.env.example) — never in this installed plist, never committed.
+     Set it up once:
+
+       cp config/secrets.env.example config/secrets.env   # then edit in your sk-ant-… key
+
+     Rotate the key by editing config/secrets.env and kickstarting the agent (no plist
+     edit needed). Then load + start it (see the manage-commands block at the bottom).
+     ____________________________________________________________________________ -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.chiefofstaff.mcp-vault</string>
+
+  <!-- Runs the launch WRAPPER (not supergateway directly): the wrapper sources the
+       gitignored config/secrets.env for ANTHROPIC_API_KEY, then execs supergateway with
+       the same flags (streamableHttp on :8005, path /mcp). Keeps the secret out of the
+       plist. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/mcp/vault-server/launch.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- /opt/homebrew/bin is required: supergateway's `#!/usr/bin/env node`
+         shebang and the `--stdio "node ..."` child both resolve node via PATH,
+         and launchd's default PATH does not include Homebrew. -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- NB: ANTHROPIC_API_KEY is NOT set here. The launch wrapper (ProgramArguments)
+         sources it from config/secrets.env at startup, so the secret never lands in
+         this installed plist. -->
+    <!-- ABSOLUTE — the vault the server reads/writes; pin it so it doesn't depend
+         on the launchd cwd. __VAULT_NAME__ is filled by setup-vault (or the
+         installer) with the chosen vault name; never hardcode one here. -->
+    <key>COS_VAULT_DIR</key>
+    <string>__REPO__/vault/__VAULT_NAME__</string>
+    <!-- Idle-exit OPT-IN. mcp-kit's idle-exit is OFF by default (so a long-lived direct
+         stdio client like Cowork never dies on idle); the supergateway bridge path leaks an
+         idle stateless child, so this bridge opts in to reap it after 5 min idle (a request
+         in flight disarms the timer; supergateway respawns on the next call). The wrapper
+         launch.sh sources secrets.env then execs supergateway, inheriting this env. -->
+    <key>COS_MCP_IDLE_EXIT_MS</key>
+    <string>300000</string>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__REPO__/mcp/logs/vault.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__REPO__/mcp/logs/vault.err.log</string>
+</dict>
+</plist>
+<!-- ____________________________________________________________________________
+     MANAGE COMMANDS (run after substituting __REPO__ + __VAULT_NAME__ and writing the
+     installed copy to ~/Library/LaunchAgents/com.chiefofstaff.mcp-vault.plist; the API
+     key comes from config/secrets.env via the launch wrapper, NOT from this plist):
+
+       U=$(id -u)
+
+       # stop + unload (bootout) — needed before re-bootstrapping after a plist edit
+       launchctl bootout gui/$U/com.chiefofstaff.mcp-vault 2>/dev/null || true
+
+       # load (bootstrap) — register the agent with launchd; RunAtLoad starts it
+       launchctl bootstrap gui/$U ~/Library/LaunchAgents/com.chiefofstaff.mcp-vault.plist
+
+       # start / restart now (kickstart with -k = kill + restart; picks up edits)
+       launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-vault
+
+       # health check (the supergateway HTTP bridge on :8005)
+       curl -s http://127.0.0.1:8005/mcp
+
+     Note: ensure-bridges.sh bootstraps + kickstarts this agent on `npm dev/start`,
+     but launchd owns its lifecycle (RunAtLoad + KeepAlive).
+     ____________________________________________________________________________ -->
