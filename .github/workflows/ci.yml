@@ -60,13 +60,17 @@ jobs:
       - name: Install board deps
         run: npm ci --prefix board
 
-      # `next lint` (board/package.json) is deprecated (removed in Next.js 16) and
-      # would HANG CI on its interactive ESLint-setup prompt (the board ships no
-      # eslint config or deps). We use the TypeScript compiler as the deterministic
-      # static gate instead. Board-invariant linting still runs via board-lint.mjs
-      # inside tests/run.sh below.
+      # Static gates for the board: the TypeScript compiler (types) and ESLint
+      # (Next.js flat-config rules — see board/eslint.config.mjs). `npm run lint`
+      # is `eslint .`; `next lint` is deprecated/removed in Next 16. This fails on
+      # ESLint *errors* (warnings are reported but non-blocking for now). Board
+      # *invariant* linting additionally runs via board-lint.mjs in tests/run.sh.
       - name: Typecheck board
         run: npx --no-install tsc --noEmit
+        working-directory: board
+
+      - name: Lint board (ESLint)
+        run: npm run lint
         working-directory: board
 
       # board/data/ is gitignored, so a fresh checkout has no cases.json.
