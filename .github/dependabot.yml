@@ -1,0 +1,44 @@
+# Keeps dependencies — including the SHA-pinned GitHub Actions — current.
+# Dependabot opens grouped PRs against the protected `main`, which then run the
+# CI required checks before they can merge.
+version: 2
+updates:
+  # GitHub Actions: bump the pinned SHAs (and their version comments) as new
+  # releases land, in a single grouped PR.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Root JS workspace (mcp/*-server + packages/*; the shared MCP SDK).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-root:
+        patterns: ["*"]
+
+  # Next.js board app — disjoint dep tree + its own lockfile.
+  - package-ecosystem: npm
+    directory: /board
+    schedule:
+      interval: weekly
+    groups:
+      npm-board:
+        patterns: ["*"]
+
+  # Python sidecars (uv lockfiles).
+  - package-ecosystem: uv
+    directory: /guard
+    schedule:
+      interval: weekly
+  - package-ecosystem: uv
+    directory: /search
+    schedule:
+      interval: weekly
