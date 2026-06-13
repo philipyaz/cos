@@ -76,7 +76,10 @@ markdown_extensions:
   - pymdownx.keys
   - pymdownx.details
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      base_path:
+        - "."
+      check_paths: true
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
@@ -128,4 +131,5 @@ nav:
       - Deep feature tour: reference/deep-features.md
       - Labels: reference/labels.md
       - Troubleshooting: reference/troubleshooting.md
+      - Releases & versioning: reference/releasing.md
   - Changelog: changelog.md

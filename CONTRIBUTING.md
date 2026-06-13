@@ -75,29 +75,21 @@ behavior change, and assert on **structural invariants**, not prose.
 ## Releasing (maintainers)
 
 Cos is versioned as a **whole repo** — one git tag and one GitHub release per version, *not* per
-package. The root [`package.json`](./package.json) `version` is the single source of truth; the
-individual `package.json`/`pyproject.toml` versions inside the monorepo are internal and may drift
-(none are published to a registry). Releases follow [Semantic Versioning](https://semver.org); the
-scheme — and exactly what counts as major/minor/patch — is documented on the
-[Changelog page](docs/changelog.md). In short: a **new feature is a minor bump**, a bug fix is a
-patch, and the board store's `schemaVersion` is a *separate* axis that migrates on read and is
-bumped independently of the release tag.
+package; the root [`package.json`](./package.json) `version` is the single source of truth (the
+individual package versions inside the monorepo are internal and may drift). Releases follow
+[Semantic Versioning](https://semver.org): a **new feature is a minor bump**, a bug fix is a
+patch, and the board store's `schemaVersion` is a *separate* axis bumped independently of the
+release tag.
 
-To cut a release from a clean, green `main`:
+**You don't hand-edit versions.** [release-please](https://github.com/googleapis/release-please)
+watches `main` and keeps a running **Release PR** that bumps `package.json` + `CHANGELOG.md` from
+the [Conventional Commit](https://www.conventionalcommits.org) titles since the last release. To
+cut a release, **merge that Release PR** — it tags `vX.Y.Z` and publishes the GitHub Release. So
+the one habit that matters day to day is a clear, conventional PR/commit title (`feat:`, `fix:`,
+`docs:` …); the changelog writes itself.
 
-1. Bump `"version"` in the root [`package.json`](./package.json).
-2. In [`docs/changelog.md`](docs/changelog.md), move the entries under `## [Unreleased]` into a new
-   `## [X.Y.Z] — <date>` heading and add the compare/release links at the bottom.
-3. Land those via a PR and merge. Then, from the updated `main`:
-
-   ```bash
-   git tag -a vX.Y.Z -m "Cos vX.Y.Z"
-   git push origin vX.Y.Z
-   gh release create vX.Y.Z --generate-notes
-   ```
-
-`--generate-notes` builds the GitHub release body from merged PR titles, so clear, conventional PR
-titles (`feat:`, `fix:`, `docs:`) make for a clean changelog with no extra effort.
+The full runbook — the SemVer policy, the one-time repo setup, and the manual fallback — is in
+[Releases & versioning](docs/reference/releasing.md).
 
 ## The ethos: transparent and human-in-the-loop
 
