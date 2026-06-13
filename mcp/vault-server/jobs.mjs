@@ -36,6 +36,13 @@ export const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "i
 // Cap the copy of the submission we keep in the record (the source of truth is the vault wiki the
 // agent writes; the job record only needs enough to be auditable). Mirrors openwhispr's PREVIEW_LEN.
 const JOBS_CONTENT_CAP = 4000;
+// Symmetric caps on the RESULT side of a record (set by setStatus). newRecord bounds the submitted
+// `content`; without these a single verbose agent result or a giant error string would write
+// unbounded into a record that then persists for the TTL and is re-parsed on every store mutation.
+// STRING fields only — a structured `result` object passes through untouched (the cached-result
+// replay contract returns it verbatim).
+const RESULT_CAP = 16000;
+const MESSAGE_CAP = 2000;
 // A claimed `running` job whose owner pid is dead is requeued; after this many requeues it is given
 // up as `interrupted` rather than looping forever on a poison input.
 const MAX_CLAIM_ATTEMPTS = 3;
@@ -85,6 +92,32 @@ export function migrate(raw) {
   return { schemaVersion: JOBS_SCHEMA_VERSION, jobs };
 }
 
+// ── Result-side caps (pure) ────────────────────────────────────────────────────
+// Bound the large free-text fields a setStatus patch can carry so one verbose agent result or giant
+// error string can't bloat a persisted record. Returns a shallow copy with only oversized STRING
+// fields truncated (flagging result truncation); a structured `result` object is left intact so the
+// cached-result replay contract still returns it verbatim. Non-object patches pass through.
+export function capPatch(patch) {
+  if (!patch || typeof patch !== "object") return patch;
+  const out = { ...patch };
+  if (typeof out.result === "string" && out.result.length > RESULT_CAP) {
+    out.result = out.result.slice(0, RESULT_CAP);
+    out.resultTruncated = true;
+  }
+  if (typeof out.status_message === "string" && out.status_message.length > MESSAGE_CAP) {
+    out.status_message = out.status_message.slice(0, MESSAGE_CAP);
+  }
+  if (
+    out.error &&
+    typeof out.error === "object" &&
+    typeof out.error.message === "string" &&
+    out.error.message.length > MESSAGE_CAP
+  ) {
+    out.error = { ...out.error, message: out.error.message.slice(0, MESSAGE_CAP) };
+  }
+  return out;
+}
+
 // ── The store (bound to one file; makeJobStore() so tests use a temp path) ──────
 export function makeJobStore(file) {
   const lockFile = `${file}.lock`;
@@ -114,8 +147,18 @@ export function makeJobStore(file) {
   async function writeStore(store) {
     store.schemaVersion = JOBS_SCHEMA_VERSION;
     await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(tmpFile, JSON.stringify(store, null, 2), "utf8");
-    await fs.rename(tmpFile, file);
+    try {
+      await fs.writeFile(tmpFile, JSON.stringify(store, null, 2), "utf8");
+      await fs.rename(tmpFile, file);
+    } catch (e) {
+      // A throw AFTER the temp exists (ENOSPC mid-write, an EXDEV cross-device rename) would orphan a
+      // pid-named temp on disk — and across KeepAlive restarts each crashed generation leaves a
+      // distinct jobs.json.<oldpid>.tmp nothing deletes. Remove it before propagating. force:true
+      // swallows ENOENT when the failure WAS the writeFile (no temp to remove). Same force-rm-and-
+      // swallow idiom as releaseLock below.
+      await fs.rm(tmpFile, { force: true }).catch(() => {});
+      throw e;
+    }
   }
 
   // Inter-process lock via an atomic O_EXCL create. `wx` fails with EEXIST if the lockfile exists;
@@ -131,8 +174,19 @@ export function makeJobStore(file) {
     for (;;) {
       try {
         const fd = await fs.open(lockFile, "wx");
-        await fd.writeFile(`${process.pid} ${nowISO()}`);
-        await fd.close();
+        try {
+          await fd.writeFile(`${process.pid} ${nowISO()}`);
+        } catch (e) {
+          // Write failed after the O_EXCL create (ENOSPC/EIO): drop the half-made lockfile so it
+          // doesn't wedge the store behind it for LOCK_STALE_MS before the stale-break reclaims it.
+          await fs.rm(lockFile, { force: true }).catch(() => {});
+          throw e;
+        } finally {
+          // ALWAYS close — without this, a throw here skips fd.close() and leaks the handle (its GC
+          // finalizer later reclaims the fd but throws an uncaught ERR_INVALID_STATE). mutate() awaits
+          // acquireLock() outside its try, so releaseLock can't cover this.
+          await fd.close().catch(() => {});
+        }
         return;
       } catch (e) {
         if (e?.code !== "EEXIST") throw e;
@@ -244,14 +298,15 @@ export function makeJobStore(file) {
   // SET STATUS — guard-style. Terminal is ABSORBING (a late write from a reaped agent can't
   // resurrect a job already flipped to interrupted), and a redundant same-status write does NOT
   // re-stamp finishedAt (the `prev !== target` guard). `patch` merges fields (status_message,
-  // result, error, interruptedReason, …). Returns the record, or null if the id is unknown.
+  // result, error, interruptedReason, …) — its large string fields are capped first (see capPatch).
+  // Returns the record, or null if the id is unknown.
   async function setStatus(id, target, patch = {}) {
     return mutate((store) => {
       const rec = store.jobs[id];
       if (!rec) return null;
       const prev = rec.status;
       if (TERMINAL_STATUSES.has(prev)) return rec; // absorbing — refuse to leave a terminal state
-      Object.assign(rec, patch);
+      Object.assign(rec, capPatch(patch));
       rec.lastSeen = nowISO();
       if (prev === target) return rec; // no-op transition — don't re-stamp finishedAt
       rec.status = target;

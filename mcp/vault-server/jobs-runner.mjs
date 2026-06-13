@@ -28,7 +28,13 @@ import { makeJobStore, resolveJobsFile } from "./jobs.mjs";
 const POLL_INTERVAL_MS = Number(process.env.COS_VAULT_POLL_INTERVAL_MS) || 8000;
 const CANCEL_POLL_MS = Number(process.env.COS_VAULT_CANCEL_POLL_MS) || 3000;
 const JOBS_TTL_MS = Number(process.env.COS_VAULT_JOBS_TTL_MS) || 3_600_000;
-const PURGE_EVERY_IDLE = 10; // purge stale terminal records roughly every N idle cycles
+// Sweep stale terminal records on a WALL-CLOCK cadence, not an idle-cycle count. The old
+// purge-every-N-idle-cycles scheme was STARVED under sustained load: a continuous stream of
+// claimable jobs keeps processOne()===true, so the idle branch (where purge lived) never ran and
+// jobs.json grew until the queue finally drained. A timer that fires whether the runner is busy or
+// idle bounds the file by time. Capped below the TTL so a long TTL doesn't also make the sweep rare.
+const PURGE_INTERVAL_MS =
+  Number(process.env.COS_VAULT_PURGE_INTERVAL_MS) || Math.min(JOBS_TTL_MS || 600_000, 600_000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Execute one CLAIMED job (status already `running`) to a terminal state. Always lands a terminal
@@ -94,12 +100,21 @@ export async function processOne(store, { pid = process.pid, fake } = {}) {
 }
 
 // The supervised loop: reconcile orphans once, then claim-and-run forever, purging stale terminal
-// records while idle. `signal` lets a test stop it.
-export async function runLoop(store, { pid = process.pid, signal } = {}) {
+// records on a wall-clock cadence (busy OR idle — see PURGE_INTERVAL_MS). `signal` lets a test stop
+// it; `now` is injectable so the timed purge can be driven deterministically.
+export async function runLoop(store, { pid = process.pid, signal, now = () => Date.now() } = {}) {
   await store.reconcileRunning();
-  let idle = 0;
+  // Seed so the FIRST iteration purges immediately — clears terminal records left by a prior
+  // generation (a crash/restart) before doing any new work.
+  let lastPurge = now() - PURGE_INTERVAL_MS;
   for (;;) {
     if (signal?.aborted) return;
+    // Timed purge, BEFORE claiming — runs even when the queue is saturated, so a back-to-back job
+    // stream can't starve it. Independent of did/idle.
+    if (now() - lastPurge >= PURGE_INTERVAL_MS) {
+      lastPurge = now();
+      await store.purgeStaleTerminal(JOBS_TTL_MS).catch(() => {});
+    }
     let did = false;
     try {
       did = await processOne(store, { pid });
@@ -108,13 +123,7 @@ export async function runLoop(store, { pid = process.pid, signal } = {}) {
         console.error(`[vault-jobs] loop error: ${e?.message ?? e}`);
       } catch {}
     }
-    if (!did) {
-      if (++idle >= PURGE_EVERY_IDLE) {
-        idle = 0;
-        await store.purgeStaleTerminal(JOBS_TTL_MS).catch(() => {});
-      }
-      await sleep(POLL_INTERVAL_MS);
-    }
+    if (!did) await sleep(POLL_INTERVAL_MS);
   }
 }
 
@@ -122,7 +131,7 @@ async function main() {
   const store = makeJobStore(resolveJobsFile());
   console.error(
     `[vault-jobs] runner up (pid ${process.pid}; jobs=${store.file}; poll=${POLL_INTERVAL_MS}ms; ` +
-      `fake=${!!process.env.COS_VAULT_FAKE_RUN})`,
+      `purge=${PURGE_INTERVAL_MS}ms; ttl=${JOBS_TTL_MS}ms; fake=${!!process.env.COS_VAULT_FAKE_RUN})`,
   );
   await runLoop(store);
 }
