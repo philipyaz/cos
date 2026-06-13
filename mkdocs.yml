@@ -128,3 +128,4 @@ nav:
       - Deep feature tour: reference/deep-features.md
       - Labels: reference/labels.md
       - Troubleshooting: reference/troubleshooting.md
+  - Changelog: changelog.md

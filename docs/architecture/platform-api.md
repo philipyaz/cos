@@ -72,7 +72,7 @@ open browser tab and the strategy view refetch — no polling, no stale board.
 
 ## Actor attribution and the do-not-undo contract
 
-Three actors can write: `human`, `agent`, `system`. The face declares itself, the store records
+Two actors write: `human` and `agent`. The face declares itself, the store records
 it. `resolveActor`
 ([`board/lib/route-helpers.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/route-helpers.ts))
 defaults to `human`; an agent write flags itself **two redundant ways** — an `x-actor: agent`
@@ -82,7 +82,7 @@ passes `actor` for itself; the seam stamps it.
 
 Every mutation appends a `CaseActivity` entry stamped with that actor onto the case's
 **append-only activity log** (capped to the last 50 per case). That log is the board's audit
-trail — the same feed the UI filters by `human` / `agent` / `system`.
+trail — the same feed the UI filters by `human` / `agent`.
 
 The read side is the companion. `get_case` (and `GET /api/cases/{id}`) surface the case's
 human-actor activity as a leading **"Manual actions by the user (human)"** block, also returned

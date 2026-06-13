@@ -43,7 +43,7 @@ makes **no LLM calls**. They are cheap, synchronous, and deterministic.
 This is the **single-seam principle** made concrete: the board's HTTP API is the *one* write path.
 The web UI is the human face of that API; the board MCP is its **agent twin**. Both write through
 the same routes — which is why every agent write carries actor attribution (below) so the board's
-append-only `activity[]` log can record human vs agent vs system.
+append-only `activity[]` log can record human vs agent.
 
 !!! note "Reminders and priorities ride the board MCP"
     Reminders (`REM-<n>`) and priorities (`PRI-<n>`) are board-native sub-resources on

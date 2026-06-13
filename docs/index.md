@@ -51,7 +51,7 @@ seam of the system.
     ---
 
     The whole-system map: the two pillars, the single-seam write path, actor attribution and the
-    append-only activity log, and the propose → approve → commit loop that keeps a human in charge.
+    append-only activity log that keeps a human in charge, and the opt-in propose → approve → commit queue.
 
     [:octicons-arrow-right-24: Architecture overview](architecture/overview.md)
 
@@ -87,8 +87,8 @@ seam of the system.
 
     ---
 
-    The board HTTP API as the one write path: board verbs, actor attribution, the activity log, and
-    the approval queue that the UI and every MCP tool both call.
+    The board HTTP API as the one write path that the UI and every MCP tool both call: board verbs,
+    actor attribution, the activity log, and the opt-in approval queue.
 
     [:octicons-arrow-right-24: Platform API](architecture/platform-api.md)
 
@@ -155,10 +155,11 @@ These tenets show up repeatedly in the design and explain most of the non-obviou
 - **Fail-closed security vs. fail-open availability.** A deliberate duality: the guard *fails
   closed* (a down scanner treats content as untrusted), while search *fails open* (a down index
   degrades to keyword results). Safety blocks; convenience degrades.
-- **Human-in-the-loop.** The agent **proposes, you approve**. Outward and consequential actions go
-  through a board approval queue (`propose → approve → commit`), every write is attributed to
-  `human` / `agent` / `system` in an append-only activity log, and a human manual edit is never
-  silently undone.
+- **Human-in-the-loop, via transparency.** Every write is attributed to `human` / `agent`
+  in an append-only activity log, and a human's manual edit is never silently undone — so you can
+  always see exactly what the agent did. For changes that warrant sign-off, the board also offers an
+  opt-in board approval queue (`propose → approve → commit`); *when* to use it is set by the skills
+  that drive Cos, not forced by the platform.
 
 !!! tip "Contributing to the docs"
     These pages are an [MkDocs](https://www.mkdocs.org/) site

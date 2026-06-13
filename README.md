@@ -37,7 +37,7 @@ And it's **lightweight by design.** Cos is a layer on **Claude Cowork**, not a n
 - **🗂️ Work and life on one board.** The quarterly plan and the dentist, the client thread and your mum's message — one writable kanban of *what's left to do*, not two systems and a head full of the gaps between.
 - **📥 Every channel, one triage.** Cos reads your **Gmail, WhatsApp, calendar, and voice notes**, resolves each message to the person and history behind it, and turns the handful that genuinely need you into board cards. The noise gets filtered down — you can always see the full feed, you just don't have to live in it.
 - **🧠 A second brain that compounds.** Every source you feed it gets read and *re-synthesized* into a private, interlinked wiki — one note can rewrite a dozen connected pages, so people, deals, and decisions stay consistent and current over time. Context survives between sessions instead of evaporating; Cos walks into every conversation already briefed.
-- **✋ You stay in control.** Cos keeps an append-only **activity log** of every change to the board — one feed you can filter by `human` / `agent` / `system`, so you can always see what the agent did, when, and tell its edits from your own.
+- **✋ You stay in control.** Cos keeps an append-only **activity log** of every change to the board — one feed you can filter by `human` / `agent`, so you can always see what the agent did, when, and tell its edits from your own.
 - **🔒 Private and safe by default.** Your email, messages, voice notes, and second brain stay **on your machine** — local, gitignored, never committed. Untrusted mail is scanned for prompt-injection *before* any agent reads it, and the scanner **fails closed**: a down guard treats content as untrusted, never a false all-clear.
 
 > 🔬 **Want the engineering depth** — on-device semantic search (turbovec + model2vec), the Llama-Prompt-Guard injection gate, AES-256-GCM off-site backups, a schema-versioned store, 60+ MCP tools? **[→ The deep feature tour](docs/reference/deep-features.md).**
@@ -66,7 +66,7 @@ One local-first board where work and life meet — with a live activity log, a p
   </tr>
   <tr>
     <td><img src="./assets/screenshots/vault.png" alt="Vault view" /><br/><b>Vault</b> — the private, interlinked second brain</td>
-    <td><img src="./assets/screenshots/activity.png" alt="Activity log" /><br/><b>Activity</b> — every change: human / agent / system</td>
+    <td><img src="./assets/screenshots/activity.png" alt="Activity log" /><br/><b>Activity</b> — every change: human / agent</td>
   </tr>
   <tr>
     <td><img src="./assets/screenshots/security.png" alt="Security view" /><br/><b>Security</b> — the prompt-injection Guard &amp; quarantine</td>

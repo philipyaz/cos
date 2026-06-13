@@ -72,13 +72,44 @@ Unit tests over the pure board modules and the board lint are hard gates; the HT
 isolated test board and self-skip when their dependencies aren't installed. Add a test alongside any
 behavior change, and assert on **structural invariants**, not prose.
 
-## The ethos: propose, then approve
+## Releasing (maintainers)
 
-Cos is **human-in-the-loop and fail-closed** by design. The board's `propose → approve/reject → commit`
-queue, the Guard that treats unscanned mail as untrusted, the auto-sync approval mode — these are not
-accidents. When you add a capability that acts on the user's behalf, give them the seat at the wheel:
-propose the action, let them approve it, and fail safe when in doubt. The human and the agent drive one
-shared surface; neither gets to surprise the other.
+Cos is versioned as a **whole repo** — one git tag and one GitHub release per version, *not* per
+package. The root [`package.json`](./package.json) `version` is the single source of truth; the
+individual `package.json`/`pyproject.toml` versions inside the monorepo are internal and may drift
+(none are published to a registry). Releases follow [Semantic Versioning](https://semver.org); the
+scheme — and exactly what counts as major/minor/patch — is documented on the
+[Changelog page](docs/changelog.md). In short: a **new feature is a minor bump**, a bug fix is a
+patch, and the board store's `schemaVersion` is a *separate* axis that migrates on read and is
+bumped independently of the release tag.
+
+To cut a release from a clean, green `main`:
+
+1. Bump `"version"` in the root [`package.json`](./package.json).
+2. In [`docs/changelog.md`](docs/changelog.md), move the entries under `## [Unreleased]` into a new
+   `## [X.Y.Z] — <date>` heading and add the compare/release links at the bottom.
+3. Land those via a PR and merge. Then, from the updated `main`:
+
+   ```bash
+   git tag -a vX.Y.Z -m "Cos vX.Y.Z"
+   git push origin vX.Y.Z
+   gh release create vX.Y.Z --generate-notes
+   ```
+
+`--generate-notes` builds the GitHub release body from merged PR titles, so clear, conventional PR
+titles (`feat:`, `fix:`, `docs:`) make for a clean changelog with no extra effort.
+
+## The ethos: transparent and human-in-the-loop
+
+Cos is **human-in-the-loop and transparent by design.** The platform's core job is to make every
+change *legible*: each write is attributed to `human` / `agent` / `system` in an append-only activity
+log, and a human's manual edits are authoritative — never silently undone. On top of that, the board
+offers an **opt-in** `propose → approve/reject → commit` queue an agent can route a change through when
+it warrants sign-off; the platform doesn't force it — *when* to propose, and the rest of the
+safeguards, live in the **skills** that drive Cos. (The Guard is the one strictly **fail-closed** piece:
+unscanned mail is untrusted.) When you add a capability that acts on the user's behalf, keep them in
+control: attribute it, prefer proposing consequential changes, and never overwrite a human's hand-made
+edit. The human and the agent drive one shared surface; neither gets to surprise the other.
 
 ## Good first issues
 
@@ -88,6 +119,6 @@ the codebase. If something confused you on your first read, that's a contributio
 
 ## Conduct and security
 
-Be the kind of collaborator you'd want a chief of staff to be: assume good faith, be respectful and direct, and keep discussion focused on the work. Harassment or hostility toward anyone isn't welcome here.
+Be the kind of collaborator you'd want a chief of staff to be: assume good faith, be respectful and direct, and keep discussion focused on the work. Harassment or hostility toward anyone isn't welcome here — see [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) for the full standard and how to report a concern.
 Found a vulnerability? Please report it responsibly per [`SECURITY.md`](./SECURITY.md) rather than opening
 a public issue.
