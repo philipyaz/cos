@@ -1,6 +1,6 @@
 // vault-jobs.test.ts — the durable cross-process job store behind async `ingest`.
 //
-// Pins the behaviours the async-ingest feature (0.2.0) and the detached runner depend on:
+// Pins the behaviours the async-ingest feature and the detached runner depend on:
 // content-hash dedup (the anti-fan-out fix), hash stability, replay policy, the guard-style
 // status transitions (absorbing terminal + no-re-stamp), migrate-on-read (missing/corrupt →
 // empty, never throws), atomic write (no partial file), TTL purge (terminal-only, injectable

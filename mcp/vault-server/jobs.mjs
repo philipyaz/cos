@@ -1,4 +1,4 @@
-// Durable, CROSS-PROCESS job store for the vault MCP's async `ingest` (the 0.2.0 feature).
+// Durable, CROSS-PROCESS job store for the vault MCP's async `ingest` (the async detached ingest feature).
 //
 // WHY THIS EXISTS. `ingest` runs a full headless Agent SDK session (seconds→minutes). Cowork
 // hard-caps a tool call at ~4 min and cancels (it does not honour progress), so a synchronous
