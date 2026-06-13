@@ -63,6 +63,7 @@ import {
   cleanCases,
   fetchCases,
   fetchLabels,
+  fetchUnansweredCount,
   subscribeToBoard,
   savePrefs,
 } from "@/lib/board-client";
@@ -70,6 +71,7 @@ import { Column } from "./column";
 import { CaseCard, type CardLineage } from "./case-card";
 import { StrategyView } from "./strategy-view";
 import { LabelManager } from "./label-manager";
+import { UnansweredMessages } from "./unanswered-messages";
 import { LabelFilter } from "./label-filter";
 import { CaseDetailDrawer } from "@/components/case-detail-drawer";
 import {
@@ -80,6 +82,7 @@ import {
   IconTag,
   IconTree,
   IconInitiative,
+  IconMail,
 } from "@/components/icons";
 
 // ── Undo model ───────────────────────────────────────────────────────────────
@@ -169,6 +172,11 @@ export function BoardView({
   // writes over SSE refresh the chips/filter without a reload) + the manager panel.
   const [labelCatalog, setLabelCatalog] = useState<LabelDef[]>(initialLabels ?? []);
   const [showLabelManager, setShowLabelManager] = useState(false);
+  // The "Unanswered" panel (messages the user still owes a reply to) + its live count
+  // for the toolbar badge. The panel owns its own list; here we keep just the tally,
+  // refreshed on mount and on each SSE version bump so a skill/agent flag shows up live.
+  const [showUnanswered, setShowUnanswered] = useState(false);
+  const [unansweredCount, setUnansweredCount] = useState(0);
   // Operational (kanban of leaf cases) vs Strategy (the Initiative > Workstream
   // outline roadmap). Seeded from prefs; the toggle persists the choice.
   const [view, setView] = useState<"operational" | "strategy">(initialView ?? "operational");
@@ -285,14 +293,31 @@ export function BoardView({
     }
   }, [query.includeArchived]);
 
+  // The unanswered tally for the toolbar badge — cheap count, refreshed on mount and
+  // on every SSE version bump (next to the cases refetch) so a skill/agent flagging or
+  // answering a message updates the badge live. Best-effort: failures leave the count.
+  const refreshUnansweredCount = useCallback(async () => {
+    try {
+      const r = await fetchUnansweredCount();
+      setUnansweredCount(r.unanswered);
+    } catch {
+      // Keep the last count; a later event will retry.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshUnansweredCount();
+  }, [refreshUnansweredCount]);
+
   useEffect(() => {
     const unsub = subscribeToBoard((v) => {
+      void refreshUnansweredCount();
       if (v > lastVersion.current) {
         void refetch();
       }
     });
     return unsub;
-  }, [refetch]);
+  }, [refetch, refreshUnansweredCount]);
 
   // When the archive toggle flips, refetch so archived cases load/unload.
   useEffect(() => {
@@ -978,6 +1003,14 @@ export function BoardView({
             <IconTag className="w-3.5 h-3.5" />
             Labels
           </button>
+          <button
+            onClick={() => setShowUnanswered(true)}
+            title="Unanswered — messages you still owe a reply to"
+            className="text-[12px] flex items-center gap-1.5 px-2 py-1 rounded-md border border-ink-100 text-ink-500 hover:bg-ink-50 hover:text-ink-900 transition"
+          >
+            <IconMail className="w-3.5 h-3.5" />
+            Unanswered{unansweredCount ? ` · ${unansweredCount}` : ""}
+          </button>
         </div>
       </div>
 
@@ -1111,6 +1144,13 @@ export function BoardView({
         onClose={() => setShowLabelManager(false)}
         labels={labelCatalog}
         onChanged={refetch}
+      />
+
+      <UnansweredMessages
+        open={showUnanswered}
+        onClose={() => setShowUnanswered(false)}
+        cases={cases}
+        onChanged={refreshUnansweredCount}
       />
 
       {/* Bulk-action bar — the update_cases UI twin (multi-select via 'x') */}

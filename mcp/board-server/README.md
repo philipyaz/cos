@@ -239,6 +239,41 @@ links/relinks the message to a case (both sides — the case's `messageIds` and 
 (the Gmail thread URL form), or pass `url: null` to **clear** it; the board **validates it as an
 absolute http(s) URL** and stores it only if it passes.
 
+#### Unanswered messages
+
+A message that just needs a **reply** (over Gmail/WhatsApp) and generates no case / reminder / event
+of its own would otherwise be silently forgotten. The board carries an **"Unanswered messages"** view
+of "messages I still owe a reply to": a message is unanswered iff it is **flagged** (`needsAnswer`) and
+**not yet answered** (`answeredAt` absent). These four tools are the Cowork surface for storing,
+flagging, listing, and clearing them — a message can be flagged whether it's linked to a case, a
+reminder, or **nothing**.
+
+#### `add_unanswered_message(source, from, [subject], [preview], [body], [receivedAt], [context], [caseId], [reminderId], [read], [url])`
+`POST /api/messages`. Stores a **brand-new** message and flags it as awaiting a reply (it lands in the
+Unanswered view). `needsAnswer` **defaults to true** server-side.
+
+- `source` **(required)** — `gmail | whatsapp | jira | agent | client | system`.
+- `from` **(required)** — the sender (the "who") — an email address, name, or system id.
+- `receivedAt` defaults to now (the "date"); `body` is the message itself.
+- `context` — a **one-sentence** line shown in the view (what they're asking, with the person's role).
+- `caseId` / `reminderId` — OPTIONAL — ALSO link the message to a matter you already found; omit both
+  to keep it **standalone**.
+- `url` — the direct **deep-link back to the ORIGINAL message** (the Gmail thread URL form); the board
+  **validates it as an absolute http(s) URL** and stores it only if it passes.
+
+#### `mark_message_unanswered(id, [context])`
+`PATCH /api/messages/{id}` `{ needsAnswer: true, context? }`. Flags an **existing** message (already
+linked, or standalone) as awaiting a reply. Use `add_unanswered_message` instead for a brand-new one.
+
+#### `mark_message_answered(id)`
+`PATCH /api/messages/{id}` `{ answered: true }`. A **pure status flip** — stamps `answeredAt` so the
+message **drops out of the Unanswered view**. It does **not** cascade to any linked case / reminder.
+
+#### `list_unanswered_messages([limit])`
+`GET /api/messages?status=unanswered`. Lists every message still awaiting a reply (newest first) — the
+contents of the Unanswered view. A read tool (no actor). `limit` trims the summary client-side. Use it
+to **dedup** before flagging and to see what's outstanding.
+
 ### Reminders
 
 A **reminder** is a lightweight **nudge** — "remember to CHECK / DO something" — for a minor matter

@@ -40,6 +40,7 @@ guard/data/
 # config stuff
 config/settings.json
 config/whatsapp-triage-state.json
+config/unanswered-messages-state.json
 
 # encrypted-backup local logs (the snapshots themselves live in the private repo)
 backup/logs/
