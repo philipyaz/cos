@@ -1,8 +1,10 @@
 # The vault agent
 
 The **vault** MCP server is the one Cos server that does not just move bytes — it *thinks*. Its
-two tools, `ingest` and `query`, each spawn a short-lived, scoped, headless Claude Code session
-that synthesizes a domain-split knowledge wiki. This is the knowledge half of Cos (the
+tools — `ingest`, `ingest_status`, `ingest_cancel`, and `query` — drive scoped, headless Claude Code
+sessions that synthesize a domain-split knowledge wiki. `query` runs **synchronously**; `ingest` is
+**asynchronous** (submit-then-poll, executed by a detached runner) — see
+[Async vault ingest](../reference/vault-async.md). This is the knowledge half of Cos (the
 [board](../architecture/hierarchy.md) is the action half), and it is built on the **LLM-Wiki**
 pattern: sources go in, an agent compiles them into an interlinked, living wiki, and you ask it
 questions later.
@@ -157,8 +159,14 @@ crash-loop the KeepAlive'd process:
 - **In-process semaphore** (`COS_VAULT_CONCURRENCY`, default **2**) — caps how many embedded
   sessions run at once so simultaneous tool calls don't fan out into N concurrent `claude`
   subprocesses. Batch material into a single `ingest`; don't call it in a tight loop.
-- **Per-call timeout / abort** (`COS_VAULT_TIMEOUT_MS`, default 180 s) — on expiry the session is
-  aborted and the tool returns a timeout error.
+- **Per-call timeout / abort** — each route has its own ceiling: `query` defaults to **90 s**
+  (`COS_VAULT_QUERY_TIMEOUT_MS`), `ingest` to **600 s** (`COS_VAULT_INGEST_TIMEOUT_MS`); on expiry the
+  session is aborted and the tool returns a timeout error. The MCP request's own cancellation (the
+  client timing out, or a `notifications/cancelled`) is wired into the same abort, so the session
+  stops promptly instead of burning tokens to its own ceiling. **The binding limit is often the
+  *client*, not this timeout:** Cowork hard-caps a tool call at ~4 min — unconfigurable, and it does
+  not honour progress notifications — whereas the Claude Code bridge's client tool timeout is
+  effectively unlimited. So run heavy `ingest` via Claude Code, and keep Cowork ingests small.
 - **Every failure caught** — thrown error, abort/timeout, or SDK-spawn failure (including a
   missing API key) is turned into a clean MCP error result, never an unhandled crash.
 
@@ -168,9 +176,14 @@ crash-loop the KeepAlive'd process:
 | --- | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | **yes** | — | The embedded SDK calls the Anthropic API. Sourced from the gitignored `config/secrets.env` by `launch.sh`, so it stays out of the installed plist. |
 | `COS_VAULT_DIR` | **yes** | — | Absolute vault root → the session's `cwd`. Missing/nonexistent → tools return a clear error, but the process still boots (KeepAlive stays calm). |
-| `COS_VAULT_MODEL` | no | `claude-sonnet-4-6` | Model for the embedded session (single model, no fallback). |
-| `COS_VAULT_MAX_TURNS` | no | `30` | Max agent turns per session. |
-| `COS_VAULT_TIMEOUT_MS` | no | `180000` | Per-call timeout; on expiry the session is aborted. |
+| `COS_VAULT_QUERY_MODEL` | no | `claude-haiku-4-5` | Model for the **read** route (`query`) — the fast/low-cost tier so a lookup returns inside the client's tool-call timeout. |
+| `COS_VAULT_INGEST_MODEL` | no | `claude-sonnet-4-6` | Model for the **write** route (`ingest`) — the higher tier for multi-page synthesis quality. |
+| `COS_VAULT_MODEL` | no | *(unset)* | If set, pins **both** routes to this model (back-compat override of the two above). |
+| `COS_VAULT_MAX_TURNS` | no | `30` | Max agent turns for `ingest`. |
+| `COS_VAULT_QUERY_MAX_TURNS` | no | `15` | Max agent turns for `query` (a read needs far fewer than a synthesis). |
+| `COS_VAULT_INGEST_TIMEOUT_MS` | no | `600000` | `ingest` per-call timeout (the binding limit on the Claude Code bridge; Cowork's own ~4-min cap binds first there). |
+| `COS_VAULT_QUERY_TIMEOUT_MS` | no | `90000` | `query` per-call timeout. |
+| `COS_VAULT_TIMEOUT_MS` | no | *(unset)* | If set, overrides **both** timeouts above (back-compat). |
 | `COS_VAULT_ATTACH_DIRS` | no | *(empty)* | Colon-separated allowlist of dirs **outside** the vault from which `ingest.files` may be read. |
 | `COS_VAULT_CONCURRENCY` | no | `2` | Max embedded sessions running at once (the semaphore). |
 
@@ -186,6 +199,7 @@ bootstraps a private vault from the committed `example-vault` template and point
 
 ## See also
 
+- [Async vault ingest](../reference/vault-async.md) — the submit-then-poll lifecycle, the deduplicating job store, and the detached runner.
 - [MCP servers](mcp-servers.md) — the thin-wrapper siblings this server is the exception to.
 - [Case hierarchy](hierarchy.md) — the action half the vault references but never writes.
 - [Prompt-injection guard](../security/guard.md) — the fail-closed counterpart that gates inbound text.

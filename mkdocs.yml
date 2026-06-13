@@ -129,6 +129,7 @@ nav:
       - Encrypted backup: reference/backup.md
   - Reference:
       - Deep feature tour: reference/deep-features.md
+      - Async vault ingest: reference/vault-async.md
       - Labels: reference/labels.md
       - Troubleshooting: reference/troubleshooting.md
       - Releases & versioning: reference/releasing.md

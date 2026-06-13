@@ -1,22 +1,15 @@
-// vault-options.test.ts — the vault MCP's nesting / scoping safeguards must be present.
+// vault-options.test.ts — the vault MCP's nesting/scoping safeguards + async tool surface.
 //
-// The vault MCP (mcp/vault-server/server.mjs) is the ONE server that EMBEDS the Claude
-// Agent SDK and spawns a headless Claude session per tool call. Because the server is
-// itself bridged at vault:8005 in the repo's .mcp.json, a naïvely-configured inner
-// session could re-mount THIS server and recurse into ingest/query — fanning out claude
-// subprocesses. The whole point of baseOptions() is to make that impossible. This test
-// pins the mandatory safeguards so a future refactor can't silently drop one.
+// The vault MCP embeds the Claude Agent SDK and spawns a headless session per tool call. Because the
+// server is itself bridged at vault:8005 in the repo's .mcp.json, a naïvely-configured inner session
+// could re-mount THIS server and recurse into ingest/query — fanning out claude subprocesses. The
+// safeguards that make that impossible now live in agent.mjs (the shared run path, imported by both
+// server.mjs and the jobs-runner); the MCP wiring + the async tool surface live in server.mjs. This
+// test pins both as a STRUCTURAL lint of the source (a real import is unsafe: agent.mjs hard-imports
+// the Agent SDK, which may be absent in CI). If agent.mjs later exports baseOptions, tighten the agent
+// assertions to a real import.
 //
-// IDEAL: import the server's option-builder and assert on the live object. The current
-// server does NOT export baseOptions/buildOptions, AND it boots on import (top-level
-// `await start(...)`) while hard-importing @anthropic-ai/claude-agent-sdk (which may not
-// be installed). Both make a real import unsafe here. So we assert on the SERVER SOURCE
-// instead — a structural lint of the safeguards. If the build agent later exports
-// `baseOptions` (see EXPECTED-EXPORTS at the bottom), tighten this to a real import.
-//
-// Run via the repo's unit harness: `node --test tests/unit/vault-options.test.ts`
-// (and through tests/run.sh step [1]).
-
+// Run via the repo's unit harness: `node --test tests/unit/vault-options.test.ts` (and tests/run.sh [1]).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -24,130 +17,109 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER_PATH = path.join(HERE, "..", "..", "mcp", "vault-server", "server.mjs");
-const SRC = readFileSync(SERVER_PATH, "utf8");
+const VAULT = path.join(HERE, "..", "..", "mcp", "vault-server");
+const AGT = readFileSync(path.join(VAULT, "agent.mjs"), "utf8");
+const SRV = readFileSync(path.join(VAULT, "server.mjs"), "utf8");
+// Collapse whitespace so assertions tolerate formatting — we care the safeguard is PRESENT.
+const flat = (s: string) => s.replace(/\s+/g, " ");
+const FAGT = flat(AGT);
+const FSRV = flat(SRV);
+const has = (flatSrc: string, re: RegExp) => re.test(flatSrc);
 
-// Collapse all whitespace so the assertions are tolerant of formatting (line breaks,
-// indentation) — we care that the safeguard is PRESENT, not how it is laid out.
-const FLAT = SRC.replace(/\s+/g, " ");
-const has = (re: RegExp) => re.test(FLAT);
+// ── agent.mjs — the scoping / nesting safeguards (the anti-recursion firewall) ──────
+test("[agent] inner agent mounts NO MCP servers (mcpServers:{} + strictMcpConfig:true)", () => {
+  assert.ok(has(FAGT, /mcpServers:\s*\{\s*\}/), "expected `mcpServers: {}` in agent.mjs baseOptions");
+  assert.ok(has(FAGT, /strictMcpConfig:\s*true/), "expected `strictMcpConfig: true`");
+});
 
-test("vault server registers itself under the name \"vault\"", () => {
-  // initialize → serverInfo.name must be "vault" (the registry name the .mcp.json + the
-  // mcp__vault__* disallowedTools entries depend on).
+test("[agent] settingSources is pinned to [\"project\"]", () => {
+  assert.ok(has(FAGT, /settingSources:\s*\[\s*"project"\s*\]/), "expected `settingSources: [\"project\"]`");
+});
+
+test("[agent] the session runs fully non-interactive (bypassPermissions)", () => {
+  assert.ok(has(FAGT, /permissionMode:\s*"bypassPermissions"/), "expected `permissionMode: \"bypassPermissions\"`");
+  assert.ok(has(FAGT, /allowDangerouslySkipPermissions:\s*true/), "expected `allowDangerouslySkipPermissions: true`");
+});
+
+test("[agent] cwd is anchored to COS_VAULT_DIR (the scoped vault)", () => {
+  assert.ok(has(FAGT, /cwd:\s*COS_VAULT_DIR/), "expected `cwd: COS_VAULT_DIR` in baseOptions");
+});
+
+test("[agent] the re-entrant vault tools + web tools are hard-denied", () => {
+  assert.ok(has(FAGT, /disallowedTools:\s*\[[^\]]*"mcp__vault__ingest"[^\]]*\]/), "deny mcp__vault__ingest");
+  assert.ok(has(FAGT, /disallowedTools:\s*\[[^\]]*"mcp__vault__query"[^\]]*\]/), "deny mcp__vault__query");
+  assert.ok(has(FAGT, /"WebFetch"/) && has(FAGT, /"WebSearch"/), "deny WebFetch + WebSearch");
+});
+
+test("[agent] the query path is READ-ONLY (disallows Write+Edit; allows only Skill/Read/Glob/Grep)", () => {
+  const q = /disallowedTools:\s*\[[^\]]*"Write"[^\]]*"Edit"[^\]]*\]/;
+  assert.ok(has(FAGT, q), "expected the query session to disallow Write and Edit");
   assert.ok(
-    has(/name:\s*"vault"/),
-    "expected `new Server({ name: \"vault\", ... })` in the server source",
+    has(FAGT, /allowedTools:\s*\[\s*"Skill",\s*"Read",\s*"Glob",\s*"Grep"\s*\]/),
+    "expected the query session's allowedTools to be exactly [Skill, Read, Glob, Grep]",
   );
 });
 
-test("the inner agent mounts NO MCP servers (mcpServers:{} + strictMcpConfig:true)", () => {
-  // The primary anti-recursion guard: an empty mcpServers map AND strictMcpConfig:true
-  // (forbids reading any .mcp.json), so the inner session can never re-mount vault:8005.
-  assert.ok(has(/mcpServers:\s*\{\s*\}/), "expected `mcpServers: {}` (empty — no inner MCP servers)");
-  assert.ok(has(/strictMcpConfig:\s*true/), "expected `strictMcpConfig: true` (forbids reading .mcp.json)");
-});
-
-test("settingSources is pinned to [\"project\"] (loads only the vault-local config)", () => {
-  // Set EXPLICITLY (the SDK default is version-ambiguous) so the inner session loads the
-  // vault-local CLAUDE.md + skills, NOT the repo-root config with the board/guard wiring.
+test("[agent] per-tool models: query→Haiku, ingest→Sonnet (COS_VAULT_MODEL overrides both)", () => {
+  assert.ok(has(FAGT, /COS_VAULT_QUERY_MODEL\s*=[^;]*"claude-haiku-4-5"/), "query defaults to Haiku");
+  assert.ok(has(FAGT, /COS_VAULT_INGEST_MODEL\s*=[^;]*"claude-sonnet-4-6"/), "ingest defaults to Sonnet");
   assert.ok(
-    has(/settingSources:\s*\[\s*"project"\s*\]/),
-    "expected `settingSources: [\"project\"]`",
+    has(FAGT, /COS_VAULT_INGEST_MODEL\s*=\s*process\.env\.COS_VAULT_MODEL\s*\|\|/),
+    "COS_VAULT_MODEL stays a back-compat override",
   );
 });
 
-test("the session runs fully non-interactive (bypassPermissions)", () => {
-  // No human is on the other end of a permission prompt behind the MCP.
+test("[agent] per-tool session timeouts: ingest 600000, query 90000", () => {
+  assert.ok(has(FAGT, /COS_VAULT_INGEST_TIMEOUT_MS\s*=[^;]*600000/), "ingest timeout 600000");
+  assert.ok(has(FAGT, /COS_VAULT_QUERY_TIMEOUT_MS\s*=[^;]*90000/), "query timeout 90000");
+});
+
+test("[agent] the caller's cancellation is wired into the agent abort", () => {
+  assert.ok(has(FAGT, /clientSignal/), "run() takes a clientSignal");
+  assert.ok(has(FAGT, /addEventListener\(\s*"abort"\s*,/), "clientSignal abort aborts the session");
+});
+
+test("[agent] the arbitrary-file-read guard (validateFiles) is defined here", () => {
+  assert.ok(has(FAGT, /export function validateFiles\(/), "expected an exported validateFiles() guard");
+});
+
+// ── server.mjs — registry name, async tool surface, dedup-before-dispatch ───────────
+test("[server] registers itself under the name \"vault\"", () => {
+  assert.ok(has(FSRV, /name:\s*"vault"/), "expected `new Server({ name: \"vault\", ... })`");
+});
+
+test("[server] exposes exactly the four tools ingest / ingest_status / ingest_cancel / query", () => {
+  for (const name of ["ingest", "ingest_status", "ingest_cancel", "query"]) {
+    assert.ok(has(FSRV, new RegExp(`name:\\s*"${name}"`)), `expected a tool named "${name}"`);
+  }
+  // the TOOLS array lists all four
   assert.ok(
-    has(/permissionMode:\s*"bypassPermissions"/),
-    "expected `permissionMode: \"bypassPermissions\"`",
-  );
-  assert.ok(
-    has(/allowDangerouslySkipPermissions:\s*true/),
-    "expected `allowDangerouslySkipPermissions: true`",
+    has(FSRV, /TOOLS\s*=\s*\[\s*INGEST_TOOL,\s*INGEST_STATUS_TOOL,\s*INGEST_CANCEL_TOOL,\s*QUERY_TOOL\s*\]/),
+    "expected TOOLS = [INGEST_TOOL, INGEST_STATUS_TOOL, INGEST_CANCEL_TOOL, QUERY_TOOL]",
   );
 });
 
-test("cwd is anchored to COS_VAULT_DIR (the scoped vault, not the repo root)", () => {
-  // cwd = the scoped vault makes settingSources:\"project\" resolve to the vault's
-  // .claude/ and anchors Read/Write/Glob/Grep there.
-  assert.ok(has(/cwd:\s*COS_VAULT_DIR/), "expected `cwd: COS_VAULT_DIR` in baseOptions");
+test("[server] ingest is ASYNC: it enqueues a job (content-hash dedup), not an awaited agent run", () => {
+  assert.ok(has(FSRV, /jobs\.enqueue\(/), "ingest must enqueue a job rather than run the agent inline");
+  // server.mjs must NOT run an ingest session itself (the detached runner does) — only query is sync.
+  assert.ok(!has(FSRV, /runIngestSession/), "server.mjs must not run ingest sessions (the runner does)");
+  assert.ok(has(FSRV, /runQuerySession/), "query stays synchronous via runQuerySession");
 });
 
-test("the re-entrant vault tools are hard-denied (belt-and-braces)", () => {
-  // Even if a server were somehow mounted, the two re-entrant tools must be disallowed so
-  // the session can never call back into ingest/query and recurse.
-  assert.ok(
-    has(/disallowedTools:\s*\[[^\]]*"mcp__vault__ingest"[^\]]*\]/),
-    "expected disallowedTools to include \"mcp__vault__ingest\"",
-  );
-  assert.ok(
-    has(/disallowedTools:\s*\[[^\]]*"mcp__vault__query"[^\]]*\]/),
-    "expected disallowedTools to include \"mcp__vault__query\"",
-  );
+test("[server] the file-read guard runs BEFORE the job is enqueued", () => {
+  const i = SRV.indexOf("async function handleIngest");
+  const end = SRV.indexOf("async function handleIngestStatus");
+  assert.ok(i >= 0 && end > i, "expected a handleIngest handler");
+  const body = SRV.slice(i, end);
+  const validateIdx = body.indexOf("validateFiles(");
+  const enqueueIdx = body.indexOf("jobs.enqueue(");
+  assert.ok(validateIdx >= 0, "handleIngest must call validateFiles()");
+  assert.ok(enqueueIdx >= 0, "handleIngest must call jobs.enqueue()");
+  assert.ok(validateIdx < enqueueIdx, "validateFiles() must run BEFORE jobs.enqueue()");
 });
 
-test("web tools are disallowed (KNOWLEDGE-ONLY, vault-local)", () => {
-  assert.ok(
-    has(/disallowedTools:\s*\[[^\]]*"WebFetch"[^\]]*"WebSearch"[^\]]*\]/) ||
-      (has(/"WebFetch"/) && has(/"WebSearch"/)),
-    "expected WebFetch + WebSearch to be disallowed",
-  );
+test("[server] the CallTool dispatcher reads extra.signal and wires the Tasks-extension seam", () => {
+  assert.ok(has(FSRV, /async\s*\(\s*request\s*,\s*extra\s*\)/), "handler takes (request, extra)");
+  assert.ok(has(FSRV, /extra\?\.signal/), "reads extra?.signal for the synchronous query cancel path");
+  assert.ok(has(FSRV, /function tasksCapable\(/), "tasksCapable() seam for the future Tasks-extension swap");
 });
-
-test("the query path is READ-ONLY — it disallows Write and Edit", () => {
-  // query() layers a stricter disallow list on top of baseOptions. The single place that
-  // names BOTH Write and Edit in a disallowedTools array is the read-only query handler.
-  // Match a disallowedTools:[ ... ] block that contains both "Write" and "Edit".
-  const queryDisallow = /disallowedTools:\s*\[[^\]]*"Write"[^\]]*"Edit"[^\]]*\]/;
-  const editFirst = /disallowedTools:\s*\[[^\]]*"Edit"[^\]]*"Write"[^\]]*\]/;
-  assert.ok(
-    has(queryDisallow) || has(editFirst),
-    "expected the query handler to disallow both Write and Edit (read-only)",
-  );
-  // And query's allowedTools must NOT grant Write/Edit (only Skill/Read/Glob/Grep).
-  assert.ok(
-    has(/allowedTools:\s*\[\s*"Skill",\s*"Read",\s*"Glob",\s*"Grep"\s*\]/),
-    "expected the query handler's allowedTools to be exactly [Skill, Read, Glob, Grep] (no Write/Edit)",
-  );
-});
-
-test("the arbitrary-file-read guard rejects out-of-vault paths BEFORE the agent", () => {
-  // ingest.files must be validated (inside COS_VAULT_DIR or COS_VAULT_ATTACH_DIRS) before
-  // any agent session is spawned. Assert the guard function exists and that ingest calls
-  // it ahead of building the prompt / acquiring a session.
-  assert.ok(has(/function validateFiles\(/), "expected a validateFiles() guard function");
-  const ingestIdx = SRC.indexOf("async function handleIngest");
-  assert.ok(ingestIdx >= 0, "expected a handleIngest handler");
-  const ingestBody = SRC.slice(ingestIdx, SRC.indexOf("async function handleQuery"));
-  const validateIdx = ingestBody.indexOf("validateFiles(");
-  const acquireIdx = ingestBody.indexOf("sessions.acquire");
-  const runIdx = ingestBody.indexOf("run(");
-  assert.ok(validateIdx >= 0, "expected handleIngest to call validateFiles()");
-  assert.ok(
-    acquireIdx === -1 || validateIdx < acquireIdx,
-    "validateFiles() must run BEFORE the session semaphore is acquired",
-  );
-  assert.ok(
-    runIdx === -1 || validateIdx < runIdx,
-    "validateFiles() must run BEFORE the agent run() is invoked",
-  );
-});
-
-// ── EXPECTED-EXPORTS (reconcile with the build agent) ────────────────────────────────
-// This file asserts on SOURCE because server.mjs currently (a) does not export its
-// option-builder and (b) boots on import. If the build agent makes the server testable
-// by exporting `baseOptions` (and ideally guarding the top-level `start()` behind an
-// `if (import.meta.url === pathToFileURL(process.argv[1]).href)` main-guard so importing
-// it is side-effect-free), replace the source-asserts above with a real import, e.g.:
-//
-//   import { baseOptions } from "../../mcp/vault-server/server.mjs";
-//   const o = baseOptions();
-//   assert.deepEqual(o.mcpServers, {});
-//   assert.equal(o.strictMcpConfig, true);
-//   assert.deepEqual(o.settingSources, ["project"]);
-//   assert.equal(o.permissionMode, "bypassPermissions");
-//   assert.ok(o.disallowedTools.includes("mcp__vault__ingest"));
-//
-// Until then, the source-assertion is the safe, dependency-free form.

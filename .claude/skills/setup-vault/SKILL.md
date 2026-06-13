@@ -119,6 +119,49 @@ test -f "$PLIST" || { echo "MISSING: run mcp-bridge-setup first (or cos-setup se
 grep -A1 COS_VAULT_DIR "$PLIST"   # confirm it now reads $REPO_ROOT/vault/$name
 ```
 
+**Async ingest runner** — the vault also has a detached jobs-runner sidecar
+(`com.chiefofstaff.mcp-vaultjobs`) that executes async `ingest` jobs (see
+[docs/reference/vault-async.md](../../../docs/reference/vault-async.md)). Install it from its committed
+template the same way — it carries the same `__REPO__` + `__VAULT_NAME__` placeholders, needs
+`ANTHROPIC_API_KEY` (its launch wrapper sources `config/secrets.env`), and has no port:
+
+```sh
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # gives $REPO_ROOT, $LAUNCH_AGENTS_DIR
+name="<name>"   # the literal slug from STEP 1
+case "$name" in (*[!a-z0-9-]*|"") echo "bad slug"; exit 1;; esac
+U=$(id -u)
+sed -e "s#__REPO__#$REPO_ROOT#g" -e "s#__VAULT_NAME__#$name#g" \
+  "$REPO_ROOT/mcp/vault-server/deploy/com.chiefofstaff.mcp-vaultjobs.plist.template" \
+  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vaultjobs.plist"
+launchctl bootout   gui/$U/com.chiefofstaff.mcp-vaultjobs 2>/dev/null || true
+launchctl bootstrap gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vaultjobs.plist"
+launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-vaultjobs
+launchctl list | grep com.chiefofstaff.mcp-vaultjobs   # loaded?
+tail -n 3 "$REPO_ROOT/mcp/logs/vaultjobs.err.log"      # expect "[vault-jobs] runner up …" with NO fatal line after it
+```
+
+**Load the `vault-operations` skill in Cowork** — the
+[`vault-operations`](https://github.com/philipyaz/cos/tree/main/.claude/skills/vault-operations) skill
+teaches the model the async **submit-then-poll** ingest lifecycle (and never to re-submit an in-flight
+job). Claude **Code** auto-loads it from the repo's `.claude/skills/` — nothing to do there. Claude
+**Cowork Desktop** does NOT read the repo filesystem (`~/.claude/skills/` is Claude Code CLI only);
+custom skills are added through its **UI** by uploading a ZIP. Build the ZIP (the skill **folder** must
+be at the ZIP root — `vault-operations/SKILL.md`, not loose files), then upload it:
+
+```sh
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+( cd "$REPO_ROOT/.claude/skills" && rm -f /tmp/vault-operations-skill.zip && zip -r /tmp/vault-operations-skill.zip vault-operations )
+echo "Now upload /tmp/vault-operations-skill.zip in Cowork → Customize → + (next to Skills) → Create skill"
+```
+
+In Claude Cowork Desktop: **Customize → `+` next to Skills → Create skill → select the ZIP**. It is
+available immediately (no restart needed) across all Cowork sessions; re-run the `zip` + re-upload to
+update it.
+
+> Belt-and-braces: even if the skill isn't loaded, the `ingest` / `ingest_status` tool **descriptions**
+> already instruct the model to submit-then-poll and not to re-submit an in-flight job — the skill
+> reinforces that guidance, it isn't strictly required for correctness.
+
 **Cowork config (if configured)** — `$COWORK_CONFIG`, the `"vault"` server entry's
 `env.COS_VAULT_DIR`. Only touch it if a `"vault"` entry exists:
 ```sh

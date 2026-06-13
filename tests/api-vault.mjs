@@ -2,24 +2,23 @@
 // api-vault.mjs — stdio JSON-RPC contract test for the vault MCP server
 // (mcp/vault-server/server.mjs — registry name "vault").
 //
-// Plain Node (ESM), zero deps. UNLIKE the board's HTTP api-* tests, the vault server
-// is a stdio MCP that EMBEDS the Claude Agent SDK and spawns a headless Claude session
-// per tool call. We deliberately assert ONLY the pre-agent contract — the paths that
-// short-circuit BEFORE query() is ever called — so the test needs NO ANTHROPIC_API_KEY
-// and makes NO LLM calls:
+// Plain Node (ESM), zero deps. UNLIKE the board's HTTP api-* tests, the vault server is a stdio MCP
+// that EMBEDS the Claude Agent SDK. We assert the parts that never reach the agent — and that now
+// includes the ASYNC ingest contract, because `ingest` only ENQUEUES a job (a detached runner does the
+// agent work), so the whole submit→status→cancel surface short-circuits BEFORE any query() call. So
+// the test needs NO ANTHROPIC_API_KEY and makes NO LLM calls:
 //   • initialize                     → serverInfo.name === "vault"
-//   • tools/list                     → EXACTLY two tools (ingest, query) with the
-//                                      expected required fields (ingest→content,
-//                                      query→question)
-//   • tools/call ingest {content:""} → isError result (the "provide content or files"
-//                                      validation), NOT a crash
-//   • tools/call ingest {files:["/etc/passwd"]} → isError result NAMING the path
-//                                      (the arbitrary-file-read guard), WITHOUT
-//                                      invoking the agent
+//   • tools/list                     → EXACTLY four tools (ingest, ingest_status, ingest_cancel,
+//                                      query) with the expected required fields
+//   • tools/call ingest {content:""} → isError ("provide content or files" validation), NOT a crash
+//   • tools/call ingest {files:["/etc/passwd"]} → isError NAMING the path (arbitrary-file-read guard)
+//   • tools/call ingest {content:"…"} → NON-error, returns a job_id; an identical re-submit DEDUPS to
+//                                      the same id; ingest_status reports `working`; an unknown
+//                                      job_id is an isError; ingest_cancel acks — all WITHOUT the agent
 //
-// We boot the server with COS_VAULT_DIR set to a THROWAWAY temp dir (so requireVaultDir
-// passes and the validation paths are reached) and WITHOUT an ANTHROPIC_API_KEY — the
-// four assertions above never reach the SDK, so no key is needed and nothing is spent.
+// We boot the server with COS_VAULT_DIR set to a THROWAWAY temp dir (so requireVaultDir passes and the
+// job store lands in temp/.cos/) and WITHOUT an ANTHROPIC_API_KEY — none of the assertions reach the
+// SDK (the runner, not the server, runs the agent), so no key is needed and nothing is spent.
 //
 // PREREQUISITE: the server's deps must be installed (@anthropic-ai/claude-agent-sdk +
 // @modelcontextprotocol/sdk) — the server hard-imports the Agent SDK at module top, so
@@ -173,11 +172,18 @@ async function main() {
     const tools = list?.tools || [];
     const names = tools.map((t) => t.name).sort();
     check(
-      tools.length === 2 && names.join(",") === "ingest,query",
-      `tools/list returns EXACTLY [ingest, query] (got [${tools.map((t) => t.name).join(", ")}])`,
+      tools.length === 4 && names.join(",") === "ingest,ingest_cancel,ingest_status,query",
+      `tools/list returns EXACTLY [ingest, ingest_status, ingest_cancel, query] (got [${tools.map((t) => t.name).join(", ")}])`,
     );
     const ingestTool = tools.find((t) => t.name === "ingest");
     const queryTool = tools.find((t) => t.name === "query");
+    const statusTool = tools.find((t) => t.name === "ingest_status");
+    const cancelTool = tools.find((t) => t.name === "ingest_cancel");
+    check(
+      statusTool?.inputSchema?.required?.includes("job_id") &&
+        cancelTool?.inputSchema?.required?.includes("job_id"),
+      "ingest_status + ingest_cancel each declare required: ['job_id']",
+    );
     check(
       Array.isArray(ingestTool?.inputSchema?.required) &&
         ingestTool.inputSchema.required.includes("content"),
@@ -231,9 +237,85 @@ async function main() {
       "the read-guard error explains it is outside the vault / allowlist",
     );
 
-    // Sanity: the server is still alive (the validation paths can't crash-loop it).
+    // ----------------------------------------------------------------------
+    // ASYNC CONTRACT: a VALID ingest ENQUEUES a job and returns a job_id — NO agent runs in
+    //   this process (the detached runner does), so this still needs no key and spends nothing.
+    //   Then: dedup (identical re-submit → same id), status, unknown-id error, and cancel.
+    // ----------------------------------------------------------------------
+    const submit = await client.request("tools/call", {
+      name: "ingest",
+      arguments: { content: "api-vault async contract note", domain: "life" },
+    });
+    check(submit?.isError !== true, "a valid ingest returns a NON-error result (it enqueued a job)");
+    const jobId = submit?.structuredContent?.job_id;
+    check(
+      typeof jobId === "string" && /^J-/.test(jobId),
+      `ingest returns a job_id in structuredContent ("${jobId}")`,
+    );
+    check(submit?.structuredContent?.status === "working", "the new job's status is 'working'");
+
+    const resubmit = await client.request("tools/call", {
+      name: "ingest",
+      arguments: { content: "api-vault async contract note", domain: "life" },
+    });
+    check(
+      resubmit?.structuredContent?.job_id === jobId && resubmit?.structuredContent?.dedup === true,
+      "an identical re-submit dedups to the SAME job_id (anti-fan-out)",
+    );
+
+    const status = await client.request("tools/call", {
+      name: "ingest_status",
+      arguments: { job_id: jobId },
+    });
+    check(
+      status?.isError !== true && status?.structuredContent?.status === "working",
+      "ingest_status returns the job lifecycle (working)",
+    );
+
+    const missing = await client.request("tools/call", {
+      name: "ingest_status",
+      arguments: { job_id: "J-doesnotexist000" },
+    });
+    check(
+      missing?.isError === true && /unknown or expired/i.test(resultText(missing)),
+      "ingest_status on an unknown job_id is an isError",
+    );
+
+    const cancel = await client.request("tools/call", {
+      name: "ingest_cancel",
+      arguments: { job_id: jobId },
+    });
+    check(cancel?.isError !== true, "ingest_cancel acks an in-flight job (cooperative)");
+
+    // ----------------------------------------------------------------------
+    // RESULT-CAP HONESTY: an oversized completed result is truncated AND the
+    // truncation is SURFACED to the caller (structuredContent.result_truncated),
+    // so a clipped receipt is never reported as the whole summary. The runner
+    // isn't running here, so we seed a completed job straight into the shared
+    // store (jobs.mjs has no import side effects), then poll through the server.
+    // ----------------------------------------------------------------------
+    const { makeJobStore } = await import("../mcp/vault-server/jobs.mjs");
+    const seedStore = makeJobStore(path.join(vaultDir, ".cos", "jobs.json"));
+    const seeded = await seedStore.enqueue({ content: "cap-surfacing probe", domain: "work" });
+    await seedStore.setStatus(seeded.job.id, "completed", { result: "R".repeat(20000) });
+    const capStatus = await client.request("tools/call", {
+      name: "ingest_status",
+      arguments: { job_id: seeded.job.id },
+    });
+    const capSC = capStatus?.structuredContent || {};
+    check(capSC.status === "completed", "seeded job reports completed");
+    check(
+      typeof capSC.result === "string" && capSC.result.length === 16000,
+      `an oversized result is capped to 16000 chars (got ${capSC.result?.length})`,
+    );
+    check(
+      capSC.result_truncated === true,
+      "ingest_status SURFACES result_truncated so the caller knows the receipt was clipped",
+    );
+
+    // Sanity: the server is still alive (the validation + async paths can't crash-loop it).
     const listAgain = await client.request("tools/list", {});
-    check((listAgain?.tools || []).length === 2, "the server is still responsive after the validation calls");
+    check((listAgain?.tools || []).length === 4, "the server is still responsive after the calls");
   } finally {
     child.stdin.end();
     child.kill();
@@ -245,7 +327,7 @@ async function main() {
     process.exit(1);
   }
   console.log(
-    "\nPASS — vault MCP holds (initialize name, exact tool list, ingest empty + read-guard validation; no LLM call, no key).",
+    "\nPASS — vault MCP holds (initialize name, 4-tool list, ingest empty + read-guard validation, async enqueue + dedup + ingest_status + ingest_cancel; no LLM call, no key).",
   );
 }
 

@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ____________________________________________________________________________
+     TEMPLATE for the vault jobs-RUNNER LaunchAgent (com.chiefofstaff.mcp-vaultjobs).
+
+     A SIDECAR (like guardsvc/search) — NOT an MCP bridge, so it is NOT in .mcp.json and has no HTTP
+     port. It executes async `ingest` jobs DETACHED from the MCP request that submitted them: the
+     vault MCP server enqueues a job + returns its id instantly; THIS process claims the job from the
+     shared store ($COS_VAULT_DIR/.cos/jobs.json) and runs the Sonnet synthesis, so a multi-minute
+     ingest survives the client disconnecting / Cowork cancelling at its ~4-min cap.
+
+     The label keeps the com.chiefofstaff.mcp-* convention (same as the guardsvc/search sidecars) so
+     ensure-bridges.sh bootstraps + kickstarts it alongside the rest on `npm dev/start`.
+
+     This is the COMMITTED template. The INSTALLED copy lives at
+       ~/Library/LaunchAgents/com.chiefofstaff.mcp-vaultjobs.plist
+     and is NOT version-controlled. It carries two placeholders:
+       __REPO__         this checkout's ABSOLUTE path
+       __VAULT_NAME__   the chosen vault directory name under vault/ (filled by setup-vault / the
+                        installer — never hardcode a specific vault here)
+     Install it (from mcp/vault-server/deploy/):
+
+       REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
+       sed -e "s#__REPO__#$REPO#g" -e "s#__VAULT_NAME__#my-vault#g" \
+         mcp/vault-server/deploy/com.chiefofstaff.mcp-vaultjobs.plist.template \
+         > ~/Library/LaunchAgents/com.chiefofstaff.mcp-vaultjobs.plist
+
+     SECRET — like the vault bridge, the runner makes OUTBOUND LLM calls, so it needs ANTHROPIC_API_KEY.
+     The key is NOT baked here: ProgramArguments runs the wrapper (jobs-runner-launch.sh), which sources
+     the gitignored config/secrets.env at startup. NO COS_MCP_IDLE_EXIT_MS — unlike the supergateway
+     bridge, the runner is a long-lived poller and must NEVER idle-exit; KeepAlive restarts it if it dies.
+     ____________________________________________________________________________ -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.chiefofstaff.mcp-vaultjobs</string>
+
+  <!-- Runs the launch WRAPPER (not node directly): the wrapper sources config/secrets.env for
+       ANTHROPIC_API_KEY, then execs `node mcp/vault-server/jobs-runner.mjs`. Keeps the secret out of
+       the installed plist. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/mcp/vault-server/jobs-runner-launch.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- /opt/homebrew/bin so the wrapper's `node` resolves (launchd's default PATH omits Homebrew). -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- ABSOLUTE — the vault the runner reads/writes (and where .cos/jobs.json lives). __VAULT_NAME__
+         is filled by setup-vault / the installer; never hardcode one here. -->
+    <key>COS_VAULT_DIR</key>
+    <string>__REPO__/vault/__VAULT_NAME__</string>
+    <!-- NB: ANTHROPIC_API_KEY is NOT set here — the wrapper sources it from config/secrets.env.
+         NB: NO COS_MCP_IDLE_EXIT_MS — the runner must not idle-exit (it is a long-lived poller). -->
+  </dict>
+
+  <key>WorkingDirectory</key><string>__REPO__</string>
+
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+
+  <key>StandardOutPath</key><string>__REPO__/mcp/logs/vaultjobs.out.log</string>
+  <key>StandardErrorPath</key><string>__REPO__/mcp/logs/vaultjobs.err.log</string>
+</dict></plist>
+<!-- ____________________________________________________________________________
+     MANAGE COMMANDS (run after substituting __REPO__ + __VAULT_NAME__ and writing the installed copy
+     to ~/Library/LaunchAgents/com.chiefofstaff.mcp-vaultjobs.plist; the API key comes from
+     config/secrets.env via the wrapper, NOT this plist):
+
+       U=$(id -u)
+
+       # stop + unload (bootout) — needed before re-bootstrapping after a plist edit
+       launchctl bootout gui/$U/com.chiefofstaff.mcp-vaultjobs 2>/dev/null || true
+
+       # load (bootstrap) — register the agent with launchd; RunAtLoad starts it
+       launchctl bootstrap gui/$U ~/Library/LaunchAgents/com.chiefofstaff.mcp-vaultjobs.plist
+
+       # start / restart now (kickstart with -k = kill + restart; picks up edits)
+       launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-vaultjobs
+
+       # liveness (no HTTP port — confirm the process + the runner-up banner)
+       launchctl list | grep com.chiefofstaff.mcp-vaultjobs
+       tail -n 5 __REPO__/mcp/logs/vaultjobs.err.log   # "[vault-jobs] runner up (pid …)"
+
+     ensure-bridges.sh bootstraps + kickstarts this agent on `npm dev/start`, but launchd owns its
+     lifecycle (RunAtLoad + KeepAlive). Run it alongside the vault bridge: enqueue happens in the
+     bridge/stdio server, execution happens here.
+     ____________________________________________________________________________ -->

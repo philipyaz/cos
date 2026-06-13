@@ -58,6 +58,7 @@ openwhispr ${OPENWHISPR_BRIDGE_PORT:-8002}
 calendar ${CALENDAR_BRIDGE_PORT:-8003}
 guard ${GUARD_BRIDGE_PORT:-8004}
 vault ${VAULT_BRIDGE_PORT:-8005}
+vaultjobs -
 whatsapp ${WHATSAPP_MCP_BRIDGE_PORT:-8006}
 search ${SEARCH_SIDECAR_PORT:-8008}
 guardsvc ${GUARD_SIDECAR_PORT:-8009}
@@ -79,7 +80,7 @@ echo "$SERVICES" | while read -r name port; do
   # Optional add-ons: if not installed on this machine (no plist), skip the probe silently —
   # don't WARN about a server the user never set up. (Core servers still warn if absent.)
   case "$name" in
-    openwhispr|whatsapp|whatsappbridge)
+    openwhispr|whatsapp|whatsappbridge|vaultjobs)
       [ -f "$LA/com.chiefofstaff.mcp-$name.plist" ] || continue ;;
   esac
   if [ "$name" = search ] || [ "$name" = guardsvc ]; then
@@ -119,6 +120,14 @@ echo "$SERVICES" | while read -r name port; do
       echo "[mcp] WARN: whatsappbridge on :$port but WhatsApp is NOT connected — cold start, or the linked device/session expired; re-pair via /whatsapp-mcp-setup if it persists (see $REPO/mcp/logs/whatsappbridge.out.log)"
     else
       echo "[mcp] WARN: whatsappbridge DOWN on :$port — see $REPO/mcp/logs/whatsappbridge.err.log"
+    fi
+  elif [ "$name" = vaultjobs ]; then
+    # The async ingest RUNNER (executes detached ingest jobs) — a sidecar with NO listening port.
+    # Liveness = the launchd job is loaded (KeepAlive restarts it on crash); confirm via launchctl.
+    if launchctl list 2>/dev/null | grep -q "com.chiefofstaff.mcp-vaultjobs"; then
+      echo "[mcp] vaultjobs runner up (async ingest executor; no port)"
+    else
+      echo "[mcp] WARN: vaultjobs runner not loaded — async ingest jobs won't execute (see $REPO/mcp/logs/vaultjobs.err.log)"
     fi
   elif lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "[mcp] $name bridge up on :$port"

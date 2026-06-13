@@ -1,11 +1,15 @@
-# vault MCP server (v1)
+# vault MCP server (v2)
 
-A stdio MCP server (registry name **`vault`**) that **embeds the Claude Agent SDK** to run
-headless **ingest / query** sessions over the Cos **domain-split knowledge vault**
-(`work/` · `life/` · `shared/`). Each tool call spawns a short-lived, scoped Claude Code
-session whose cwd is the vault root and whose only reach is the vault filesystem plus the two
-`second-brain-*` skills. Runs over stdio; Claude Desktop bridges it into Cowork, or front it
-with supergateway for the HTTP bridge on **`8005`**.
+A stdio MCP server (registry name **`vault`**) that **embeds the Claude Agent SDK** to run headless
+sessions over the Cos **domain-split knowledge vault** (`work/` · `life/` · `shared/`). Four tools:
+**`ingest`** (asynchronous — submit-then-poll), **`ingest_status`**, **`ingest_cancel`**, and
+**`query`** (synchronous). `query` runs its session inline; `ingest` enqueues a job and a **detached
+launchd runner** (`com.chiefofstaff.mcp-vaultjobs`, [`jobs-runner.mjs`](jobs-runner.mjs)) performs the
+synthesis — so a multi-minute ingest survives the client's tool-call timeout (notably Cowork's ~4-min
+cap). The shared agent-run path (prompts, scoping safeguards, `run()`) lives in
+[`agent.mjs`](agent.mjs); the durable job store in [`jobs.mjs`](jobs.mjs). Runs over stdio; Claude
+Desktop bridges it into Cowork, or front it with supergateway for the HTTP bridge on **`8005`**.
+Full async lifecycle: [docs/reference/vault-async.md](../../docs/reference/vault-async.md).
 
 > **This server is different from its siblings.** `board`, `calendar`, and `guard` are thin
 > `fetch` wrappers over an HTTP route and make **no LLM calls**. `vault` **embeds the Agent
@@ -39,8 +43,12 @@ Ingest knowledge into the domain-split vault wiki. Provide inline `content` (a t
 transcript / recap) **and/or** `files`. The session classifies each input's domain (`work|life`),
 re-synthesizes the affected source / entity / concept pages in that wiki (rewrite, don't append —
 a substantive source touches ~10–15 pages), updates that domain's `index.md` / `log.md`, and
-resolves entities to canonical `[[wikilinks]]`. Returns a JSON ingest summary
-(`{ perDomain, sourcesCreated, pagesResynthesized, contradictions, boardRefsRecorded }`).
+resolves entities to canonical `[[wikilinks]]`. **Asynchronous:** returns a **`job_id`** immediately
+(in `structuredContent`) and a detached runner performs the work — poll `ingest_status` to a terminal
+state. On `completed`, `ingest_status` surfaces the JSON ingest summary
+(`{ perDomain, sourcesCreated, pagesResynthesized, contradictions, boardRefsRecorded }`). Identical
+re-submits **dedup** to the same `job_id` (no second agent). See
+[Async vault ingest](../../docs/reference/vault-async.md).
 
 - `content` **(required)** — inline material. May be an **empty string** if `files` are supplied.
 - `files` `[x]` — array of **absolute on-device paths** to read as sources (PDFs / images read
@@ -51,6 +59,23 @@ resolves entities to canonical `[[wikilinks]]`. Returns a JSON ingest summary
 - `cases` `[x]` — board case ids (e.g. `CASE-1`) recorded **by reference only**.
 - **Validation:** rejects when **both** `content` is empty **and** no `files` are given
   (`provide content or files`).
+
+### `ingest_status(job_id)`
+
+Poll an ingest job started by `ingest`. Returns the job's `status` (`working` | `running` |
+`completed` | `failed` | `cancelled` | `interrupted`) in `structuredContent`, plus `result` on
+`completed` (the ingest summary) or `error` on `failed` / `interrupted`. Call every `poll_interval_ms`
+until terminal. An unknown / expired `job_id` returns an error (the job aged out of its retention
+window — re-submit the material).
+
+- `job_id` **(required)** — the id returned by `ingest`.
+
+### `ingest_cancel(job_id)`
+
+Request a cooperative stop of an in-flight ingest job. Pages already written **stay** (no rollback);
+acking an already-terminal job is a harmless no-op.
+
+- `job_id` **(required)**.
 
 ### `query(question, [domain])`
 
@@ -100,9 +125,14 @@ as `additionalDirectories` so `Read` can reach them (in-vault paths are already 
 | --- | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | **yes** | — | The embedded SDK calls the Anthropic API. Without it, sessions fail and the tool returns a clean error. |
 | `COS_VAULT_DIR` | **yes** | — | Absolute vault root. Missing/nonexistent → every tool returns a clear error (the process still boots so KeepAlive stays calm). |
-| `COS_VAULT_MODEL` | no | `claude-sonnet-4-6` | Model for the embedded Agent SDK session (single model, no fallback). |
-| `COS_VAULT_MAX_TURNS` | no | `30` | Max agent turns per session. |
-| `COS_VAULT_TIMEOUT_MS` | no | `180000` | Per-call timeout; on expiry the session is aborted and the tool returns a timeout error. |
+| `COS_VAULT_QUERY_MODEL` | no | `claude-haiku-4-5` | Model for the **read** path (`query`) — fast/low-cost tier so a lookup returns inside the client's tool-call timeout. |
+| `COS_VAULT_INGEST_MODEL` | no | `claude-sonnet-4-6` | Model for the **write** path (`ingest`) — higher tier for multi-page synthesis quality. |
+| `COS_VAULT_MODEL` | no | _(unset)_ | If set, pins **both** tools to this model (back-compat / global override of the two above). |
+| `COS_VAULT_MAX_TURNS` | no | `30` | Max agent turns for `ingest`. |
+| `COS_VAULT_QUERY_MAX_TURNS` | no | `15` | Max agent turns for `query` (a read needs far fewer than a synthesis). |
+| `COS_VAULT_INGEST_TIMEOUT_MS` | no | `600000` | `ingest` per-call timeout. NOTE: under **Cowork** the binding limit is Cowork's own hard ~4-min cap (unconfigurable, ignores progress); this generous ceiling is for the **Claude Code** bridge (client tool timeout ~28h by default). Client cancellation is wired into the abort, so it won't keep burning tokens after a client gives up. |
+| `COS_VAULT_QUERY_TIMEOUT_MS` | no | `90000` | `query` per-call timeout (Haiku reads finish well inside this). |
+| `COS_VAULT_TIMEOUT_MS` | no | _(unset)_ | If set, overrides **both** timeouts above (back-compat). |
 | `COS_VAULT_ATTACH_DIRS` | no | _(empty)_ | Colon-separated allowlist of dirs **outside** the vault from which `ingest.files` may be read. |
 | `COS_VAULT_CONCURRENCY` | no | `2` | Max embedded sessions running at once (the semaphore). |
 
