@@ -42,6 +42,19 @@ export async function PATCH(
   if ("url" in body && body.url !== null && body.url !== "" && normalizeMessageUrl(body.url) === undefined) {
     return NextResponse.json({ error: "'url' must be an absolute http(s) URL." }, { status: 400 });
   }
+  // Unanswered-message flags (additive optionals on MessageRecord). `needsAnswer` pins
+  // the message as awaiting a reply; `answered` (a verb, not a stored field) flips
+  // answeredAt; `context` is the one-line context shown in the unanswered view. A
+  // present value of the wrong shape is a clean 400; null/"" on context CLEARS it.
+  if ("needsAnswer" in body && typeof body.needsAnswer !== "boolean") {
+    return NextResponse.json({ error: "'needsAnswer' must be a boolean." }, { status: 400 });
+  }
+  if ("answered" in body && typeof body.answered !== "boolean") {
+    return NextResponse.json({ error: "'answered' must be a boolean." }, { status: 400 });
+  }
+  if ("context" in body && body.context !== null && typeof body.context !== "string") {
+    return NextResponse.json({ error: "'context' must be a string or null." }, { status: 400 });
+  }
 
   const actor = resolveActor(req, body);
   // The principal (board owner) drives trust derivation; resolved once, outside the write lock.
@@ -57,6 +70,21 @@ export async function PATCH(
       // url:null or url:"" normalizes to undefined, which CLEARS it. Only touched when
       // the key is present, so an omitted `url` leaves the existing link untouched.
       if ("url" in body) msg.url = normalizeMessageUrl(body.url);
+
+      // Unanswered-message flags. Each clears-to-undefined to keep the record byte-clean
+      // (like the url:null path) so an unflagged/answered message carries no dead keys.
+      // UNANSWERED === needsAnswer && !answeredAt; marking answered stamps answeredAt now.
+      if ("needsAnswer" in body) msg.needsAnswer = body.needsAnswer ? true : undefined;
+      if ("answered" in body) msg.answeredAt = body.answered ? new Date().toISOString() : undefined;
+      if ("context" in body) {
+        msg.context = typeof body.context === "string" && body.context.trim() ? body.context : undefined;
+      }
+      // A pure history note when a message linked to a case is marked answered — mirrors
+      // the message_linked/unlinked notes. NO reminder cascade; the row just leaves the view.
+      if (body.answered === true && msg.caseId) {
+        const caseRec = findCase(db, msg.caseId);
+        if (caseRec) logActivity(caseRec, actor, "message_answered", msg.subject || msg.from);
+      }
 
       let trustTargets: string[] = [];
       let trustCaseId: string | undefined;

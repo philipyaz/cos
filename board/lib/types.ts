@@ -97,7 +97,11 @@ export const VALID_BIOLOGICAL_SEX: BiologicalSex[] = ["male", "female"];
 // set). New enums: ActivityLevel, BiologicalSex. migrate() carries db.weights forward when
 // it is an array and db.nutritionGoal forward when it is an object (mirroring the
 // events/priorities and the settings lines respectively).
-export const SCHEMA_VERSION = 10;
+// v11 adds the unanswered-messages fields (MessageRecord.needsAnswer / answeredAt /
+// context — a still-owed reply is the same message carrying a status flag) — additive
+// optionals, read-compatible, migrate() is a no-op (the messages[] array rides through
+// verbatim); an absent needsAnswer === not flagged. Unanswered === needsAnswer && !answeredAt.
+export const SCHEMA_VERSION = 11;
 
 // Who performed a mutation — drives activity attribution + note authorship.
 export type Actor = "human" | "agent" | "system";
@@ -259,6 +263,9 @@ export interface MessageRecord {
   caseId?: string;
   reminderId?: string; // OPTIONAL link to a Reminder (REM-<n>) — single source of truth for the reminder<->email link (mirrors caseId; a message may link to a case and/or a reminder)
   url?: string; // direct deep-link back to the ORIGINAL message (additive optional, read-compatible like outbound/reminderId). For Gmail this is the thread URL https://mail.google.com/mail/u/0/#all/<threadId>, captured at link time so the board/UI can jump straight to the source. Validated server-side as an absolute http(s) URL (board/lib/message-url.ts).
+  needsAnswer?: boolean; // flagged as awaiting a reply (the "pin"). Additive optional, read-compatible like outbound/reminderId/url — absent === not flagged. UNANSWERED === needsAnswer && !answeredAt.
+  answeredAt?: string; // ISO; set when the message is marked answered (absent === STILL unanswered). Additive optional, read-compatible like outbound/reminderId/url.
+  context?: string; // one-sentence context shown in the unanswered-messages view (what they're asking). Additive optional, read-compatible like outbound/reminderId/url.
 }
 
 export interface CalendarEvent {

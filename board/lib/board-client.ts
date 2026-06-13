@@ -376,6 +376,33 @@ export async function fetchEnabledAddonGroups(): Promise<AddonNavGroup[]> {
   }
 }
 
+// ── Unanswered messages (the "messages I still owe a reply to" view) ──────────
+// A message is UNANSWERED when needsAnswer && !answeredAt (the pure predicate in
+// lib/inbox.selectUnansweredMessages). The skill/MCP flags them; the board panel
+// lists them and marks them answered (a pure status flip — the row leaves the view).
+export interface MessagesResponse extends VersionedResponse {
+  messages: MessageRecord[];
+}
+export interface UnansweredCountResponse extends VersionedResponse {
+  unanswered: number;
+}
+
+// The unanswered set (newest-first), for the slide-over panel. See GET /api/messages.
+export function fetchUnanswered(): Promise<MessagesResponse> {
+  return request<MessagesResponse>("/api/messages?status=unanswered");
+}
+
+// Cheap unanswered tally for the toolbar badge — see app/api/unanswered-count.
+export function fetchUnansweredCount(): Promise<UnansweredCountResponse> {
+  return request<UnansweredCountResponse>("/api/unanswered-count");
+}
+
+// Mark a message answered — a pure status flip (sets answeredAt server-side, so the
+// row leaves the unanswered view). Rides the message PATCH; no dedicated route.
+export function markAnswered(id: string): Promise<MessageResponse> {
+  return updateMessage(id, { answered: true });
+}
+
 // ── Calendar events ──────────────────────────────────────────────────────────
 // Basic calendar layer (v4). Each CalendarEvent maps 1:1 to /api/events; the
 // optional event.caseId is the single source of truth for the case<->event link.

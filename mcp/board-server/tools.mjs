@@ -558,6 +558,107 @@ const UPDATE_MESSAGE_TOOL = {
   },
 };
 
+const ADD_UNANSWERED_MESSAGE_TOOL = {
+  name: "add_unanswered_message",
+  description:
+    "Store a brand-new message and FLAG it as awaiting a reply (it appears in the board's " +
+    "'Unanswered messages' view until marked answered). Use this for an inbound email or chat the " +
+    "USER still owes a reply to that generated no case / reminder / event of its own — it would " +
+    "otherwise be silently forgotten. The message is created STANDALONE (linked to nothing); pass " +
+    "`caseId` and/or `reminderId` to ALSO link it to a matter you already found. `needsAnswer` " +
+    "defaults to true server-side. " +
+    "`POST /api/messages`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      source: {
+        type: "string",
+        enum: MESSAGE_SOURCE,
+        description: "Where the message came from.",
+      },
+      from: { type: "string", description: "Sender — an email address, name, or system id (the 'who')." },
+      subject: { type: "string", description: "Subject / title." },
+      preview: { type: "string", description: "Short preview line." },
+      body: { type: "string", description: "Full message body (the message itself)." },
+      receivedAt: { type: "string", description: "ISO timestamp; defaults to now (the 'date')." },
+      context: {
+        type: "string",
+        description:
+          "A ONE-SENTENCE context shown in the unanswered view — what they're asking and the " +
+          "person's role, e.g. 'Sara (landlord) is asking when you'll sign the renewal.'",
+      },
+      caseId: { type: "string", description: "OPTIONAL case id to ALSO link the message to, e.g. 'CASE-1'." },
+      reminderId: { type: "string", description: "OPTIONAL reminder id to ALSO link the message to, e.g. 'REM-1'." },
+      read: { type: "boolean", description: "Whether the message is read. Defaults false." },
+      url: {
+        type: "string",
+        description:
+          "Direct deep-link back to the ORIGINAL message so the board/UI can jump straight to it. For Gmail pass the " +
+          "thread URL https://mail.google.com/mail/u/0/#all/<threadId> (use the Gmail threadId you already have; u/0 is " +
+          "the signed-in account index). Stored only if it is an absolute http(s) URL.",
+      },
+    },
+    required: ["source", "from"],
+  },
+};
+
+const MARK_MESSAGE_UNANSWERED_TOOL = {
+  name: "mark_message_unanswered",
+  description:
+    "Flag an EXISTING message (already linked to a case/reminder, or standalone) as awaiting a " +
+    "reply, so it appears in the board's 'Unanswered messages' view. Use this when the message is " +
+    "already on the board (you found it via search / list_unanswered_messages) — use " +
+    "add_unanswered_message instead to store a brand-new one. " +
+    "`PATCH /api/messages/{id}`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Message id, e.g. 'M-1'." },
+      context: {
+        type: "string",
+        description:
+          "OPTIONAL one-sentence context shown in the unanswered view (what they're asking; the " +
+          "person's role woven in).",
+      },
+    },
+    required: ["id"],
+  },
+};
+
+const MARK_MESSAGE_ANSWERED_TOOL = {
+  name: "mark_message_answered",
+  description:
+    "Mark a message as ANSWERED — a pure status flip that removes it from the board's 'Unanswered " +
+    "messages' view (it stamps `answeredAt`). Use this once the USER has replied. It does NOT " +
+    "cascade to any linked case / reminder (no lane move, no reminder close). " +
+    "`PATCH /api/messages/{id}`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Message id, e.g. 'M-1'." },
+    },
+    required: ["id"],
+  },
+};
+
+const LIST_UNANSWERED_MESSAGES_TOOL = {
+  name: "list_unanswered_messages",
+  description:
+    "List every message the USER still owes a reply to (flagged needsAnswer and not yet answered), " +
+    "newest first — the contents of the board's 'Unanswered messages' view. Use it to dedup before " +
+    "flagging (so you don't store one twice) and to see what's outstanding. " +
+    "`GET /api/messages?status=unanswered`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      limit: {
+        type: "number",
+        description: "OPTIONAL max number of messages to show (applied when summarizing; defaults to all).",
+      },
+    },
+  },
+};
+
 // ── Reminders (8) ──────────────────────────────────────────────────────────
 // A reminder is a LIGHTWEIGHT NUDGE — "a reminder to CHECK or to DO something" —
 // for a minor matter that doesn't justify a full Case (no kanban lanes, no
@@ -1170,6 +1271,10 @@ export const TOOLS = [
   // messages
   LINK_MESSAGE_TOOL,
   UPDATE_MESSAGE_TOOL,
+  ADD_UNANSWERED_MESSAGE_TOOL,
+  MARK_MESSAGE_UNANSWERED_TOOL,
+  MARK_MESSAGE_ANSWERED_TOOL,
+  LIST_UNANSWERED_MESSAGES_TOOL,
   // reminders (8)
   CREATE_REMINDER_TOOL,
   LIST_REMINDERS_TOOL,

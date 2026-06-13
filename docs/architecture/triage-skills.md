@@ -17,6 +17,13 @@ board (`mail-to-board`, `whatsapp-triage`), one **housekeeper** that organizes w
 leave behind (`board-organize`), and a **catalog of recipes** that describes how each is
 scheduled.
 
+!!! tip "See also: Unanswered messages"
+    A lighter-weight operator sweep, [`unanswered-messages`](../features/unanswered-messages.md),
+    scans the same Gmail + WhatsApp channels for messages still awaiting *your* reply and pins
+    them to a dedicated board view. It follows the same guard-first, watermarked, do-not-undo
+    pattern described below — with its own non-colliding cursor (`cos/answer-checked` label +
+    `config/unanswered-messages-state.json`) so it never steals the reconcilers' threads.
+
 ## The operator pattern: no host-side cron
 
 There is deliberately **no host-side scheduler** — no launchd job, no cron, no shell loop

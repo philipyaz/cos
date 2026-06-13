@@ -123,6 +123,13 @@ nav:
       - Platform API: architecture/platform-api.md
       - Add-ons: architecture/addons.md
       - Case hierarchy: architecture/hierarchy.md
+  - Features:
+      - Board: features/board.md
+      - Activity: features/activity.md
+      - Calendar: features/calendar.md
+      - Reminders: features/reminders.md
+      - Priorities: features/priorities.md
+      - Unanswered messages: features/unanswered-messages.md
   - Security:
       - Prompt-injection guard: security/guard.md
   - Features:
