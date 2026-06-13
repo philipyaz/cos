@@ -23,6 +23,10 @@
     "whatsapp": {
       "type": "http",
       "url": "http://localhost:8006/mcp"
+    },
+    "nutrition": {
+      "type": "http",
+      "url": "http://localhost:8007/mcp"
     }
   }
 }

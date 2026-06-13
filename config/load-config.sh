@@ -59,6 +59,9 @@ fi
 : "${WHATSAPP_MCP_DIR:=$HOME/Code/whatsapp-mcp}"
 : "${WHATSAPP_MCP_BRIDGE_PORT:=8006}"
 : "${WHATSAPP_GO_PORT:=8010}"
+# Nutrition & Chef add-on (built-in; in-repo mcp/nutrition-server). Gated per-board via
+# Settings.addons — this default only seeds the bridge port for the supergateway HTTP bridge.
+: "${NUTRITION_BRIDGE_PORT:=8007}"
 
 # --- 3. Override defaults with the real machine config (once cos-setup has written it) ---------
 if [ -f "$REPO_ROOT/config/cos.env" ]; then
@@ -81,6 +84,7 @@ fi
 : "${GUARD_SIDECAR_URL:=http://127.0.0.1:$GUARD_SIDECAR_PORT}"
 : "${WHATSAPP_MCP_BRIDGE_URL:=http://localhost:$WHATSAPP_MCP_BRIDGE_PORT}"
 : "${WHATSAPP_GO_URL:=http://localhost:$WHATSAPP_GO_PORT}"
+: "${NUTRITION_BRIDGE_URL:=http://localhost:$NUTRITION_BRIDGE_PORT}"
 
 # --- 5. Export for child processes ------------------------------------------------------------
 export REPO_ROOT BREW_PREFIX NODE_BIN UV_BIN SUPERGATEWAY_BIN LAUNCH_AGENTS_DIR COWORK_CONFIG
@@ -91,3 +95,4 @@ export BOARD_BRIDGE_PORT OPENWHISPR_BRIDGE_PORT CALENDAR_BRIDGE_PORT GUARD_BRIDG
 export BOARD_BRIDGE_URL OPENWHISPR_BRIDGE_URL CALENDAR_BRIDGE_URL GUARD_BRIDGE_URL VAULT_BRIDGE_URL
 export SEARCH_SIDECAR_PORT GUARD_SIDECAR_PORT SEARCH_SIDECAR_URL GUARD_SIDECAR_URL
 export WHATSAPP_MCP_DIR WHATSAPP_MCP_BRIDGE_PORT WHATSAPP_GO_PORT WHATSAPP_MCP_BRIDGE_URL WHATSAPP_GO_URL
+export NUTRITION_BRIDGE_PORT NUTRITION_BRIDGE_URL

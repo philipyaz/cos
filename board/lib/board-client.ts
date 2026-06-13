@@ -307,6 +307,62 @@ export function fetchUnreadCount(): Promise<UnreadCountResponse> {
   return request<UnreadCountResponse>("/api/unread-count");
 }
 
+// ── Add-ons (the optional verticals layered over the core board) ──────────────
+// The add-on catalog (GET /api/addons) — one row per manifest with its enabled flag
+// and a best-effort bridge reachability hint. Mirrors the AddonManifest shape on the
+// wire (the route projects the registry); the catalog/management surface reads the
+// whole row, while the sidebar only needs the enabled rows' flattened nav items.
+export interface AddonNavItem {
+  href: string;
+  label: string;
+  icon: string; // key into components/icons.tsx (e.g. "IconChef")
+}
+export interface AddonView {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  navItems: AddonNavItem[];
+  enabled: boolean;
+  bridge: { port: number; reachable: boolean };
+}
+export interface AddonsResponse extends VersionedResponse {
+  addons: AddonView[];
+}
+
+// Fetch the full add-on catalog (every manifest + enabled flag + bridge hint). The
+// /addons management surface reads this directly.
+export function fetchAddons(): Promise<AddonsResponse> {
+  return request<AddonsResponse>("/api/addons");
+}
+
+// PATCH /api/addons/[id] — flip one add-on on/off (the catalog toggle). The flag lives
+// in cases.json (db.settings.addons), so the write bumps db.version → SSE → the sidebar's
+// Add-ons group and this catalog reconcile live. Returns the toggled add-on + the new
+// version; THROWS Error(<api error>) on a non-2xx (e.g. an unknown add-on id → 404), so
+// the view reverts its optimistic switch and surfaces the failure (mirrors setGuardEnabled).
+export interface AddonToggleResponse extends VersionedResponse {
+  addon: { id: string; enabled: boolean };
+}
+export function setAddonEnabled(id: string, enabled: boolean): Promise<AddonToggleResponse> {
+  return request<AddonToggleResponse>(`/api/addons/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    ...jsonBody({ enabled }),
+  });
+}
+
+// The ENABLED add-ons' flattened nav items — the cheap feed for the sidebar's live
+// "Add-ons" group. Mirrors fetchUnreadCount's shape/error-handling: it never throws
+// (a failed fetch resolves to [] so the sidebar simply keeps its last-known group).
+export async function fetchEnabledAddons(): Promise<AddonNavItem[]> {
+  try {
+    const res = await fetchAddons();
+    return res.addons.filter((a) => a.enabled).flatMap((a) => a.navItems);
+  } catch {
+    return [];
+  }
+}
+
 // ── Calendar events ──────────────────────────────────────────────────────────
 // Basic calendar layer (v4). Each CalendarEvent maps 1:1 to /api/events; the
 // optional event.caseId is the single source of truth for the case<->event link.

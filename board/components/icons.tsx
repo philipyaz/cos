@@ -433,6 +433,22 @@ export function IconTree(props: SVGProps<SVGSVGElement>) {
 // Alias: the Strategy view's "roadmap" affordance shares the outline glyph.
 export const IconRoadmap = IconTree;
 
+// ── Add-on glyphs ──────────────────────────────────────────────────────────────
+// Each optional add-on contributes its own nav icon (keyed by AddonManifest.icon).
+// Chef = the Nutrition & Chef add-on (its Food Log nav + the catalog row): a chef's
+// hat over a small base, in the same 1.5-stroke / currentColor convention as the set.
+
+export function IconChef(props: SVGProps<SVGSVGElement>) {
+  // A chef's toque: a puffed cap (three lobes) sitting on a banded base.
+  return (
+    <svg {...base} {...props}>
+      <path d="M4.5 8.5a2.3 2.3 0 1 1 .9-4.4 2.6 2.6 0 0 1 5.2 0 2.3 2.3 0 1 1 .9 4.4v0Z" />
+      <path d="M4.5 8.5v3a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1v-3" />
+      <path d="M6.5 12.5v-3M9.5 12.5v-3" />
+    </svg>
+  );
+}
+
 // ── Brand mark ───────────────────────────────────────────────────────────────
 // The sidebar monogram — a "C" arc rendered as a stroked path (not a text glyph)
 // so it stays crisp at ~18px inside the gradient badge, and a small centre dot

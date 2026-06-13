@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { fetchUnreadCount, subscribeToBoard } from "@/lib/board-client";
+import {
+  fetchUnreadCount,
+  fetchEnabledAddons,
+  subscribeToBoard,
+  type AddonNavItem,
+} from "@/lib/board-client";
 import {
   IconSearch,
   IconInbox,
@@ -16,9 +21,23 @@ import {
   IconBook,
   IconStar,
   IconTrash,
+  IconChef,
+  IconBolt,
   IconBrand,
 } from "@/components/icons";
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode, SVGProps } from "react";
+
+// Add-on nav icons are stored as STRING keys in the manifest (AddonManifest.icon /
+// navItems[].icon — see lib/addons.ts), so the sidebar resolves them to the actual
+// glyph here. An unknown key falls back to the neutral IconBolt so a future add-on
+// whose icon isn't yet mapped still renders a sensible nav row.
+const ADDON_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
+  IconChef,
+};
+function addonIcon(key: string): ReactNode {
+  const Glyph = ADDON_ICONS[key] ?? IconBolt;
+  return <Glyph />;
+}
 
 type Item = {
   href: string;
@@ -34,15 +53,26 @@ type Item = {
 // the at-a-glance badge. We keep it LIVE off the SSE stream: the layout that
 // computes the seed only re-runs on a full reload, so without this the badge
 // goes stale the instant the Inbox (or the agent) flips a message's read-state.
-export function Sidebar({ unreadCount }: { unreadCount?: number }) {
+export function Sidebar({
+  unreadCount,
+  addonNav,
+}: {
+  unreadCount?: number;
+  // The enabled add-ons' flattened nav items, computed server-side in layout.tsx and
+  // threaded down as the SSR seed (correct first paint, no flash). Kept LIVE off the
+  // SSE stream below — a catalog toggle bumps db.version, so the group flips without a
+  // reload, exactly like the unread badge.
+  addonNav?: AddonNavItem[];
+}) {
   const path = usePathname() ?? "/";
 
   // Seed from SSR, then mirror the app-wide live-update pattern: on each board
-  // change (newer version), refetch the cheap unread count. `lastVersion` starts
-  // at 0 so the SSE `hello` on connect triggers one reconciling fetch on mount —
-  // self-correcting even if the seed was already stale. A failed fetch keeps the
-  // last value; the next change event retries.
+  // change (newer version), refetch the cheap unread count AND the enabled add-ons'
+  // nav. `lastVersion` starts at 0 so the SSE `hello` on connect triggers one
+  // reconciling fetch on mount — self-correcting even if a seed was already stale. A
+  // failed fetch keeps the last value; the next change event retries.
   const [unread, setUnread] = useState(unreadCount ?? 0);
+  const [addons, setAddons] = useState<AddonNavItem[]>(addonNav ?? []);
   const lastVersion = useRef(0);
   useEffect(() => {
     const unsub = subscribeToBoard((v) => {
@@ -50,6 +80,11 @@ export function Sidebar({ unreadCount }: { unreadCount?: number }) {
       lastVersion.current = v;
       fetchUnreadCount()
         .then((r) => setUnread(r.unread))
+        .catch(() => {});
+      // fetchEnabledAddons never throws (it resolves to [] on failure), so a hiccup
+      // simply leaves the last-known group in place until the next change event.
+      fetchEnabledAddons()
+        .then(setAddons)
         .catch(() => {});
     });
     return unsub;
@@ -82,6 +117,15 @@ export function Sidebar({ unreadCount }: { unreadCount?: number }) {
     { href: "/security", label: "Security", icon: <IconShield /> },
     { href: "/backups", label: "Backups", icon: <IconArchive /> },
   ];
+
+  // The third group — the ENABLED add-ons' flattened nav items, resolving each
+  // manifest icon key to its glyph. Empty when no add-on is enabled (the whole group,
+  // divider included, renders nothing in that case — see below).
+  const addonItems: Item[] = addons.map((a) => ({
+    href: a.href,
+    label: a.label,
+    icon: addonIcon(a.icon),
+  }));
 
   return (
     <aside className="hidden md:flex w-[240px] shrink-0 flex-col bg-ink-50 text-ink-700">
@@ -143,6 +187,32 @@ export function Sidebar({ unreadCount }: { unreadCount?: number }) {
           <NavItem key={it.label} item={it} active={path.startsWith(it.href)} />
         ))}
       </nav>
+
+      {/* The third group — Add-ons. The caption is ALWAYS shown and links to the /addons
+          catalog (where add-ons are turned on/off) — so a fresh board with nothing enabled
+          can still DISCOVER and enable its first add-on (the group would otherwise be a
+          chicken-and-egg: hidden until something is on, but you turn things on from here).
+          The enabled add-ons' nav items render beneath it, only when at least one is on.
+          Same divider+caption idiom as "Review". */}
+      <div className="px-3 mt-4">
+        <div className="border-t border-ink-100" />
+        <Link
+          href="/addons"
+          className={`flex items-center gap-1 px-2 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wider transition ${
+            path.startsWith("/addons") ? "text-ink-700" : "text-ink-400 hover:text-ink-700"
+          }`}
+          title="Manage add-ons"
+        >
+          Add-ons
+        </Link>
+      </div>
+      {addonItems.length > 0 && (
+        <nav className="px-3 space-y-0.5">
+          {addonItems.map((it) => (
+            <NavItem key={it.label} item={it} active={path.startsWith(it.href)} />
+          ))}
+        </nav>
+      )}
     </aside>
   );
 }

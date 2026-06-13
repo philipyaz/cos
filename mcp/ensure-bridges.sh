@@ -1,7 +1,7 @@
 #!/bin/sh
 # Ensure the MCP HTTP bridges (board :8001, openwhispr :8002, calendar :8003,
-# guard :8004, vault :8005, whatsapp :8006) + the uv sidecars (search :8008, guardsvc :8009) +
-# the WhatsApp Go bridge sidecar (:8010) are loaded + running.
+# guard :8004, vault :8005, whatsapp :8006, nutrition :8007) + the uv sidecars (search :8008,
+# guardsvc :8009) + the WhatsApp Go bridge sidecar (:8010) are loaded + running.
 #
 # Called from board/package.json `dev`/`start` so that whenever the app comes up,
 # the bridges are guaranteed up too. One-way on purpose: this NEVER stops them —
@@ -60,6 +60,7 @@ guard ${GUARD_BRIDGE_PORT:-8004}
 vault ${VAULT_BRIDGE_PORT:-8005}
 vaultjobs -
 whatsapp ${WHATSAPP_MCP_BRIDGE_PORT:-8006}
+nutrition ${NUTRITION_BRIDGE_PORT:-8007}
 search ${SEARCH_SIDECAR_PORT:-8008}
 guardsvc ${GUARD_SIDECAR_PORT:-8009}
 whatsappbridge ${WHATSAPP_GO_PORT:-8010}
@@ -80,7 +81,7 @@ echo "$SERVICES" | while read -r name port; do
   # Optional add-ons: if not installed on this machine (no plist), skip the probe silently —
   # don't WARN about a server the user never set up. (Core servers still warn if absent.)
   case "$name" in
-    openwhispr|whatsapp|whatsappbridge|vaultjobs)
+    openwhispr|whatsapp|whatsappbridge|vaultjobs|nutrition)
       [ -f "$LA/com.chiefofstaff.mcp-$name.plist" ] || continue ;;
   esac
   if [ "$name" = search ] || [ "$name" = guardsvc ]; then
