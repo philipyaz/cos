@@ -1,40 +1,31 @@
 #!/usr/bin/env node
 // MCP server (registry name "vault") for the Cos DOMAIN-SPLIT KNOWLEDGE VAULT.
 //
-// UNLIKE the sibling stdio servers (board / calendar / guard), which are thin `fetch`
-// wrappers over an HTTP route and make NO LLM calls, this server EMBEDS the Claude Agent
-// SDK (`@anthropic-ai/claude-agent-sdk`). Each tool call spawns a HEADLESS, scoped Claude
-// Code session (`query({prompt, options})`) whose cwd is the vault root and whose only
-// reach is the vault filesystem + the two `second-brain-*` skills. The session synthesizes
-// the wiki (ingest) or reads it to answer a question (query). It is KNOWLEDGE-ONLY: it has
-// NO board / calendar / guard tools and MUST NOT create or move board cases — any board case
-// id it is handed is recorded by reference (a read-only `cases:` / **Board:** note) only.
+// This is the THIN MCP layer. The agent-run path (the embedded Claude Agent SDK session + the
+// nesting/scoping safeguards + the prompts) lives in agent.mjs; the durable async job state lives in
+// jobs.mjs. This file just maps MCP tool calls onto them:
 //
-// NESTING SAFEGUARDS (this is the whole reason `baseOptions` is so explicit). This MCP is
-// itself bridged at vault:8005 inside the repo's `.mcp.json`. If the inner session re-loaded
-// that config it would re-mount THIS server and could recurse into `ingest`/`query` forever,
-// fanning out claude subprocesses. We prevent that four ways, all set deliberately:
-//   • mcpServers:{} + strictMcpConfig:true  → the inner agent loads NO MCP servers and is
-//       forbidden from reading any .mcp.json (so it never re-mounts vault:8005 / recurses).
-//   • disallowedTools lists mcp__vault__ingest / mcp__vault__query  → belt-and-braces: even
-//       if a server somehow mounted, the two re-entrant tools are hard-denied.
-//   • settingSources:["project"]  → set EXPLICITLY (the SDK default is version-ambiguous).
-//       The inner session loads ONLY the vault-local CLAUDE.md + skills under cwd's .claude/,
-//       NOT the repo-root config (which carries the full board/guard MCP wiring).
-//   • cwd = COS_VAULT_DIR  → the scoped vault, NOT the launchd repo-root WorkingDirectory, so
-//       "project" resolves to the vault, and Read/Write/Glob/Grep are anchored there.
-// bypassPermissions + allowDangerouslySkipPermissions make the session fully non-interactive
-// behind the MCP (no human is on the other end of a permission prompt).
+//   • query        — SYNCHRONOUS. Runs a read-only Haiku session (agent.mjs runQuerySession) and
+//                     returns the answer directly. Fast enough to return inside any client's cap.
+//   • ingest       — ASYNCHRONOUS (submit-then-poll). Validates the file allowlist, ENQUEUES a job
+//                     (jobs.mjs, content-hash dedup so identical re-submits collapse to one job), and
+//                     returns the job_id IMMEDIATELY in an ordinary CallToolResult. A separate
+//                     launchd-supervised jobs-runner (jobs-runner.mjs) claims the job and runs the
+//                     Sonnet synthesis DETACHED, so a multi-minute ingest survives the client's tool
+//                     -call timeout (notably Cowork's unconfigurable ~4-min cap).
+//   • ingest_status / ingest_cancel — poll a job to a terminal state / cooperatively cancel it.
 //
-// AUTH: the embedded SDK calls the Anthropic API, so ANTHROPIC_API_KEY MUST be present in
-// this process's environment (inherited from the launchd plist / supergateway shell). Without
-// it the spawned session fails and the tool returns a clean err() (never an unhandled crash).
+// WHY a job id in a NORMAL result and not the MCP Tasks extension: today's clients negotiate
+// protocolVersion 2025-11-25 and do not advertise io.modelcontextprotocol/tasks, and the Tasks spec
+// (§4.3) FORBIDS returning a CreateTaskResult to a client that didn't advertise it. A job-id-in-
+// CallToolResult is ordinary application data — spec-compatible — and the field names mirror the Tasks
+// shape so the future swap (when a client advertises the extension — see tasksCapable()) is a one-file
+// wire-adapter change, not a rewrite.
 //
-// COST / LATENCY: each tool call is a full agent session — it takes SECONDS TO MINUTES and
-// consumes tokens (single model COS_VAULT_MODEL=claude-sonnet-4-6). A tiny in-process semaphore caps how many
-// sessions run at once so concurrent tool calls don't fan out into N claude subprocesses.
-// Every failure mode — thrown error, abort/timeout, SDK spawn failure — is caught and turned
-// into an err() result, so a bad input can never crash-loop the KeepAlive'd process.
+// KNOWLEDGE-ONLY: no board/calendar/guard tools; a board case id handed to ingest is recorded by
+// reference only. AUTH: the embedded SDK needs ANTHROPIC_API_KEY in the environment (the RUNNER's
+// environment for ingest; this process's for query). Every failure mode is caught and turned into a
+// clean err()/failed-job, so a bad input can never crash-loop the KeepAlive'd process.
 //
 // Runs over stdio; supergateway fronts it for the HTTP bridge on 127.0.0.1:8005/mcp.
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -43,112 +34,109 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-// Shared first-party MCP helpers (result shapers, arg trimmer, transport boot) — imported by
-// RELATIVE path so launchd's direct `node .../server.mjs` resolves it with zero dependence on a
-// workspace install. The Agent SDK is NOT imported from mcp-kit (the kit imports nothing from
-// any SDK); we import `query` straight from the Agent SDK package here.
 import { err, text, str, start } from "../../packages/mcp-kit/index.mjs";
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import path from "node:path";
 import fs from "node:fs";
+import {
+  COS_VAULT_DIR,
+  COS_VAULT_QUERY_MODEL,
+  COS_VAULT_INGEST_MODEL,
+  validateFiles,
+  runQuerySession,
+} from "./agent.mjs";
+import { makeJobStore, resolveJobsFile, TERMINAL_STATUSES } from "./jobs.mjs";
 
-// ── Config (read once at boot) ─────────────────────────────────────────────────
-// COS_VAULT_DIR is REQUIRED — the absolute vault root. If it is missing, the tools all
-// return a clear err() (we do NOT throw at boot, so the process still starts and KeepAlive
-// stays calm; the operator sees the error on the first tool call).
-const COS_VAULT_DIR = process.env.COS_VAULT_DIR || "";
-const COS_VAULT_MODEL = process.env.COS_VAULT_MODEL || "claude-sonnet-4-6";
-const COS_VAULT_MAX_TURNS = Number(process.env.COS_VAULT_MAX_TURNS) || 30;
-const COS_VAULT_TIMEOUT_MS = Number(process.env.COS_VAULT_TIMEOUT_MS) || 180000;
-// Optional colon-separated allowlist of dirs OUTSIDE the vault from which file attachments
-// may be read. An attachment path is accepted only if it lives inside the vault OR inside one
-// of these dirs — the arbitrary-file-read guard (see validateFiles).
-const COS_VAULT_ATTACH_DIRS = (process.env.COS_VAULT_ATTACH_DIRS || "")
-  .split(":")
-  .map((d) => d.trim())
-  .filter(Boolean)
-  .map((d) => path.resolve(d));
+// ── Async surface tuning ─────────────────────────────────────────────────────────
+// Suggested poll cadence + the job retrievability window, surfaced honestly in structuredContent so
+// the model polls on a sane interval and knows how long a result stays fetchable.
+const POLL_INTERVAL_MS = Number(process.env.COS_VAULT_POLL_INTERVAL_MS) || 8000;
+const INGEST_TTL_MS = Number(process.env.COS_VAULT_JOBS_TTL_MS) || 3_600_000; // 60 min (Tasks §11.2 default)
 
-// How many embedded agent sessions may run at once (each is a claude subprocess). Concurrent
-// tool calls serialize through this semaphore so we never fan out into N subprocesses.
-const COS_VAULT_CONCURRENCY = Number(process.env.COS_VAULT_CONCURRENCY) || 2;
+const jobs = makeJobStore(resolveJobsFile());
 
-// ── Tiny in-process semaphore ──────────────────────────────────────────────────
-// FIFO permit pool of size COS_VAULT_CONCURRENCY. acquire() resolves when a permit is free;
-// release() hands the permit to the next waiter (or returns it to the pool).
-function makeSemaphore(limit) {
-  let active = 0;
-  const waiters = [];
-  const release = () => {
-    active--;
-    const next = waiters.shift();
-    if (next) {
-      active++;
-      next();
-    }
-  };
-  const acquire = () =>
-    new Promise((resolve) => {
-      if (active < limit) {
-        active++;
-        resolve();
-      } else {
-        waiters.push(resolve);
-      }
-    });
-  return { acquire, release };
-}
-const sessions = makeSemaphore(COS_VAULT_CONCURRENCY);
+// A CallToolResult carrying both a human line and structured data (the interim form of the Tasks
+// CreateTaskResult / tasks-get payload). structuredContent gives the model the job_id + cadence + the
+// terminal result/error without parsing prose.
+const textSC = (line, structuredContent) => ({
+  content: [{ type: "text", text: line }],
+  structuredContent,
+});
 
 // ── Tool definitions ───────────────────────────────────────────────────────────
-
-const DOMAIN_KNOWLEDGE_NOTE =
-  "KNOWLEDGE ONLY — never writes the board. Each call runs a headless Claude Code session " +
-  "scoped to the vault; it takes seconds to minutes.";
+const KNOWLEDGE_NOTE =
+  "KNOWLEDGE ONLY — never writes the board; a board case id is recorded by reference only. Each call " +
+  "runs a headless Claude Code session scoped to the vault.";
 
 const INGEST_TOOL = {
   name: "ingest",
   description:
-    "Ingest knowledge into the domain-split vault wiki (work/life). " +
-    DOMAIN_KNOWLEDGE_NOTE +
-    " Provide inline `content` (a thought / email / transcript / recap) and/or `files` " +
-    "(absolute on-device paths read as sources). `domain` ('work'|'life'|'auto', default " +
-    "'auto') hints classification. `cases` are board case ids recorded BY REFERENCE only — " +
-    "the vault never creates or moves a case. The session classifies each input's domain, " +
-    "re-synthesizes the affected source/entity/concept pages in that wiki, and updates the " +
-    "domain index.md / log.md. Returns a JSON ingest summary.",
+    "Submit material for ingestion into the domain-split vault wiki (work/life). " +
+    KNOWLEDGE_NOTE +
+    " ASYNCHRONOUS: returns IMMEDIATELY with a job_id in structuredContent; ingestion runs in the " +
+    "background and takes seconds to minutes. A returned job_id does NOT mean it finished — you MUST " +
+    "poll ingest_status(job_id) on the cadence in poll_interval_ms until status is terminal " +
+    "(completed/failed/cancelled/interrupted) before reporting the result. Do NOT call ingest again " +
+    "for the same material while a job is in flight — an identical re-submit returns the SAME job_id " +
+    "(dedup), so re-submitting wastes a turn; poll instead. Provide inline `content` and/or `files` " +
+    "(absolute on-device paths, read as sources). `domain` ('work'|'life'|'auto', default 'auto'). " +
+    "`cases` are board case ids recorded BY REFERENCE only.",
   inputSchema: {
     type: "object",
     properties: {
       content: {
         type: "string",
         description:
-          "Inline material to ingest — a thought, email body, transcript, or recap. May be " +
-          "an empty string if `files` are supplied instead.",
+          "Inline material to ingest — a thought, email body, transcript, or recap. May be an empty " +
+          "string if `files` are supplied instead.",
       },
       files: {
         type: "array",
         items: { type: "string" },
         description:
-          "Absolute on-device paths to read as SOURCES. Each must be inside the vault root or " +
-          "inside an allowed COS_VAULT_ATTACH_DIRS dir; any path outside the allowlist rejects " +
-          "the whole call. PDFs/images are read natively.",
+          "Absolute on-device paths to read as SOURCES. Each must be inside the vault root or an " +
+          "allowed COS_VAULT_ATTACH_DIRS dir; any path outside the allowlist rejects the whole call.",
       },
       domain: {
         type: "string",
         enum: ["work", "life", "auto"],
-        description:
-          "Domain hint. 'auto' (default) lets the session classify each input itself.",
+        description: "Domain hint. 'auto' (default) lets the session classify each input itself.",
       },
       cases: {
         type: "array",
         items: { type: "string" },
         description:
-          "OPTIONAL board case ids (e.g. 'CASE-1') to record BY REFERENCE only. The vault " +
-          "NEVER writes the board; these are stored as a read-only `cases:` / **Board:** note.",
+          "OPTIONAL board case ids (e.g. 'CASE-1') recorded BY REFERENCE only — the vault never writes the board.",
       },
     },
     required: ["content"],
+  },
+};
+
+const INGEST_STATUS_TOOL = {
+  name: "ingest_status",
+  description:
+    "Check an ingestion job started by `ingest`. Call after ingest and re-call every poll_interval_ms " +
+    "until status is terminal (completed/failed/cancelled/interrupted). While status is working or " +
+    "running the job is still in progress — wait and poll again; do NOT start a new ingest. On " +
+    "completed, structuredContent.result holds the ingest summary; on failed/interrupted, " +
+    "structuredContent.error holds the reason. An unknown or expired job_id is an error (it aged out " +
+    "of its retention window — re-submit the material).",
+  inputSchema: {
+    type: "object",
+    properties: { job_id: { type: "string", description: "The job_id returned by ingest." } },
+    required: ["job_id"],
+  },
+};
+
+const INGEST_CANCEL_TOOL = {
+  name: "ingest_cancel",
+  description:
+    "Cancel an in-flight ingestion job by job_id. Cooperative: the job stops at its next checkpoint " +
+    "and already-written pages STAY (no rollback). Acking an already-finished job is harmless. Use " +
+    "when the user aborts or the ingest is no longer needed.",
+  inputSchema: {
+    type: "object",
+    properties: { job_id: { type: "string", description: "The job_id to cancel." } },
+    required: ["job_id"],
   },
 };
 
@@ -156,247 +144,92 @@ const QUERY_TOOL = {
   name: "query",
   description:
     "Answer a question against the domain-split vault wiki. " +
-    DOMAIN_KNOWLEDGE_NOTE +
-    " The session reads the matching domain index.md(s), follows [[wikilinks]], and answers " +
-    "with [[wikilink]] citations. KNOWLEDGE ONLY — no board access; purely-open-work questions " +
-    "(open to-dos / what's-in-flight) are declined with a board pointer. `domain` " +
-    "('work'|'life'|'both'|'auto', default 'auto') scopes which wiki(s) are read. Read-only.",
+    KNOWLEDGE_NOTE +
+    " Read-only and SYNCHRONOUS — returns the answer directly (do NOT poll). The session reads the " +
+    "matching domain index.md(s), follows [[wikilinks]], and answers with [[wikilink]] citations. " +
+    "Purely-open-work questions (open to-dos / what's-in-flight) are declined with a board pointer. " +
+    "`domain` ('work'|'life'|'both'|'auto', default 'auto') scopes which wiki(s) are read.",
   inputSchema: {
     type: "object",
     properties: {
-      question: {
-        type: "string",
-        description: "The question to answer against the vault wiki.",
-      },
+      question: { type: "string", description: "The question to answer against the vault wiki." },
       domain: {
         type: "string",
         enum: ["work", "life", "both", "auto"],
-        description:
-          "Which wiki(s) to read. 'auto' (default) lets the session pick; 'both' reads work + life.",
+        description: "Which wiki(s) to read. 'auto' (default) lets the session pick; 'both' reads work + life.",
       },
     },
     required: ["question"],
   },
 };
 
-const TOOLS = [INGEST_TOOL, QUERY_TOOL];
+const TOOLS = [INGEST_TOOL, INGEST_STATUS_TOOL, INGEST_CANCEL_TOOL, QUERY_TOOL];
 
-// ── Agent-SDK options ───────────────────────────────────────────────────────────
-// baseOptions returns the MANDATORY scoping + nesting safeguards shared by both tools.
-// `extra` layers per-tool bits (skills, read-only disallow list, additionalDirectories).
-// A FRESH AbortController is created per call so run()'s timeout aborts only that session.
-function baseOptions(extra = {}) {
-  return {
-    // cwd = the scoped vault, NOT the launchd repo-root WorkingDirectory — anchors the
-    // file tools and makes settingSources:"project" resolve to the vault's .claude/.
-    cwd: COS_VAULT_DIR,
-    // EXPLICIT (SDK default is version-ambiguous): load ONLY the vault-local CLAUDE.md +
-    // skills, NOT the repo-root config with the full board/guard MCP wiring.
-    settingSources: ["project"],
-    // Use the standard Claude Code system prompt preset.
-    systemPrompt: { type: "preset", preset: "claude_code" },
-    // The session needs Skill (to load second-brain-*) plus the file primitives.
-    allowedTools: ["Skill", "Read", "Write", "Edit", "Glob", "Grep"],
-    // Fully non-interactive behind the MCP — no human to answer a permission prompt.
-    permissionMode: "bypassPermissions",
-    allowDangerouslySkipPermissions: true,
-    model: COS_VAULT_MODEL,
-    maxTurns: COS_VAULT_MAX_TURNS,
-    // mcpServers:{} + strictMcpConfig:true → the inner agent mounts NO MCP servers and is
-    // forbidden from reading any .mcp.json, so it can never re-mount vault:8005 and recurse.
-    mcpServers: {},
-    strictMcpConfig: true,
-    // Belt-and-braces: even if a server were somehow mounted, the two re-entrant vault tools
-    // are hard-denied; web tools are off (KNOWLEDGE-ONLY, vault-local).
-    disallowedTools: ["WebFetch", "WebSearch", "mcp__vault__ingest", "mcp__vault__query"],
-    // NB: the AbortController is created + wired SOLELY by run() (it is the single owner),
-    // which injects it into options before calling query() — see run().
-    ...extra,
-  };
-}
-
-// ── Path validation for ingest.files (arbitrary-file-read guard) ─────────────────
-// Each path must be a non-empty ABSOLUTE path; resolve it; ACCEPT only if it is inside
-// COS_VAULT_DIR or inside one of COS_VAULT_ATTACH_DIRS. Returns either { error } (reject the
-// WHOLE call, naming the offending path, BEFORE invoking the agent) or { accepted, extraDirs }
-// where extraDirs are the parent dirs of accepted OUT-OF-VAULT paths (for additionalDirectories).
-function isInside(parent, child) {
-  const rel = path.relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
-}
-
-function validateFiles(files) {
-  const accepted = [];
-  const extraDirs = new Set();
-  const vaultRoot = path.resolve(COS_VAULT_DIR);
-  for (const raw of files) {
-    if (typeof raw !== "string" || raw.trim() === "") {
-      return { error: `every entry in 'files' must be a non-empty absolute path (got ${JSON.stringify(raw)}).` };
-    }
-    const p = raw.trim();
-    if (!path.isAbsolute(p)) {
-      return { error: `file path must be absolute, not relative: ${p}` };
-    }
-    const resolved = path.resolve(p);
-    const inVault = isInside(vaultRoot, resolved);
-    const allowedDir = COS_VAULT_ATTACH_DIRS.find((d) => isInside(d, resolved));
-    if (!inVault && !allowedDir) {
-      return {
-        error:
-          `refusing to read file outside the vault and the allowed attachment dirs: ${resolved}. ` +
-          (COS_VAULT_ATTACH_DIRS.length
-            ? `Allowed dirs: ${COS_VAULT_ATTACH_DIRS.join(", ")}.`
-            : `Set COS_VAULT_ATTACH_DIRS to permit out-of-vault sources.`),
-      };
-    }
-    accepted.push(resolved);
-    // Only out-of-vault (but allowlisted) paths need an additionalDirectories grant; in-vault
-    // paths are already reachable via cwd.
-    if (!inVault) extraDirs.add(path.dirname(resolved));
-  }
-  return { accepted, extraDirs: [...extraDirs] };
-}
-
-// ── Prompt templates ─────────────────────────────────────────────────────────────
-
-function buildIngestPrompt({ content, accepted, cases, domain }) {
-  const filesBlock = accepted.length ? accepted.map((f) => `- ${f}`).join("\n") : "(none)";
-  const casesBlock = cases.length ? cases.join(", ") : "(none)";
-  return (
-    "You are the vault knowledge librarian. Load and follow the `second-brain-ingest` skill " +
-    `exactly. Vault root: ${COS_VAULT_DIR}. The wiki is DOMAIN-SPLIT: work -> ${COS_VAULT_DIR}/work/wiki, ` +
-    `life -> ${COS_VAULT_DIR}/life/wiki, shared entities -> ${COS_VAULT_DIR}/shared/wiki. You are ` +
-    "KNOWLEDGE-ONLY: you have NO board/calendar/guard tools and MUST NOT create or move board " +
-    "cases. Record any board case id you are given only as a read-only `cases:`/**Board:** reference.\n\n" +
-    "Process the input(s). For each: classify domain (work|life), synthesize the affected " +
-    "source/entity/concept pages in that wiki (rewrite, don't append; a substantive source " +
-    "touches 10-15 pages), update that domain's index.md and log.md, resolve entities to canonical " +
-    "[[wikilinks]].\n\n" +
-    "If files are attached, COPY each into raw/assets/ and link it from the source page so it is " +
-    "preserved and searchable (an associated artifact).\n\n" +
-    "Maintain the domain's ULTRA-STRONG index.md — an overarching-theme map grouping concepts+entities, " +
-    "not a flat list.\n\n" +
-    "INLINE MATERIAL:\n<<<\n" +
-    (content || "(none)") +
-    "\n>>>\n\n" +
-    "ATTACHED FILES (read each as a SOURCE; PDFs/images via native Read, describe content in text):\n" +
-    filesBlock +
-    "\n\n" +
-    "ASSOCIATED BOARD CASES (record by reference only, do NOT write the board):\n" +
-    casesBlock +
-    "\n\n" +
-    `DOMAIN HINT: ${domain && domain !== "auto" ? domain : "auto — classify yourself"}\n\n` +
-    "When done, return ONLY a JSON summary: { perDomain, sourcesCreated, pagesResynthesized, " +
-    "contradictions, boardRefsRecorded }. Do not ask interactive questions; make best-judgment " +
-    "calls and note assumptions."
-  );
-}
-
-function buildQueryPrompt({ question, domain }) {
-  const hint =
-    domain && domain !== "auto"
-      ? `domain hint: ${domain}`
-      : "domain hint: auto — determine the domain yourself";
-  return (
-    "You are the vault knowledge librarian. Load and follow the `second-brain-query` skill " +
-    `exactly. Vault root: ${COS_VAULT_DIR}; wiki is DOMAIN-SPLIT (work/life/shared). KNOWLEDGE-ONLY: ` +
-    "NO board access; if the question is purely about open work/to-dos, say so and stop (the " +
-    `board owns that surface). Determine the question's domain (${hint}), read the matching ` +
-    "index.md(s), follow [[wikilinks]], answer with [[wikilink]] citations. Do NOT write any " +
-    "files.\n\n" +
-    "QUESTION:\n<<<\n" +
-    question +
-    "\n>>>\n\n" +
-    "Return the answer text plus a list of pages cited. Also return any ASSOCIATED ARTIFACTS " +
-    "(files in raw/assets/ linked from the pages you cite) relevant to the answer."
-  );
-}
-
-// ── Run an embedded session ─────────────────────────────────────────────────────
-// SINGLE OWNER of the per-call AbortController: creates it, wires the timeout to its abort(),
-// injects it into the options object, then streams the query, captures the single
-// type==="result" message, and returns its text. A non-success / errored result throws; the
-// caller (handleIngest/handleQuery) turns any throw into a clean err().
-async function run(prompt, options) {
-  const controller = new AbortController();
-  options.abortController = controller;
-
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, COS_VAULT_TIMEOUT_MS);
-
-  try {
-    let finalText = null;
-    for await (const message of query({ prompt, options })) {
-      if (message.type === "result") {
-        if (message.subtype !== "success" || message.is_error) {
-          // Surface the REAL failure detail. Different SDK/API errors populate
-          // different fields — a model-not-found, for instance, comes back as
-          // subtype:"success" + is_error:true with the message in `result`, while a
-          // max-turns/exec error uses `subtype`/`errors`. Check them all, and log the
-          // raw result message to stderr (→ vault.err.log) so a bad run is diagnosable
-          // without re-probing the API by hand.
-          const detail =
-            [
-              message.api_error_status ? `http=${message.api_error_status}` : null,
-              Array.isArray(message.errors) && message.errors.length
-                ? message.errors.join("; ")
-                : null,
-              typeof message.result === "string" && message.result.trim()
-                ? message.result.trim()
-                : null,
-              message.subtype && message.subtype !== "success"
-                ? `subtype=${message.subtype}`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" | ") || "unknown agent error (no detail in result message)";
-          try {
-            console.error(
-              `[vault] agent error result: ${JSON.stringify(message).slice(0, 2000)}`
-            );
-          } catch {}
-          throw new Error(`is_error=${!!message.is_error}: ${detail}`);
-        }
-        finalText = message.result;
-      }
-    }
-    if (finalText === null) throw new Error("agent produced no result message");
-    return finalText;
-  } catch (e) {
-    if (timedOut || e?.name === "AbortError") {
-      throw new Error(`vault agent timed out after ${COS_VAULT_TIMEOUT_MS}ms`);
-    }
-    // Some failures (auth, network, a bad model id rejected before streaming) are THROWN
-    // by query() rather than returned as a result message; carry the real message + cause
-    // through, and log it so the err.log shows the actual API error.
-    const cause = e?.cause ? ` (cause: ${e.cause?.message ?? String(e.cause)})` : "";
-    const msg = `${e?.message ?? String(e)}${cause}`;
-    console.error(`[vault] agent session failed: ${msg}`);
-    throw new Error(`vault agent session failed: ${msg}`);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// ── Tool handlers ────────────────────────────────────────────────────────────────
-
+// ── Guards + wire seam ───────────────────────────────────────────────────────────
 function requireVaultDir() {
   if (!COS_VAULT_DIR) {
-    return err(
-      "COS_VAULT_DIR is not set — the vault MCP needs the absolute vault root in its environment."
-    );
+    return err("COS_VAULT_DIR is not set — the vault MCP needs the absolute vault root in its environment.");
   }
-  // A misconfigured root is better caught here than as a confusing agent failure.
   if (!fs.existsSync(COS_VAULT_DIR)) {
     return err(`COS_VAULT_DIR does not exist: ${COS_VAULT_DIR}`);
   }
   return null;
 }
 
-async function handleIngest(args) {
+// The future Tasks-extension swap point. On a client that advertises io.modelcontextprotocol/tasks in
+// this request's _meta we would emit a real CreateTaskResult; no 2025-11-25 client does, so this is
+// always false today and ingest always takes the interim job-id path. Wiring it now makes the later
+// swap a branch, not a rewrite.
+function tasksCapable(request) {
+  const caps = request?.params?._meta?.["io.modelcontextprotocol/clientCapabilities"];
+  return !!caps?.extensions?.["io.modelcontextprotocol/tasks"];
+}
+
+// shapeJobResult — the SOLE serialization seam for the async surface. Today it emits the interim
+// job-id CallToolResult; the Tasks-extension swap replaces ONLY this function (+ tool registration).
+function shapeJobResult(job, { created } = {}) {
+  const sc = {
+    job_id: job.id,
+    status: job.status,
+    created_at: job.firstSeen,
+    last_updated_at: job.lastSeen,
+    poll_interval_ms: POLL_INTERVAL_MS,
+    ttl_ms: INGEST_TTL_MS,
+    submission_count: job.submissionCount,
+    dedup: created === false,
+  };
+  const line =
+    created === false
+      ? `Ingest job ${job.id} is already ${job.status} (submission #${job.submissionCount}); poll ingest_status — do NOT re-submit.`
+      : `Ingest job ${job.id} submitted (status: ${job.status}). Poll ingest_status(${job.id}) every ~${Math.round(POLL_INTERVAL_MS / 1000)}s until terminal before reporting the result.`;
+  return textSC(line, sc);
+}
+
+function shapeStatusResult(job) {
+  const sc = {
+    job_id: job.id,
+    status: job.status,
+    status_message: job.status_message ?? null,
+    created_at: job.firstSeen,
+    last_updated_at: job.lastSeen,
+    started_at: job.startedAt ?? null,
+    finished_at: job.finishedAt ?? null,
+    poll_interval_ms: POLL_INTERVAL_MS,
+    ttl_ms: INGEST_TTL_MS,
+  };
+  if (job.status === "completed") sc.result = job.result ?? null;
+  if (job.status === "failed" || job.status === "interrupted") {
+    sc.error = job.error ?? { message: job.interruptedReason || "interrupted", retryable: true };
+  }
+  const live = !TERMINAL_STATUSES.has(job.status);
+  const line = live
+    ? `Ingest job ${job.id}: ${job.status}${job.status_message ? " — " + job.status_message : ""}. Still running — poll again in ~${Math.round(POLL_INTERVAL_MS / 1000)}s.`
+    : `Ingest job ${job.id}: ${job.status} (terminal).`;
+  return textSC(line, sc);
+}
+
+// ── Tool handlers ────────────────────────────────────────────────────────────────
+async function handleIngest(args, { wantsTasks } = {}) {
   const guard = requireVaultDir();
   if (guard) return guard;
 
@@ -405,90 +238,88 @@ async function handleIngest(args) {
   const cases = Array.isArray(args.cases) ? args.cases.filter((c) => str(c)) : [];
   const domain = ["work", "life", "auto"].includes(args.domain) ? args.domain : "auto";
 
-  // Reject if BOTH content is empty AND no files were supplied.
   if (content.trim() === "" && files.length === 0) {
     return err("provide content or files — both are empty.");
   }
 
-  // Arbitrary-file-read guard runs BEFORE the agent is ever invoked.
-  let accepted = [];
-  let extraDirs = [];
+  // Arbitrary-file-read guard runs BEFORE the job is ever enqueued (fail fast to the caller). The
+  // runner re-validates from the stored files list before it runs the agent.
   if (files.length) {
     const v = validateFiles(files);
     if (v.error) return err(v.error);
-    accepted = v.accepted;
-    extraDirs = v.extraDirs;
   }
 
-  const prompt = buildIngestPrompt({ content, accepted, cases, domain });
-  const options = baseOptions({
-    skills: ["second-brain-ingest"],
-    // Grant the validated parent dirs of out-of-vault attachments so Read can reach them.
-    additionalDirectories: extraDirs,
-  });
+  // wantsTasks is the future Tasks-extension seam — always false on 2025-11-25 clients, so we always
+  // take the interim job-id path below. (When true, a future build returns a real CreateTaskResult.)
+  void wantsTasks;
 
-  await sessions.acquire();
   try {
-    const result = await run(prompt, options);
-    return text(result);
+    const { job, created } = await jobs.enqueue({ content, files, domain, cases });
+    return shapeJobResult(job, { created });
   } catch (e) {
-    return err(e?.message ?? String(e));
-  } finally {
-    sessions.release();
+    return err(`vault ingest enqueue failed: ${e?.message ?? String(e)}`);
   }
 }
 
-async function handleQuery(args) {
+async function handleIngestStatus(args) {
   const guard = requireVaultDir();
   if (guard) return guard;
+  const id = str(args.job_id);
+  if (!id) return err("'job_id' is required.");
+  const job = await jobs.getJob(id);
+  if (!job) return err(`unknown or expired ingest job: ${id}`);
+  return shapeStatusResult(job);
+}
 
+async function handleIngestCancel(args) {
+  const guard = requireVaultDir();
+  if (guard) return guard;
+  const id = str(args.job_id);
+  if (!id) return err("'job_id' is required.");
+  const job = await jobs.requestCancel(id);
+  if (!job) return err(`unknown or expired ingest job: ${id}`);
+  return textSC(
+    `Cancellation requested for ingest job ${id} (current status: ${job.status}). It stops at its next checkpoint.`,
+    { job_id: id, status: job.status, cancel_requested: !!job.cancelRequested },
+  );
+}
+
+// query is SYNCHRONOUS — runQuerySession wraps the semaphore + the read-only Haiku session. The MCP
+// request's cancellation signal aborts it if the client gives up.
+async function handleQuery(args, clientSignal) {
+  const guard = requireVaultDir();
+  if (guard) return guard;
   const question = str(args.question);
   if (!question) return err("'question' is required.");
   const domain = ["work", "life", "both", "auto"].includes(args.domain) ? args.domain : "auto";
-
-  const prompt = buildQueryPrompt({ question, domain });
-  const options = baseOptions({
-    skills: ["second-brain-query"],
-    // Read-only: strip Write/Edit on top of the base allow list.
-    allowedTools: ["Skill", "Read", "Glob", "Grep"],
-    disallowedTools: [
-      "Write",
-      "Edit",
-      "WebFetch",
-      "WebSearch",
-      "mcp__vault__ingest",
-      "mcp__vault__query",
-    ],
-  });
-
-  await sessions.acquire();
   try {
-    const result = await run(prompt, options);
-    return text(result);
+    return text(await runQuerySession({ question, domain, clientSignal }));
   } catch (e) {
     return err(e?.message ?? String(e));
-  } finally {
-    sessions.release();
   }
 }
 
 // ── Server wiring ────────────────────────────────────────────────────────────────
-
-const server = new Server(
-  { name: "vault", version: "1.0.0" },
-  { capabilities: { tools: {} } }
-);
+const server = new Server({ name: "vault", version: "2.0.0" }, { capabilities: { tools: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const args = request.params.arguments ?? {};
+  // extra.signal aborts when the client cancels this tool call (its timeout / notifications/cancelled);
+  // it matters for the synchronous query (ingest returns instantly).
+  const clientSignal = extra?.signal;
+  const wantsTasks = tasksCapable(request); // future Tasks-extension seam — false on today's clients
   try {
     switch (request.params.name) {
       case "ingest":
-        return await handleIngest(args);
+        return await handleIngest(args, { wantsTasks });
+      case "ingest_status":
+        return await handleIngestStatus(args);
+      case "ingest_cancel":
+        return await handleIngestCancel(args);
       case "query":
-        return await handleQuery(args);
+        return await handleQuery(args, clientSignal);
       default:
         return err(`Unknown tool: ${request.params.name}`);
     }
@@ -501,6 +332,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 await start(
   server,
   new StdioServerTransport(),
-  `vault MCP server v1 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; ` +
-    `COS_VAULT_DIR=${COS_VAULT_DIR || "(UNSET — tools will error)"}; model=${COS_VAULT_MODEL})`
+  `vault MCP server v2 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; ` +
+    `COS_VAULT_DIR=${COS_VAULT_DIR || "(UNSET — tools will error)"}; ` +
+    `query=${COS_VAULT_QUERY_MODEL} (sync), ingest=${COS_VAULT_INGEST_MODEL} (async via jobs-runner); ` +
+    `jobs=${jobs.file})`,
 );

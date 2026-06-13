@@ -130,6 +130,8 @@ setup-vault → guard-setup → mcp-bridge-setup → backup-recovery
 
 When it finishes, open the board at your `$BOARD_URL` (`http://localhost:$BOARD_PORT` by default) and start triaging.
 
+> **Skills in Cowork.** Claude **Code** loads the repo's `.claude/skills/` directly. Claude **Cowork Desktop** adds custom skills through its **UI** (it doesn't read the repo filesystem), so `cos-setup` (via `setup-vault`) packages the runtime **`vault-operations`** skill — which drives the vault's async **submit-then-poll** ingest — into a ZIP for you to upload via **Customize → `+` (Skills) → Create skill**. (Even without it, the `ingest`/`ingest_status` tool descriptions carry the same guidance.)
+
 ### Manual quickstart (just the board)
 
 Want to kick the tires on the board alone, without wiring the MCP bridges, vault, or Guard? You can run just the Next.js app:
