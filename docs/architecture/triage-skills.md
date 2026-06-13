@@ -171,7 +171,7 @@ duplicate. Two non-obvious traps the search guards against:
 ### Do-not-undo — the headline guardrail
 
 The board is a **shared surface**: the human edits it by hand in the UI; the agent edits it
-via these skills. The activity log attributes every edit (`human` / `agent` / `system`),
+via these skills. The activity log attributes every edit (`human` / `agent`),
 and that attribution is what licenses a write. The contract — surfaced by `get_case` as a
 "⚠ Manual actions by the user" block (the `manualActions` field over HTTP) — is read
 **before every mutation of an existing case**:

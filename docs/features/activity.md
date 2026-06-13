@@ -27,7 +27,7 @@ sources, flattened into one `FeedEntry[]`:
 
 - **Case rows** — one entry per `case.activity[]` entry, for **every** case including **archived**
   ones (the audit trail shows everything; nothing is filtered by `archivedAt`). These carry the real
-  `actor` (`human` / `agent` / `system`), `verb`, and optional `detail` verbatim.
+  `actor` (`human` / `agent`), `verb`, and optional `detail` verbatim.
 - **Reminder rows** — `db.reminders` has no activity log of its own, so the selector **synthesizes**
   lifecycle rows: always a `reminder_created` at `createdAt`; a `reminder_completed` at
   `completedAt ?? updatedAt` when `status === "done"`; a `reminder_dismissed` at `updatedAt` when
@@ -127,7 +127,7 @@ the app's UTC-anchored day math.
 
 Two pure client filters narrow the feed (ephemeral `useState`, not persisted):
 
-- **Actor** — `All · Human · Agent · System`. A specific actor matches only case rows attributed to
+- **Actor** — `All · Human · Agent`. A specific actor matches only case rows attributed to
   it; synthesized rows (no actor) show only under **All**.
 - **Category** — `All · Created · Completed · Moved · Updated · Linked · Notes · Archived · Flagged`.
   Each chip maps to a set of categories so every category is reachable (**Linked** folds in unlinks,

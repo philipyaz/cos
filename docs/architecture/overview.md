@@ -126,8 +126,7 @@ predictable.
   back door and no divergent logic. (The vault, symmetrically, is **knowledge-only** — its MCP has no
   board tools and must never create or move a card; any case id it's handed is recorded *by reference*
   as a read-only note.)
-- **Actor attribution + append-only activity log.** Every write is stamped `human` / `agent` /
-  `system`. UI writes are `human`; every board-MCP write is `agent` (via an `x-actor: agent` header
+- **Actor attribution + append-only activity log.** Every write is stamped `human` or `agent`. UI writes are `human`; every board-MCP write is `agent` (via an `x-actor: agent` header
   *and* an `actor` field in the body). The activity log is append-only, so you can always filter the
   feed by who did what.
 - **Human-in-the-loop (`propose → approve → commit`).** When a change should have you in the loop, the

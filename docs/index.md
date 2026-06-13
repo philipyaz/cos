@@ -155,7 +155,7 @@ These tenets show up repeatedly in the design and explain most of the non-obviou
 - **Fail-closed security vs. fail-open availability.** A deliberate duality: the guard *fails
   closed* (a down scanner treats content as untrusted), while search *fails open* (a down index
   degrades to keyword results). Safety blocks; convenience degrades.
-- **Human-in-the-loop, via transparency.** Every write is attributed to `human` / `agent` / `system`
+- **Human-in-the-loop, via transparency.** Every write is attributed to `human` / `agent`
   in an append-only activity log, and a human's manual edit is never silently undone — so you can
   always see exactly what the agent did. For changes that warrant sign-off, the board also offers an
   opt-in board approval queue (`propose → approve → commit`); *when* to use it is set by the skills

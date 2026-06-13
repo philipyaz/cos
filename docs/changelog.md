@@ -36,7 +36,7 @@ all to agents over MCP.
 ### Added
 
 - **Board** — a writable kanban store (Next.js + a schema-versioned JSON store) for
-  work + life to-dos, with an append-only `human` / `agent` / `system` activity log.
+  work + life to-dos, with an append-only `human` / `agent` activity log.
 - **Vault** — an interlinked knowledge wiki (the LLM-Wiki pattern) that re-synthesises
   every source it is fed.
 - **Guard** — a fail-closed prompt-injection classifier sidecar (Meta
