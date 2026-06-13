@@ -287,6 +287,32 @@ async function main() {
     });
     check(cancel?.isError !== true, "ingest_cancel acks an in-flight job (cooperative)");
 
+    // ----------------------------------------------------------------------
+    // RESULT-CAP HONESTY: an oversized completed result is truncated AND the
+    // truncation is SURFACED to the caller (structuredContent.result_truncated),
+    // so a clipped receipt is never reported as the whole summary. The runner
+    // isn't running here, so we seed a completed job straight into the shared
+    // store (jobs.mjs has no import side effects), then poll through the server.
+    // ----------------------------------------------------------------------
+    const { makeJobStore } = await import("../mcp/vault-server/jobs.mjs");
+    const seedStore = makeJobStore(path.join(vaultDir, ".cos", "jobs.json"));
+    const seeded = await seedStore.enqueue({ content: "cap-surfacing probe", domain: "work" });
+    await seedStore.setStatus(seeded.job.id, "completed", { result: "R".repeat(20000) });
+    const capStatus = await client.request("tools/call", {
+      name: "ingest_status",
+      arguments: { job_id: seeded.job.id },
+    });
+    const capSC = capStatus?.structuredContent || {};
+    check(capSC.status === "completed", "seeded job reports completed");
+    check(
+      typeof capSC.result === "string" && capSC.result.length === 16000,
+      `an oversized result is capped to 16000 chars (got ${capSC.result?.length})`,
+    );
+    check(
+      capSC.result_truncated === true,
+      "ingest_status SURFACES result_truncated so the caller knows the receipt was clipped",
+    );
+
     // Sanity: the server is still alive (the validation + async paths can't crash-loop it).
     const listAgain = await client.request("tools/list", {});
     check((listAgain?.tools || []).length === 4, "the server is still responsive after the calls");

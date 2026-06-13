@@ -90,13 +90,15 @@ test("setStatus caps oversized result/error/status_message (but leaves a structu
   // capPatch (pure): only OVERSIZED STRING fields are truncated; a structured result object and
   // small fields pass straight through.
   const bigResult = "R".repeat(20000);
-  const bigErr = "E".repeat(9000);
+  const bigErr = "E".repeat(12000);
   const capped = capPatch({ result: bigResult, status_message: "x".repeat(5000), error: { message: bigErr, retryable: true } });
   assert.equal(capped.result.length, 16000, "string result truncated to RESULT_CAP");
   assert.equal(capped.resultTruncated, true, "truncation is flagged for honesty");
-  assert.equal(capped.status_message.length, 2000, "status_message truncated to MESSAGE_CAP");
-  assert.equal(capped.error.message.length, 2000, "error.message truncated to MESSAGE_CAP");
+  assert.equal(capped.status_message.length, 2000, "status_message truncated to STATUS_MESSAGE_CAP");
+  assert.equal(capped.error.message.length, 8000, "error.message gets its own roomier ERROR_CAP (read to debug failures)");
   assert.equal(capped.error.retryable, true, "other error fields preserved");
+  // a short error.message (under ERROR_CAP) is left intact
+  assert.equal(capPatch({ error: { message: "boom" } }).error.message, "boom", "small error.message untouched");
   const structured = capPatch({ result: { sourcesCreated: 3 } });
   assert.deepEqual(structured.result, { sourcesCreated: 3 }, "a structured result object is NOT touched");
   assert.equal(structured.resultTruncated, undefined, "no truncation flag for an untouched result");

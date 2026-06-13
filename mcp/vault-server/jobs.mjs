@@ -37,12 +37,17 @@ export const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "i
 // agent writes; the job record only needs enough to be auditable). Mirrors openwhispr's PREVIEW_LEN.
 const JOBS_CONTENT_CAP = 4000;
 // Symmetric caps on the RESULT side of a record (set by setStatus). newRecord bounds the submitted
-// `content`; without these a single verbose agent result or a giant error string would write
-// unbounded into a record that then persists for the TTL and is re-parsed on every store mutation.
-// STRING fields only — a structured `result` object passes through untouched (the cached-result
-// replay contract returns it verbatim).
+// `content`; without these a single runaway agent result or a giant error string would write unbounded
+// into a record that then persists for the TTL and is re-parsed on every store mutation. STRING fields
+// only — a structured `result` object passes through untouched (the cached-result replay contract
+// returns it verbatim). NOTE `result` is CONSUMED data (the polling agent reads it via ingest_status),
+// not the deliverable (the vault wiki on disk is the source of truth) — so RESULT_CAP is generous
+// (~25x the on-contract JSON summary; it only clips an off-contract runaway), and capPatch flags any
+// clip via `resultTruncated`, which server.mjs SURFACES so the caller is never silently misled.
+// error.message is read verbatim to debug a failed ingest → its own roomier ERROR_CAP.
 const RESULT_CAP = 16000;
-const MESSAGE_CAP = 2000;
+const STATUS_MESSAGE_CAP = 2000;
+const ERROR_CAP = 8000;
 // A claimed `running` job whose owner pid is dead is requeued; after this many requeues it is given
 // up as `interrupted` rather than looping forever on a poison input.
 const MAX_CLAIM_ATTEMPTS = 3;
@@ -104,16 +109,16 @@ export function capPatch(patch) {
     out.result = out.result.slice(0, RESULT_CAP);
     out.resultTruncated = true;
   }
-  if (typeof out.status_message === "string" && out.status_message.length > MESSAGE_CAP) {
-    out.status_message = out.status_message.slice(0, MESSAGE_CAP);
+  if (typeof out.status_message === "string" && out.status_message.length > STATUS_MESSAGE_CAP) {
+    out.status_message = out.status_message.slice(0, STATUS_MESSAGE_CAP);
   }
   if (
     out.error &&
     typeof out.error === "object" &&
     typeof out.error.message === "string" &&
-    out.error.message.length > MESSAGE_CAP
+    out.error.message.length > ERROR_CAP
   ) {
-    out.error = { ...out.error, message: out.error.message.slice(0, MESSAGE_CAP) };
+    out.error = { ...out.error, message: out.error.message.slice(0, ERROR_CAP) };
   }
   return out;
 }

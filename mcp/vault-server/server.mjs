@@ -217,7 +217,12 @@ function shapeStatusResult(job) {
     poll_interval_ms: POLL_INTERVAL_MS,
     ttl_ms: INGEST_TTL_MS,
   };
-  if (job.status === "completed") sc.result = job.result ?? null;
+  if (job.status === "completed") {
+    sc.result = job.result ?? null;
+    // Honesty: if the store clipped an off-contract oversized result (capPatch → resultTruncated),
+    // tell the caller so it never reports a silently-shortened receipt as the whole summary.
+    if (job.resultTruncated) sc.result_truncated = true;
+  }
   if (job.status === "failed" || job.status === "interrupted") {
     sc.error = job.error ?? { message: job.interruptedReason || "interrupted", retryable: true };
   }
