@@ -33,15 +33,19 @@ export interface AddonManifest {
   core: false; // an add-on is never core (the literal false marks it optional)
 }
 
-// The first add-on: Nutrition & Chef. Phase 1 ships the food-log vertical end-to-end;
-// the pantry + meal-plan nav items (and their MCP tools) are added in later phases —
-// the data model + store helpers already exist, so the framework is ready for them.
+// The first add-on: Nutrition & Chef. It ships three verticals end-to-end — the food
+// log, the pantry, and the meal plan — each contributing a nav item and its MCP tools.
+// All three share the core store (their data arrays live in DBShape) and the same gate.
 const NUTRITION_ADDON: AddonManifest = {
   id: "nutrition",
   title: "Nutrition & Chef",
   description: "Log what you eat, track your pantry, and plan meals.",
   icon: "IconChef",
-  navItems: [{ href: "/nutrition/log", label: "Food Log", icon: "IconChef" }], // pantry+plan nav added in later phases
+  navItems: [
+    { href: "/nutrition/log", label: "Food Log", icon: "IconChef" },
+    { href: "/nutrition/pantry", label: "Pantry", icon: "IconFridge" },
+    { href: "/nutrition/plan", label: "Meal Plan", icon: "IconMealPlan" },
+  ],
   apiPrefixes: ["/api/nutrition"],
   dataArrays: ["foodLogs", "pantryItems", "mealPlanEntries"],
   mcp: {
@@ -49,7 +53,22 @@ const NUTRITION_ADDON: AddonManifest = {
     bridgePortVar: "NUTRITION_BRIDGE_PORT",
     defaultPort: 8007,
     setupSkill: "nutrition-mcp-setup",
-    tools: ["log_food", "list_food_log", "get_food_log", "update_food_log", "delete_food_log"],
+    tools: [
+      "log_food",
+      "list_food_log",
+      "get_food_log",
+      "update_food_log",
+      "delete_food_log",
+      "read_pantry",
+      "add_pantry_item",
+      "update_pantry_item",
+      "remove_pantry_item",
+      "plan_meal",
+      "list_meal_plan",
+      "get_meal_plan",
+      "update_meal_plan",
+      "remove_meal_plan",
+    ],
   },
   core: false,
 };

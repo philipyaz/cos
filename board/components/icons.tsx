@@ -449,6 +449,31 @@ export function IconChef(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconFridge(props: SVGProps<SVGSVGElement>) {
+  // A refrigerator: a tall cabinet split into a small freezer (top) and the
+  // main compartment, each with a vertical door handle — the Pantry nav glyph.
+  return (
+    <svg {...base} {...props}>
+      <rect x="4" y="1.5" width="8" height="13" rx="1.2" />
+      <path d="M4 6h8" />
+      <path d="M6 3.4v1.3M6 7.4v2.2" />
+    </svg>
+  );
+}
+
+export function IconMealPlan(props: SVGProps<SVGSVGElement>) {
+  // A dinner plate (a circle with an inner rim) flanked by a fork and a knife —
+  // the Meal Plan nav glyph. Stays distinct from IconChef (the toque).
+  return (
+    <svg {...base} {...props}>
+      <circle cx="8" cy="8" r="3.2" />
+      <circle cx="8" cy="8" r="1.4" />
+      <path d="M2 3v3a1 1 0 0 0 2 0V3M3 3v10" />
+      <path d="M13 3c-.8 0-1.4.9-1.4 2s.6 2 1.4 2V3Zm0 4v6" />
+    </svg>
+  );
+}
+
 // ── Brand mark ───────────────────────────────────────────────────────────────
 // The sidebar monogram — a "C" arc rendered as a stroked path (not a text glyph)
 // so it stays crisp at ~18px inside the gradient badge, and a small centre dot

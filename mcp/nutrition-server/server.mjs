@@ -26,7 +26,9 @@
 //   note                           optional freeform note
 //   createdAt / updatedAt          ISO
 //
-// Phase 1 scope: food-log tools ONLY. Pantry + meal-plan are later phases.
+// Scope: the food-log vertical (FOOD-<n>) PLUS the pantry vertical (PantryItem,
+// PANTRY-<n>, /api/nutrition/pantry) and the meal-plan vertical (MealPlanEntry,
+// MEAL-<n>, /api/nutrition/plan). All three mirror the same tool shape + gate model.
 //
 // Config: CRM_BASE_URL (default http://localhost:3000)
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -46,6 +48,11 @@ const CRM_BASE_URL = baseUrl("CRM_BASE_URL", "http://localhost:3000");
 // In lockstep with VALID_MEAL_SLOT / VALID_HEALTH_RATING in board/lib/types.ts.
 const MEAL_SLOT = ["breakfast", "lunch", "dinner", "snack"];
 const HEALTH_RATING = ["green", "amber", "red"];
+// In lockstep with VALID_PANTRY_CATEGORY / VALID_PANTRY_LOCATION / VALID_MEAL_PLAN_STATUS
+// in board/lib/types.ts (pantry + meal-plan verticals).
+const PANTRY_CATEGORY = ["produce", "protein", "dairy", "grain", "pantry", "frozen", "spice", "other"];
+const PANTRY_LOCATION = ["fridge", "freezer", "pantry"];
+const MEAL_PLAN_STATUS = ["planned", "cooked", "skipped"];
 
 // The add-on guardrail, baked into the write tool descriptions so the agent knows a
 // disabled add-on rejects writes (and where to enable it).
@@ -170,14 +177,233 @@ const DELETE_FOOD_LOG_TOOL = {
   },
 };
 
+// ── Pantry tool definitions (OUR pantry model field names exactly) ─────────────
+
+const READ_PANTRY_TOOL = {
+  name: "read_pantry",
+  description:
+    "Read the pantry / on-hand inventory — `GET /api/nutrition/pantry`. Read-only (works even if the " +
+    "add-on is disabled). Filter by `category` (produce|protein|dairy|grain|pantry|frozen|spice|other), " +
+    "`location` (fridge|freezer|pantry), `expiringBefore` ('YYYY-MM-DD' — only items whose expiry is " +
+    "before that day), and/or `lowStock` (true — only items flagged running-low). With no filters, " +
+    "returns ALL items. Renders the items grouped by category, flagging expiring-soon + low-stock items.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      category: { type: "string", enum: PANTRY_CATEGORY, description: "Only items in this food category." },
+      location: { type: "string", enum: PANTRY_LOCATION, description: "Only items stored here: fridge | freezer | pantry." },
+      expiringBefore: { type: "string", description: "Only items whose expiry is before this day, 'YYYY-MM-DD'." },
+      lowStock: { type: "boolean", description: "True to return only items flagged running-low." },
+    },
+  },
+};
+
+const ADD_PANTRY_ITEM_TOOL = {
+  name: "add_pantry_item",
+  description:
+    "Add an item to the pantry — `POST /api/nutrition/pantry`. " +
+    ADDON_GUARDRAIL +
+    " `name` is required (what the item is). Optionally provide `quantity` (amount on hand), `unit` " +
+    "('g', 'cans', 'bunch'), `category` (produce|protein|dairy|grain|pantry|frozen|spice|other), " +
+    "`location` (fridge|freezer|pantry), `expiresAt` ('YYYY-MM-DD' expiry), and a `note`. Returns the " +
+    "minted PANTRY-id.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "What the item is, e.g. 'Greek yoghurt'." },
+      quantity: { type: "number", description: "Optional amount on hand, e.g. 2." },
+      unit: { type: "string", description: "Optional unit, e.g. 'g', 'cans', 'bunch'." },
+      category: { type: "string", enum: PANTRY_CATEGORY, description: "Optional food category." },
+      location: { type: "string", enum: PANTRY_LOCATION, description: "Optional storage location: fridge | freezer | pantry." },
+      expiresAt: { type: "string", description: "Optional expiry day, 'YYYY-MM-DD'." },
+      note: { type: "string", description: "Optional freeform note." },
+    },
+    required: ["name"],
+  },
+};
+
+const UPDATE_PANTRY_ITEM_TOOL = {
+  name: "update_pantry_item",
+  description:
+    "Update a pantry item's fields — `PATCH /api/nutrition/pantry/{id}`. " +
+    ADDON_GUARDRAIL +
+    " Pass only the fields you want to change (any of: name, quantity, unit, category, location, " +
+    "expiresAt, lowStock, note). Set `lowStock` true/false to flag/clear running-low.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Pantry item id, e.g. 'PANTRY-1'." },
+      name: { type: "string", description: "New name (non-empty)." },
+      quantity: { type: "number", description: "New amount on hand." },
+      unit: { type: "string", description: "New unit, e.g. 'g', 'cans', 'bunch'." },
+      category: { type: "string", enum: PANTRY_CATEGORY, description: "New food category." },
+      location: { type: "string", enum: PANTRY_LOCATION, description: "New storage location: fridge | freezer | pantry." },
+      expiresAt: { type: "string", description: "New expiry day, 'YYYY-MM-DD'." },
+      lowStock: { type: "boolean", description: "Set true/false to flag/clear the running-low flag." },
+      note: { type: "string", description: "New freeform note." },
+    },
+    required: ["id"],
+  },
+};
+
+const REMOVE_PANTRY_ITEM_TOOL = {
+  name: "remove_pantry_item",
+  description:
+    "Remove a pantry item by id (e.g. 'PANTRY-1') — `DELETE /api/nutrition/pantry/{id}`. " +
+    ADDON_GUARDRAIL +
+    " Pantry items have no soft-archive; this hard-removes the item. (Meal-plan `pantryItemIds` are " +
+    "soft refs — a removed item leaves them dangling, which is tolerated.)",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Pantry item id, e.g. 'PANTRY-1'." },
+    },
+    required: ["id"],
+  },
+};
+
+// ── Meal-plan tool definitions (OUR meal-plan model field names exactly) ───────
+
+const PLAN_MEAL_TOOL = {
+  name: "plan_meal",
+  description:
+    "Plan a meal on a day/slot — `POST /api/nutrition/plan`. " +
+    ADDON_GUARDRAIL +
+    " `date` ('YYYY-MM-DD'), `slot` (breakfast|lunch|dinner|snack), and `title` are required. " +
+    "Optionally provide a `recipe` (text/link), an `ingredients` list, `servings`, `pantryItemIds` " +
+    "(SOFT refs to PANTRY-ids — not validated, dangling tolerated), and `eventId` (a CalendarEvent " +
+    "EVT-id to show the meal on the calendar — it MUST exist or the write is rejected). New entries " +
+    "default to status 'planned'. Returns the minted MEAL-id.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      date: { type: "string", description: "Day the meal is planned for, 'YYYY-MM-DD'." },
+      slot: { type: "string", enum: MEAL_SLOT, description: "Which meal: breakfast | lunch | dinner | snack." },
+      title: { type: "string", description: "The meal name, e.g. 'Sheet-pan salmon'." },
+      recipe: { type: "string", description: "Optional recipe text or link." },
+      ingredients: {
+        type: "array",
+        items: { type: "string" },
+        description: "Optional ingredient list, e.g. ['salmon', 'broccoli', 'lemon'].",
+      },
+      servings: { type: "number", description: "Optional serving count." },
+      pantryItemIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Optional SOFT refs to pantry items (PANTRY-ids); not validated, dangling tolerated.",
+      },
+      eventId: { type: "string", description: "Optional CalendarEvent id (EVT-<n>) to link — it must exist." },
+    },
+    required: ["date", "slot", "title"],
+  },
+};
+
+const LIST_MEAL_PLAN_TOOL = {
+  name: "list_meal_plan",
+  description:
+    "List meal-plan entries — `GET /api/nutrition/plan`. Read-only (works even if the add-on is " +
+    "disabled). Filter by a half-open day window with `from` (inclusive) / `to` (exclusive) as " +
+    "'YYYY-MM-DD', and/or by `slot` (breakfast|lunch|dinner|snack) and `status` (planned|cooked|skipped). " +
+    "With no filters, returns ALL entries. Renders a per-day agenda, one line per entry.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      from: { type: "string", description: "Window start (inclusive), 'YYYY-MM-DD'." },
+      to: { type: "string", description: "Window end (exclusive), 'YYYY-MM-DD'." },
+      slot: { type: "string", enum: MEAL_SLOT, description: "Only entries in this meal slot." },
+      status: { type: "string", enum: MEAL_PLAN_STATUS, description: "Only entries with this status: planned | cooked | skipped." },
+    },
+  },
+};
+
+const GET_MEAL_PLAN_TOOL = {
+  name: "get_meal_plan",
+  description:
+    "Fetch a single meal-plan entry by id (e.g. 'MEAL-1') — `GET /api/nutrition/plan/{id}`. Read-only. " +
+    "Renders the day, slot, title, recipe, ingredients, servings, status, linked pantry items, linked " +
+    "calendar event, and note. Unknown id → tool error.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Meal-plan entry id, e.g. 'MEAL-1'." },
+    },
+    required: ["id"],
+  },
+};
+
+const UPDATE_MEAL_PLAN_TOOL = {
+  name: "update_meal_plan",
+  description:
+    "Update a meal-plan entry's fields — `PATCH /api/nutrition/plan/{id}`. " +
+    ADDON_GUARDRAIL +
+    " Pass only the fields you want to change (any of: date, slot, title, recipe, ingredients, servings, " +
+    "status, pantryItemIds, eventId). Set `status` to planned|cooked|skipped. A non-empty `eventId` links " +
+    "to a CalendarEvent (EVT-id — it MUST exist); `eventId` null UNLINKS it. `pantryItemIds` are soft refs " +
+    "(not validated).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Meal-plan entry id, e.g. 'MEAL-1'." },
+      date: { type: "string", description: "New day, 'YYYY-MM-DD'." },
+      slot: { type: "string", enum: MEAL_SLOT, description: "New meal slot: breakfast | lunch | dinner | snack." },
+      title: { type: "string", description: "New title (non-empty)." },
+      recipe: { type: "string", description: "New recipe text or link." },
+      ingredients: {
+        type: "array",
+        items: { type: "string" },
+        description: "New ingredient list (replaces the old one).",
+      },
+      servings: { type: "number", description: "New serving count." },
+      status: { type: "string", enum: MEAL_PLAN_STATUS, description: "New status: planned | cooked | skipped." },
+      pantryItemIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "New SOFT refs to pantry items (PANTRY-ids); not validated, dangling tolerated.",
+      },
+      eventId: {
+        type: ["string", "null"],
+        description: "A CalendarEvent id (EVT-<n>) to link (it must exist), or null to UNLINK.",
+      },
+    },
+    required: ["id"],
+  },
+};
+
+const REMOVE_MEAL_PLAN_TOOL = {
+  name: "remove_meal_plan",
+  description:
+    "Remove a meal-plan entry by id (e.g. 'MEAL-1') — `DELETE /api/nutrition/plan/{id}`. " +
+    ADDON_GUARDRAIL +
+    " Meal-plan entries have no soft-archive; this hard-removes the entry. (A linked CalendarEvent is " +
+    "NOT touched.)",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Meal-plan entry id, e.g. 'MEAL-1'." },
+    },
+    required: ["id"],
+  },
+};
+
 const TOOLS = [
   // reads
   LIST_FOOD_LOG_TOOL,
   GET_FOOD_LOG_TOOL,
+  READ_PANTRY_TOOL,
+  LIST_MEAL_PLAN_TOOL,
+  GET_MEAL_PLAN_TOOL,
   // food-log lifecycle
   LOG_FOOD_TOOL,
   UPDATE_FOOD_LOG_TOOL,
   DELETE_FOOD_LOG_TOOL,
+  // pantry lifecycle
+  ADD_PANTRY_ITEM_TOOL,
+  UPDATE_PANTRY_ITEM_TOOL,
+  REMOVE_PANTRY_ITEM_TOOL,
+  // meal-plan lifecycle
+  PLAN_MEAL_TOOL,
+  UPDATE_MEAL_PLAN_TOOL,
+  REMOVE_MEAL_PLAN_TOOL,
 ];
 
 const server = new Server(
@@ -205,6 +431,48 @@ function foodLine(e) {
     `  - ${e.id}  ${e.slot}  ${e.description}  ${kcal}` +
     `${macros ? `  ${macros}` : ""}${e.health ? `  [${e.health}]` : ""}${e.estimated ? "  ~est" : ""}`
   );
+}
+
+// Today, as "YYYY-MM-DD" in local time — the anchor for the expiring-soon window.
+const today = () => {
+  const d = new Date();
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+};
+
+// One-line render of a pantry item for the grouped pantry listing. `flags` annotates
+// expiring-soon (within 3 days / already past) + low-stock so they pop in the list.
+function pantryLine(it) {
+  const qty =
+    typeof it.quantity === "number"
+      ? ` ${it.quantity}${it.unit ? ` ${it.unit}` : ""}`
+      : it.unit
+        ? ` (${it.unit})`
+        : "";
+  const flags = [];
+  if (it.lowStock) flags.push("LOW");
+  if (it.expiresAt) {
+    const now = today();
+    if (it.expiresAt < now) flags.push(`EXPIRED ${it.expiresAt}`);
+    else {
+      // expiring soon === within 3 days of today (inclusive of today).
+      const soon = new Date(`${now}T00:00:00`);
+      soon.setDate(soon.getDate() + 3);
+      const soonDay = `${soon.getFullYear()}-${`${soon.getMonth() + 1}`.padStart(2, "0")}-${`${soon.getDate()}`.padStart(2, "0")}`;
+      if (it.expiresAt <= soonDay) flags.push(`exp ${it.expiresAt}`);
+    }
+  }
+  const loc = it.location ? `  @${it.location}` : "";
+  return `  - ${it.id}  ${it.name}${qty}${loc}${flags.length ? `  [${flags.join(", ")}]` : ""}`;
+}
+
+// One-line render of a meal-plan entry for the per-day agenda.
+function mealLine(e) {
+  const servings = typeof e.servings === "number" ? `  x${e.servings}` : "";
+  const status = e.status && e.status !== "planned" ? `  (${e.status})` : "";
+  const evt = e.eventId ? `  →${e.eventId}` : "";
+  return `  - ${e.id}  ${e.slot}  ${e.title}${servings}${status}${evt}`;
 }
 
 // ── Read tools ───────────────────────────────────────────────────────────────
@@ -376,6 +644,322 @@ async function handleDeleteFoodLog(args) {
   return text(`Deleted ${id} from the food log (no soft-archive; hard-removed).`);
 }
 
+// ── Pantry tools ───────────────────────────────────────────────────────────────
+
+async function handleReadPantry(args) {
+  const sp = new URLSearchParams();
+  const expiringBefore = str(args.expiringBefore);
+  if (typeof args.category === "string" && PANTRY_CATEGORY.includes(args.category)) sp.set("category", args.category);
+  if (typeof args.location === "string" && PANTRY_LOCATION.includes(args.location)) sp.set("location", args.location);
+  if (expiringBefore) sp.set("expiringBefore", expiringBefore);
+  if (args.lowStock === true) sp.set("lowStock", "true");
+  const qs = sp.toString();
+
+  const { data, errorResult } = await api("GET", `/api/nutrition/pantry${qs ? `?${qs}` : ""}`);
+  if (errorResult) return errorResult;
+
+  const items = data.items ?? [];
+  const filters = qs ? ` (${qs.replace(/&/g, ", ")})` : "";
+  if (!items.length) return text(`No pantry items${filters}.`);
+
+  // Group by category (in the canonical PANTRY_CATEGORY order, then any unknowns last);
+  // within a category, by name then id. An absent category groups under "uncategorised".
+  const catRank = (c) => {
+    const i = PANTRY_CATEGORY.indexOf(c);
+    return i === -1 ? PANTRY_CATEGORY.length : i;
+  };
+  const byCat = new Map();
+  for (const it of items) {
+    const key = it.category ?? "uncategorised";
+    if (!byCat.has(key)) byCat.set(key, []);
+    byCat.get(key).push(it);
+  }
+  const cats = [...byCat.keys()].sort((a, b) => catRank(a) - catRank(b) || a.localeCompare(b));
+
+  const lines = [`Pantry (${items.length})${filters}:`];
+  for (const cat of cats) {
+    const catItems = byCat
+      .get(cat)
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    lines.push(`${cat} — ${catItems.length} item${catItems.length === 1 ? "" : "s"}`);
+    for (const it of catItems) lines.push(pantryLine(it));
+  }
+  return text(lines.join("\n"));
+}
+
+async function handleAddPantryItem(args) {
+  if (typeof args.name !== "string" || args.name.trim() === "") {
+    return err("'name' is required.");
+  }
+  if (args.quantity !== undefined && typeof args.quantity !== "number") {
+    return err("'quantity' must be a number.");
+  }
+  if (args.category !== undefined && !PANTRY_CATEGORY.includes(args.category)) {
+    return err(`'category' must be one of: ${PANTRY_CATEGORY.join(", ")}.`);
+  }
+  if (args.location !== undefined && !PANTRY_LOCATION.includes(args.location)) {
+    return err(`'location' must be one of: ${PANTRY_LOCATION.join(", ")}.`);
+  }
+  if (args.expiresAt !== undefined && !isISODate(args.expiresAt)) {
+    return err("'expiresAt' must be 'YYYY-MM-DD'.");
+  }
+
+  const payload = { name: args.name };
+  if (typeof args.quantity === "number") payload.quantity = args.quantity;
+  for (const k of ["unit", "category", "location", "expiresAt", "note"]) {
+    if (typeof args[k] === "string" && args[k] !== "") payload[k] = args[k];
+  }
+
+  const { data, errorResult } = await api("POST", "/api/nutrition/pantry", payload);
+  if (errorResult) return errorResult;
+
+  const it = data.item;
+  const qty = typeof it.quantity === "number" ? `  ${it.quantity}${it.unit ? ` ${it.unit}` : ""}` : "";
+  return text(
+    `Added ${it.id} — "${it.name}"${qty}\n` +
+      (it.category ? `Category: ${it.category}  ` : "") +
+      (it.location ? `Location: ${it.location}  ` : "") +
+      (it.expiresAt ? `Expires: ${it.expiresAt}` : "") +
+      `\nAdded to the pantry.`
+  );
+}
+
+async function handleUpdatePantryItem(args) {
+  const id = str(args.id);
+  if (!id) return err("'id' is required, e.g. 'PANTRY-1'.");
+  if (args.name !== undefined && (typeof args.name !== "string" || args.name.trim() === "")) {
+    return err("'name' must be a non-empty string.");
+  }
+  if (args.quantity !== undefined && typeof args.quantity !== "number") {
+    return err("'quantity' must be a number.");
+  }
+  if (args.category !== undefined && !PANTRY_CATEGORY.includes(args.category)) {
+    return err(`'category' must be one of: ${PANTRY_CATEGORY.join(", ")}.`);
+  }
+  if (args.location !== undefined && !PANTRY_LOCATION.includes(args.location)) {
+    return err(`'location' must be one of: ${PANTRY_LOCATION.join(", ")}.`);
+  }
+  if (args.expiresAt !== undefined && !isISODate(args.expiresAt)) {
+    return err("'expiresAt' must be 'YYYY-MM-DD'.");
+  }
+  if (args.lowStock !== undefined && typeof args.lowStock !== "boolean") {
+    return err("'lowStock' must be a boolean.");
+  }
+
+  const payload = {};
+  for (const k of ["name", "unit", "category", "location", "expiresAt", "note"]) {
+    if (typeof args[k] === "string") payload[k] = args[k];
+  }
+  if (typeof args.quantity === "number") payload.quantity = args.quantity;
+  if (typeof args.lowStock === "boolean") payload.lowStock = args.lowStock;
+  if (Object.keys(payload).length === 0) {
+    return err("Nothing to update — pass at least one field besides 'id'.");
+  }
+
+  const { data, errorResult } = await api("PATCH", `/api/nutrition/pantry/${encodeURIComponent(id)}`, payload);
+  if (errorResult) return errorResult;
+
+  const it = data.item;
+  const changed = Object.keys(payload).join(", ");
+  const qty = typeof it.quantity === "number" ? `  ${it.quantity}${it.unit ? ` ${it.unit}` : ""}` : "";
+  return text(
+    `Updated ${it.id} (${changed})\n` +
+      `"${it.name}"${qty}${it.lowStock ? "  [LOW]" : ""}`
+  );
+}
+
+async function handleRemovePantryItem(args) {
+  const id = str(args.id);
+  if (!id) return err("'id' is required, e.g. 'PANTRY-1'.");
+
+  const { errorResult } = await api("DELETE", `/api/nutrition/pantry/${encodeURIComponent(id)}`);
+  if (errorResult) return errorResult;
+
+  return text(`Removed ${id} from the pantry (no soft-archive; hard-removed).`);
+}
+
+// ── Meal-plan tools ────────────────────────────────────────────────────────────
+
+async function handlePlanMeal(args) {
+  if (!isISODate(args.date)) {
+    return err("'date' is required as 'YYYY-MM-DD'.");
+  }
+  if (typeof args.slot !== "string" || !MEAL_SLOT.includes(args.slot)) {
+    return err(`'slot' is required and must be one of: ${MEAL_SLOT.join(", ")}.`);
+  }
+  if (typeof args.title !== "string" || args.title.trim() === "") {
+    return err("'title' is required.");
+  }
+  if (args.servings !== undefined && typeof args.servings !== "number") {
+    return err("'servings' must be a number.");
+  }
+  if (
+    args.ingredients !== undefined &&
+    (!Array.isArray(args.ingredients) || args.ingredients.some((i) => typeof i !== "string"))
+  ) {
+    return err("'ingredients' must be an array of strings.");
+  }
+  if (
+    args.pantryItemIds !== undefined &&
+    (!Array.isArray(args.pantryItemIds) || args.pantryItemIds.some((i) => typeof i !== "string"))
+  ) {
+    return err("'pantryItemIds' must be an array of strings.");
+  }
+
+  const payload = { date: args.date, slot: args.slot, title: args.title };
+  for (const k of ["recipe", "eventId", "note"]) {
+    if (typeof args[k] === "string" && args[k] !== "") payload[k] = args[k];
+  }
+  if (typeof args.servings === "number") payload.servings = args.servings;
+  if (Array.isArray(args.ingredients)) payload.ingredients = args.ingredients;
+  if (Array.isArray(args.pantryItemIds)) payload.pantryItemIds = args.pantryItemIds;
+
+  const { data, errorResult } = await api("POST", "/api/nutrition/plan", payload);
+  if (errorResult) return errorResult;
+
+  const e = data.entry;
+  return text(
+    `Planned ${e.id} — "${e.title}"\n` +
+      `Date: ${e.date}  Slot: ${e.slot}  Status: ${e.status}` +
+      (typeof e.servings === "number" ? `  x${e.servings}` : "") +
+      (e.eventId ? `\nLinked event: ${e.eventId}` : "") +
+      `\nAdded to the meal plan.`
+  );
+}
+
+async function handleListMealPlan(args) {
+  const sp = new URLSearchParams();
+  for (const k of ["from", "to"]) {
+    const v = str(args[k]);
+    if (v) sp.set(k, v);
+  }
+  if (typeof args.slot === "string" && MEAL_SLOT.includes(args.slot)) sp.set("slot", args.slot);
+  if (typeof args.status === "string" && MEAL_PLAN_STATUS.includes(args.status)) sp.set("status", args.status);
+  const qs = sp.toString();
+
+  const { data, errorResult } = await api("GET", `/api/nutrition/plan${qs ? `?${qs}` : ""}`);
+  if (errorResult) return errorResult;
+
+  const entries = data.entries ?? [];
+  const filters = qs ? ` (${qs.replace(/&/g, ", ")})` : "";
+  if (!entries.length) return text(`No meal-plan entries${filters}.`);
+
+  // Per-day agenda: group by day (chronological); within a day, by slot order then id.
+  const slotRank = (s) => {
+    const i = MEAL_SLOT.indexOf(s);
+    return i === -1 ? MEAL_SLOT.length : i;
+  };
+  const byDay = new Map();
+  for (const e of entries) {
+    if (!byDay.has(e.date)) byDay.set(e.date, []);
+    byDay.get(e.date).push(e);
+  }
+  const days = [...byDay.keys()].sort((a, b) => a.localeCompare(b));
+
+  const lines = [`Meal plan (${entries.length})${filters}:`];
+  for (const day of days) {
+    const dayEntries = byDay
+      .get(day)
+      .sort((a, b) => slotRank(a.slot) - slotRank(b.slot) || a.id.localeCompare(b.id));
+    lines.push(`${day} — ${dayEntries.length} meal${dayEntries.length === 1 ? "" : "s"}`);
+    for (const e of dayEntries) lines.push(mealLine(e));
+  }
+  return text(lines.join("\n"));
+}
+
+async function handleGetMealPlan(args) {
+  const id = str(args.id);
+  if (!id) return err("'id' is required, e.g. 'MEAL-1'.");
+
+  const { data, errorResult } = await api("GET", `/api/nutrition/plan/${encodeURIComponent(id)}`);
+  if (errorResult) return errorResult;
+
+  const e = data.entry;
+  const lines = [`${e.id} — ${e.title}`, `Date: ${e.date}`, `Slot: ${e.slot}`, `Status: ${e.status}`];
+  if (typeof e.servings === "number") lines.push(`Servings: ${e.servings}`);
+  if (e.recipe) lines.push(`Recipe: ${e.recipe}`);
+  if (Array.isArray(e.ingredients) && e.ingredients.length) lines.push(`Ingredients: ${e.ingredients.join(", ")}`);
+  if (Array.isArray(e.pantryItemIds) && e.pantryItemIds.length) {
+    lines.push(`Pantry items: ${e.pantryItemIds.join(", ")} (soft refs)`);
+  }
+  if (e.eventId) lines.push(`Linked event: ${e.eventId}`);
+  if (e.note) lines.push(`Note: ${e.note}`);
+  return text(lines.join("\n"));
+}
+
+async function handleUpdateMealPlan(args) {
+  const id = str(args.id);
+  if (!id) return err("'id' is required, e.g. 'MEAL-1'.");
+  if (args.date !== undefined && !isISODate(args.date)) {
+    return err("'date' must be 'YYYY-MM-DD'.");
+  }
+  if (args.slot !== undefined && !MEAL_SLOT.includes(args.slot)) {
+    return err(`'slot' must be one of: ${MEAL_SLOT.join(", ")}.`);
+  }
+  if (args.title !== undefined && (typeof args.title !== "string" || args.title.trim() === "")) {
+    return err("'title' must be a non-empty string.");
+  }
+  if (args.servings !== undefined && typeof args.servings !== "number") {
+    return err("'servings' must be a number.");
+  }
+  if (args.status !== undefined && !MEAL_PLAN_STATUS.includes(args.status)) {
+    return err(`'status' must be one of: ${MEAL_PLAN_STATUS.join(", ")}.`);
+  }
+  if (
+    args.ingredients !== undefined &&
+    (!Array.isArray(args.ingredients) || args.ingredients.some((i) => typeof i !== "string"))
+  ) {
+    return err("'ingredients' must be an array of strings.");
+  }
+  if (
+    args.pantryItemIds !== undefined &&
+    (!Array.isArray(args.pantryItemIds) || args.pantryItemIds.some((i) => typeof i !== "string"))
+  ) {
+    return err("'pantryItemIds' must be an array of strings.");
+  }
+  // eventId: a non-empty string links (must exist server-side); null UNLINKS. Reject any
+  // other shape locally so the unlink-vs-link intent stays unambiguous.
+  if (args.eventId !== undefined && args.eventId !== null && typeof args.eventId !== "string") {
+    return err("'eventId' must be a CalendarEvent id (EVT-<n>) string, or null to unlink.");
+  }
+
+  const payload = {};
+  for (const k of ["date", "slot", "title", "recipe", "note"]) {
+    if (typeof args[k] === "string") payload[k] = args[k];
+  }
+  if (typeof args.servings === "number") payload.servings = args.servings;
+  if (typeof args.status === "string") payload.status = args.status;
+  if (Array.isArray(args.ingredients)) payload.ingredients = args.ingredients;
+  if (Array.isArray(args.pantryItemIds)) payload.pantryItemIds = args.pantryItemIds;
+  // eventId is forwarded for both a non-empty link AND the explicit null unlink.
+  if (args.eventId === null || typeof args.eventId === "string") payload.eventId = args.eventId;
+  if (Object.keys(payload).length === 0) {
+    return err("Nothing to update — pass at least one field besides 'id'.");
+  }
+
+  const { data, errorResult } = await api("PATCH", `/api/nutrition/plan/${encodeURIComponent(id)}`, payload);
+  if (errorResult) return errorResult;
+
+  const e = data.entry;
+  const changed = Object.keys(payload).join(", ");
+  return text(
+    `Updated ${e.id} (${changed})\n` +
+      `Date: ${e.date}  Slot: ${e.slot}  Status: ${e.status}\n` +
+      `"${e.title}"` +
+      (e.eventId ? `\nLinked event: ${e.eventId}` : "")
+  );
+}
+
+async function handleRemoveMealPlan(args) {
+  const id = str(args.id);
+  if (!id) return err("'id' is required, e.g. 'MEAL-1'.");
+
+  const { errorResult } = await api("DELETE", `/api/nutrition/plan/${encodeURIComponent(id)}`);
+  if (errorResult) return errorResult;
+
+  return text(`Removed ${id} from the meal plan (no soft-archive; hard-removed).`);
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -386,6 +970,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleListFoodLog(args);
     case "get_food_log":
       return handleGetFoodLog(args);
+    case "read_pantry":
+      return handleReadPantry(args);
+    case "list_meal_plan":
+      return handleListMealPlan(args);
+    case "get_meal_plan":
+      return handleGetMealPlan(args);
     // food-log lifecycle
     case "log_food":
       return handleLogFood(args);
@@ -393,6 +983,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleUpdateFoodLog(args);
     case "delete_food_log":
       return handleDeleteFoodLog(args);
+    // pantry lifecycle
+    case "add_pantry_item":
+      return handleAddPantryItem(args);
+    case "update_pantry_item":
+      return handleUpdatePantryItem(args);
+    case "remove_pantry_item":
+      return handleRemovePantryItem(args);
+    // meal-plan lifecycle
+    case "plan_meal":
+      return handlePlanMeal(args);
+    case "update_meal_plan":
+      return handleUpdateMealPlan(args);
+    case "remove_meal_plan":
+      return handleRemoveMealPlan(args);
     default:
       return err(`Unknown tool: ${request.params.name}`);
   }

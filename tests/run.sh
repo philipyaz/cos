@@ -533,6 +533,55 @@ else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
+# --- 10e. api-nutrition-pantry (only when a board is healthy) ----------------
+# The v9 pantry API (board/app/api/nutrition/pantry[/:id]) with the add-on ENABLED:
+# create bumps version + mints a PANTRY-<n> id (name + quantity/unit/category/location/
+# expiresAt/lowStock persist); GET lists it and the category/location/expiringBefore/
+# lowStock filters narrow correctly; GET-by-id; PATCH persists (an x-actor:agent write
+# round-trips); the missing-name + bad-category/bad-location + non-number-quantity +
+# non-boolean-lowStock + bad-expiresAt writes are rejected with 400; the GATE (a DISABLED
+# add-on 404s every WRITE while GET still returns); DELETE drops the id. Snapshots +
+# restores board/data/cases.json (pantry + settings.addons live there → net-zero).
+# Skipped when no board.
+echo
+echo "--- [10e] api-nutrition-pantry (live board) -----------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-pantry.mjs"; then
+    echo "api-nutrition-pantry: PASS"
+  else
+    echo "api-nutrition-pantry: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-pantry"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10f. api-nutrition-mealplan (only when a board is healthy) --------------
+# The v9 meal-plan API (board/app/api/nutrition/plan[/:id]) with the add-on ENABLED:
+# create bumps version + mints a MEAL-<n> id (date/slot/title persist; status defaults
+# "planned"; SOFT pantryItemIds tolerated — a dangling ref is allowed); the eventId
+# RELATIONAL check (a real EVT-<n> from POST /api/events links + sticks; an UNKNOWN
+# eventId → 400; PATCH eventId:null UNLINKS); GET lists it and the from/to + slot +
+# status filters narrow; GET-by-id; PATCH persists a status transition planned→cooked
+# (an x-actor:agent write round-trips); the missing-date/slot/title + bad-slot/bad-status
+# writes are rejected with 400; the GATE (a DISABLED add-on 404s every WRITE while GET
+# still returns); DELETE drops the id. Snapshots + restores board/data/cases.json
+# (mealPlan + events + settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10f] api-nutrition-mealplan (live board) ---------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-mealplan.mjs"; then
+    echo "api-nutrition-mealplan: PASS"
+  else
+    echo "api-nutrition-mealplan: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-mealplan"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
 # --- 11. api-trust (only when a board is healthy) ----------------------------
 # Drives the guard sender-trust WHITELIST API through the board's thin PROXY
 # routes (board/app/api/trust + …/trust/[email]) → the guard sidecar (:8009):

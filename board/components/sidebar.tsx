@@ -22,6 +22,8 @@ import {
   IconStar,
   IconTrash,
   IconChef,
+  IconFridge,
+  IconMealPlan,
   IconBolt,
   IconBrand,
 } from "@/components/icons";
@@ -33,6 +35,8 @@ import type { ComponentType, ReactNode, SVGProps } from "react";
 // whose icon isn't yet mapped still renders a sensible nav row.
 const ADDON_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   IconChef,
+  IconFridge,
+  IconMealPlan,
 };
 function addonIcon(key: string): ReactNode {
   const Glyph = ADDON_ICONS[key] ?? IconBolt;
