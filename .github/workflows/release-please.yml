@@ -1,0 +1,35 @@
+name: release-please
+
+# Versioning is automated. On every push to main, release-please opens (or updates) a single
+# "Release PR" that accumulates the next version + CHANGELOG from the Conventional Commit
+# titles since the last release. Merging that PR tags vX.Y.Z and publishes the GitHub Release.
+# Whole-repo SemVer: the root package.json version is the source of truth (config in
+# release-please-config.json; last-released version in .release-please-manifest.json).
+# Full runbook: docs/reference/releasing.md
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+# One release pass at a time; never cancel an in-flight one mid-publish.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          # Prefer a PAT (RELEASE_PLEASE_TOKEN) so the Release PR triggers CI; fall back to
+          # the default GITHUB_TOKEN (PRs it opens do NOT trigger CI — merge via owner bypass).
+          # See docs/reference/releasing.md → "One-time setup".
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
