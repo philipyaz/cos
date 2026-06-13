@@ -87,8 +87,8 @@ seam of the system.
 
     ---
 
-    The board HTTP API as the one write path: board verbs, actor attribution, the activity log, and
-    the approval queue that the UI and every MCP tool both call.
+    The board HTTP API as the one write path that the UI and every MCP tool both call: board verbs,
+    actor attribution, the activity log, and the opt-in approval queue.
 
     [:octicons-arrow-right-24: Platform API](architecture/platform-api.md)
 
