@@ -2,6 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { NotFoundError, VersionConflictError, BadRequestError } from "@/lib/store";
 import type { Actor } from "@/lib/types";
 
+// Calendar-day ("YYYY-MM-DD") shape guard — a pure, lock-free, db-free string predicate
+// shared by every route that takes a calendar-day field (the nutrition + events routes).
+// Single-sourced here (alongside resolveActor / storeErrorToResponse) so the regex can't
+// drift between the ~10 routes that previously each carried a byte-identical inline copy.
+export const isISODate = (v: unknown): v is string =>
+  typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
 // "human" by default; an MCP/agent write flags itself via { actor:"agent" } or
 // the `x-actor: agent` header so its writes are attributed correctly.
 export function resolveActor(req: NextRequest, body: unknown): Actor {

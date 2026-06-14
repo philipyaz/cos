@@ -12,12 +12,12 @@ import {
   BadRequestError,
 } from "@/lib/store";
 import { VALID_DOMAIN } from "@/lib/types";
-import { resolveActor, storeErrorToResponse } from "@/lib/route-helpers";
+import { resolveActor, storeErrorToResponse, isISODate } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
 
-// Calendar-day ("YYYY-MM-DD") and 24h time ("HH:MM") shape guards (mirror route.ts).
-const isISODate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+// 24h time ("HH:MM") shape guard. (The calendar-day guard `isISODate` is shared from
+// @/lib/route-helpers.)
 const isHHMM = (v: unknown): v is string => typeof v === "string" && /^\d{2}:\d{2}$/.test(v);
 
 export async function GET(

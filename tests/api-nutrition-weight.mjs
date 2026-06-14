@@ -100,12 +100,15 @@ async function main() {
 
     // ----------------------------------------------------------------------
     // log_weight (POST) → 201, WEIGHT-<n> id, version increments, fields persist
+    // NB: the weigh-in dates below are deliberately HISTORICAL (2019-03-xx) so the
+    // "new day → 201 created" assertions can't collide with a real weigh-in the live
+    // board may already hold for today (the upsert-by-day would otherwise return 200).
     // ----------------------------------------------------------------------
     const v0 = (await GET("/api/nutrition/weight")).body.version;
     check(typeof v0 === "number", `GET /api/nutrition/weight returns a numeric version (${v0})`);
 
     const created = await POST("/api/nutrition/weight", {
-      date: "2026-06-10",
+      date: "2019-03-10",
       weightKg: 90,
       note: "morning",
     });
@@ -113,7 +116,7 @@ async function main() {
     const entry = created.body.entry;
     check(!!entry?.id, `create returned an entry id (${entry?.id})`);
     check(WEIGHT_ID_RE.test(entry?.id || ""), `entry id matches WEIGHT-<n> (${entry?.id})`);
-    check(entry?.date === "2026-06-10", "created entry persisted date");
+    check(entry?.date === "2019-03-10", "created entry persisted date");
     check(entry?.weightKg === 90, "created entry persisted weightKg");
     check(entry?.note === "morning", "created entry persisted note");
     check(created.body.created === true, "create response reports created:true");
@@ -128,7 +131,7 @@ async function main() {
     // ----------------------------------------------------------------------
     const vBeforeUpsert = (await GET("/api/nutrition/weight")).body.version;
     const upsert = await POST("/api/nutrition/weight", {
-      date: "2026-06-10",
+      date: "2019-03-10",
       weightKg: 89.4,
       note: "re-weighed",
     });
@@ -144,14 +147,14 @@ async function main() {
 
     // The list now carries exactly ONE entry for that day (the upsert did not append).
     const afterUpsert = await listWeights();
-    const sameDay = afterUpsert.filter((w) => w.date === "2026-06-10");
+    const sameDay = afterUpsert.filter((w) => w.date === "2019-03-10");
     check(sameDay.length === 1, "exactly one weigh-in exists for the upserted day");
     check(sameDay[0]?.weightKg === 89.4, "…carrying the upserted weightKg");
 
     // ----------------------------------------------------------------------
     // lb → kg at the boundary: a weightLb-only POST stores canonical kilograms
     // ----------------------------------------------------------------------
-    const lbCreated = await POST("/api/nutrition/weight", { date: "2026-06-14", weightLb: 200 });
+    const lbCreated = await POST("/api/nutrition/weight", { date: "2019-03-14", weightLb: 200 });
     check(lbCreated.status === 201, `POST weightLb-only (new day) → 201 (got ${lbCreated.status})`);
     const expectedKg = 200 * LB_TO_KG;
     check(
@@ -169,23 +172,23 @@ async function main() {
     check(weightIds(listed.body.weights).has(weightId), "the created entry is in the list");
     // ASC by date: the 06-10 entry sorts before the 06-14 entry.
     const dates = listed.body.weights.map((w) => w.date);
-    const i10 = dates.indexOf("2026-06-10");
-    const i14 = dates.indexOf("2026-06-14");
+    const i10 = dates.indexOf("2019-03-10");
+    const i14 = dates.indexOf("2019-03-14");
     check(i10 !== -1 && i14 !== -1 && i10 < i14, "the list is sorted ASC by date");
 
-    const inWindow = await GET("/api/nutrition/weight?from=2026-06-01&to=2026-06-12");
+    const inWindow = await GET("/api/nutrition/weight?from=2019-03-01&to=2019-03-12");
     check(
       weightIds(inWindow.body.weights || []).has(weightId),
-      "from/to window [2026-06-01, 2026-06-12) includes the 2026-06-10 entry",
+      "from/to window [2019-03-01, 2019-03-12) includes the 2019-03-10 entry",
     );
     check(
       !weightIds(inWindow.body.weights || []).has(lbWeightId),
-      "from/to window [2026-06-01, 2026-06-12) EXCLUDES the 2026-06-14 entry",
+      "from/to window [2019-03-01, 2019-03-12) EXCLUDES the 2019-03-14 entry",
     );
-    const tightWindow = await GET("/api/nutrition/weight?from=2026-06-01&to=2026-06-10");
+    const tightWindow = await GET("/api/nutrition/weight?from=2019-03-01&to=2019-03-10");
     check(
       !weightIds(tightWindow.body.weights || []).has(weightId),
-      "from/to is half-open: to=2026-06-10 EXCLUDES the 2026-06-10 entry",
+      "from/to is half-open: to=2019-03-10 EXCLUDES the 2019-03-10 entry",
     );
 
     // GET by id
@@ -259,7 +262,7 @@ async function main() {
     const noDate = await POST("/api/nutrition/weight", { weightKg: 90 });
     check(noDate.status === 400, `POST weight missing date → 400 (got ${noDate.status})`);
 
-    const noWeight = await POST("/api/nutrition/weight", { date: "2026-06-11" });
+    const noWeight = await POST("/api/nutrition/weight", { date: "2019-03-11" });
     check(noWeight.status === 400, `POST weight with neither weightKg nor weightLb → 400 (got ${noWeight.status})`);
 
     const badGoalSex = await PUT("/api/nutrition/goal", {
@@ -313,7 +316,7 @@ async function main() {
       `GET /api/nutrition/targets while disabled → 200 (got ${targetsWhileDisabled.status})`,
     );
 
-    const blockedPost = await POST("/api/nutrition/weight", { date: "2026-06-12", weightKg: 88 });
+    const blockedPost = await POST("/api/nutrition/weight", { date: "2019-03-12", weightKg: 88 });
     check(blockedPost.status === 404, `POST weight while disabled → 404 (got ${blockedPost.status})`);
     const blockedGoal = await PUT("/api/nutrition/goal", {
       sex: "female",
@@ -328,7 +331,7 @@ async function main() {
     const survived = await GET("/api/nutrition/weight");
     check(
       !weightIds(survived.body.weights || []).has(undefined) &&
-        !(survived.body.weights || []).some((w) => w.date === "2026-06-12"),
+        !(survived.body.weights || []).some((w) => w.date === "2019-03-12"),
       "the blocked POST did NOT append a new weigh-in",
     );
 

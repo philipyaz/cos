@@ -50,14 +50,18 @@ export const MEASURED_WINDOW_DAYS = 14; // the look-back window for the measured
 export const MEASURED_MIN_DAYS = 10; // …needs at least this many logged days + this much weight span
 
 // ── Tiny local helpers (kept local so the module imports ONLY ./types) ──────────
-// Round to an integer; round to 1 decimal. We keep FULL precision internally and only
-// round at the output boundary, so intermediate math (EWMA, TDEE) isn't lossy.
+// Round to an integer; round to 1 decimal. Weight-trend math (EWMA) is kept full-precision;
+// TDEE is rounded ONCE to a whole-kcal value (see `tdee` below) that is then reused as BOTH
+// the displayed estimate AND the deficit base — so the target/deficit build off the same
+// integer the user sees (a deliberate single rounding, not lossy drift).
 const round = (n: number): number => Math.round(n);
 const r1 = (n: number): number => Math.round(n * 10) / 10;
 
 // Plain calendar arithmetic on a "YYYY-MM-DD" string (UTC-noon anchored so a day shift is
 // never a DST/timezone off-by-one). Returns a "YYYY-MM-DD" string `n` days after `day`.
-function addDays(day: string, n: number): string {
+// EXPORTED so the views (weight-chart, pantry) share this one noon-anchored implementation
+// rather than each carrying its own copy with a different anchor.
+export function addDays(day: string, n: number): string {
   const [y, m, d] = day.split("-").map((s) => parseInt(s, 10));
   const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
   dt.setUTCDate(dt.getUTCDate() + n);
@@ -187,7 +191,10 @@ export interface DayAdherence {
   date: string; // the calendar day
   calories: number; // total kcal logged that day
   target: number; // the daily calorie target (0 when none is computed)
-  deltaKcal: number; // calories − target (negative = under)
+  // calories − target (negative = under). NOTE: with no target (dailyCalorieTarget null →
+  // target 0) this collapses to `calories` itself — a large positive number on a neutral
+  // "on_track" day, NOT a real overshoot. Consumers should read it alongside `target > 0`.
+  deltaKcal: number;
   status: AdherenceStatus;
 }
 
@@ -301,13 +308,24 @@ export function computeNutritionTargets(args: {
   // ≤ 0 means at/under goal → 0 weeks / today. With weight still to lose and a positive
   // effective rate, ETA is remaining / rate (weeks) and a calendar date that far out.
   const remainingKg = trend != null && goal ? r1(trend - goal.targetWeightKg) : null;
-  const etaWeeks =
-    remainingKg != null && remainingKg > 0 && effRate > 0
-      ? r1(remainingKg / effRate)
-      : remainingKg != null && remainingKg <= 0
-        ? 0
-        : null;
-  const etaDate = etaWeeks != null && etaWeeks > 0 ? addDays(today, round(etaWeeks * 7)) : etaWeeks === 0 ? today : null;
+  // ETA is a three-state outcome computed once: unknown (no trend/goal) → null/null; already
+  // at/under goal (remaining ≤ 0) → 0 weeks, today; still losing at a positive rate →
+  // remaining ÷ rate weeks, projected that many days out.
+  let etaWeeks: number | null;
+  let etaDate: string | null;
+  if (remainingKg == null) {
+    etaWeeks = null;
+    etaDate = null;
+  } else if (remainingKg <= 0) {
+    etaWeeks = 0;
+    etaDate = today;
+  } else if (effRate > 0) {
+    etaWeeks = r1(remainingKg / effRate);
+    etaDate = addDays(today, round(etaWeeks * 7));
+  } else {
+    etaWeeks = null;
+    etaDate = null;
+  }
 
   // Per-day adherence: one row per DISTINCT logged day, newest first. Each day's status is
   // judged against the daily target (when there is one): well under (≤60%) is "under",

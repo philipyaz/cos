@@ -10,12 +10,9 @@ import {
 } from "@/lib/store";
 import { assertAddonEnabled } from "@/lib/addons";
 import { VALID_MEAL_SLOT, VALID_HEALTH_RATING } from "@/lib/types";
-import { resolveActor, storeErrorToResponse } from "@/lib/route-helpers";
+import { resolveActor, storeErrorToResponse, isISODate } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
-
-// Calendar-day ("YYYY-MM-DD") shape guard (mirror route.ts).
-const isISODate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 // GET /api/nutrition/log/[id] — UNGATED (a disabled add-on's data stays viewable).
 export async function GET(

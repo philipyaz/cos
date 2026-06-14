@@ -8,12 +8,9 @@ import {
   type PantryCategory,
   type PantryLocation,
 } from "@/lib/types";
-import { resolveActor, storeErrorToResponse } from "@/lib/route-helpers";
+import { resolveActor, storeErrorToResponse, isISODate } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
-
-// Calendar-day ("YYYY-MM-DD") shape guard — pure string shape, like the events route.
-const isISODate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 // GET /api/nutrition/pantry?category=&location=&expiringBefore=&lowStock=true — default
 // returns ALL pantry items. `category`/`location` narrow to a food category / storage

@@ -24,23 +24,21 @@ import { useState } from "react";
 import type { NutritionGoal, WeightEntry } from "@/lib/types";
 import type { NutritionTargets, GuardrailFlag } from "@/lib/nutrition-targets";
 import { upsertWeight } from "@/lib/nutrition-client";
+import { formatDay, kgToDisplay, displayToKg } from "@/lib/nutrition-format";
 import { IconScale, IconTrend, IconChevronDown, IconChevronRight, IconWarning } from "@/components/icons";
 import { GoalDrawer } from "./goal-drawer";
 import { WeightChart } from "./weight-chart";
 
 // A canonical-kg weight → a display string in the goal's chosen unit (default kg), 1 dp.
-// Kept here (not the engine) because it's a DISPLAY concern; storage is always kg.
-const LB_PER_KG = 0.45359237;
+// Storage is always kg; kgToDisplay (shared, lib/nutrition-format) does the unit conversion.
 function fmtWeight(kg: number | null, unit: "kg" | "lb"): string {
   if (kg == null) return "—";
-  const v = unit === "lb" ? kg / LB_PER_KG : kg;
-  return `${Math.round(v * 10) / 10} ${unit}`;
+  return `${Math.round(kgToDisplay(kg, unit) * 10) / 10} ${unit}`;
 }
 // A signed kg delta (the remaining-to-go), in the chosen unit. Positive = still to lose.
 function fmtDeltaWeight(kg: number | null, unit: "kg" | "lb"): string {
   if (kg == null) return "—";
-  const v = unit === "lb" ? kg / LB_PER_KG : kg;
-  const r = Math.round(v * 10) / 10;
+  const r = Math.round(kgToDisplay(kg, unit) * 10) / 10;
   return `${r > 0 ? "+" : ""}${r} ${unit}`;
 }
 // A bare integer kcal, or an em-dash when null.
@@ -347,7 +345,7 @@ function LogWeightButton({
     .filter((w) => w.date <= today)
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
     .at(-1);
-  const seed = latest ? String(Math.round((unit === "lb" ? latest.weightKg / LB_PER_KG : latest.weightKg) * 10) / 10) : "";
+  const seed = latest ? String(Math.round(kgToDisplay(latest.weightKg, unit) * 10) / 10) : "";
   const [value, setValue] = useState(seed);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -361,7 +359,7 @@ function LogWeightButton({
     setError(null);
     setSaving(true);
     try {
-      const weightKg = unit === "lb" ? num * LB_PER_KG : num; // convert at the boundary
+      const weightKg = displayToKg(num, unit); // convert at the boundary
       await upsertWeight({ date: today, weightKg });
       setOpen(false);
       onLogged();
@@ -429,11 +427,4 @@ function LogWeightButton({
   );
 }
 
-// ── Local date format (deterministic; mirrors food-log-view's formatDay) ──────────
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function formatDay(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return iso;
-  const month = MONTHS[Number(m[2]) - 1] ?? m[2];
-  return `${month} ${Number(m[3])}, ${m[1]}`;
-}
+// (formatDay — "MMM D, YYYY" — is imported from the shared lib/nutrition-format module.)

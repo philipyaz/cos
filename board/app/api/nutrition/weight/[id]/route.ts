@@ -11,12 +11,9 @@ import {
   BadRequestError,
 } from "@/lib/store";
 import { assertAddonEnabled } from "@/lib/addons";
-import { resolveActor, storeErrorToResponse } from "@/lib/route-helpers";
+import { resolveActor, storeErrorToResponse, isISODate } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
-
-// Calendar-day ("YYYY-MM-DD") shape guard (mirror route.ts).
-const isISODate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 // GET /api/nutrition/weight/[id] — UNGATED (a disabled add-on's data stays viewable).
 export async function GET(

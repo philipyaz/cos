@@ -18,6 +18,7 @@ import type { FoodLogEntry, MealSlot, HealthRating, NutritionGoal, WeightEntry }
 import type { NutritionTargets, AdherenceStatus } from "@/lib/nutrition-targets";
 import { useLiveBoard } from "@/lib/use-live-board";
 import { listWeights, getGoal, getTargets } from "@/lib/nutrition-client";
+import { toISODay, formatDay } from "@/lib/nutrition-format";
 import { IconChef } from "@/components/icons";
 import { WeightLossPanel } from "./weight-loss-panel";
 
@@ -339,23 +340,4 @@ function groupByDay(entries: FoodLogEntry[]): DayGroup[] {
         { calories: 0, protein: 0, carbs: 0, fat: 0 },
       ),
     }));
-}
-
-// "YYYY-MM-DD" for a Date in LOCAL time — used only to mark which grouped day is today.
-function toISODay(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-// A readable, DETERMINISTIC day header from a bare "YYYY-MM-DD" string. We format from
-// the string parts (not new Date(iso), which would parse as UTC midnight and could shift
-// the day in a behind-UTC timezone, drifting between SSR and client). "MMM D, YYYY".
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function formatDay(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return iso;
-  const month = MONTHS[Number(m[2]) - 1] ?? m[2];
-  return `${month} ${Number(m[3])}, ${m[1]}`;
 }

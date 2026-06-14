@@ -30,7 +30,6 @@ export interface AddonManifest {
     setupSkill: string; // the slash-skill that wires the bridge on a new machine
     tools: string[]; // the MCP tool names this server exposes
   };
-  core: false; // an add-on is never core (the literal false marks it optional)
 }
 
 // The first add-on: Nutrition & Chef. It ships four verticals end-to-end — the food log,
@@ -80,7 +79,6 @@ const NUTRITION_ADDON: AddonManifest = {
       "get_nutrition_targets",
     ],
   },
-  core: false,
 };
 
 // The static add-on registry — one entry per add-on. Order is the catalog/display order.

@@ -8,12 +8,9 @@ import {
   type MealSlot,
   type HealthRating,
 } from "@/lib/types";
-import { resolveActor, storeErrorToResponse } from "@/lib/route-helpers";
+import { resolveActor, storeErrorToResponse, isISODate } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
-
-// Calendar-day ("YYYY-MM-DD") shape guard — pure string shape, like the events route.
-const isISODate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 // GET /api/nutrition/log?from=&to=&slot=&date= — default returns ALL food-log entries.
 // `from`/`to` filter on e.date by string compare (ISO days sort lexically), the

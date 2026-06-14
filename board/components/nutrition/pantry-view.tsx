@@ -20,6 +20,8 @@ import type { PantryItem, PantryCategory, PantryLocation } from "@/lib/types";
 import { VALID_PANTRY_CATEGORY } from "@/lib/types";
 import { useLiveBoard } from "@/lib/use-live-board";
 import { deletePantryItem } from "@/lib/nutrition-client";
+import { toISODay, formatDay } from "@/lib/nutrition-format";
+import { addDays } from "@/lib/nutrition-targets";
 import { IconFridge, IconPlus, IconTrash, IconWarning } from "@/components/icons";
 import { PantryItemDrawer } from "./pantry-item-drawer";
 
@@ -381,34 +383,6 @@ function classifyExpiry(
   return null; // far enough out to not need a chip
 }
 
-// "YYYY-MM-DD" for a Date in LOCAL time — used to derive today + the expiry cutoff.
-function toISODay(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-// Add `n` days to a bare "YYYY-MM-DD" string and return a bare ISO day. Parses the parts
-// into a UTC Date (avoids local-tz DST shifting the arithmetic), adds, re-emits the parts.
-function addDays(iso: string, n: number): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return iso;
-  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  d.setUTCDate(d.getUTCDate() + n);
-  const y = d.getUTCFullYear();
-  const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${mo}-${day}`;
-}
-
-// A readable, DETERMINISTIC date from a bare "YYYY-MM-DD" string. We format from the
-// string parts (not new Date(iso), which would parse as UTC midnight and could shift the
-// day in a behind-UTC timezone, drifting between SSR and client). "MMM D, YYYY".
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function formatDay(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return iso;
-  const month = MONTHS[Number(m[2]) - 1] ?? m[2];
-  return `${month} ${Number(m[3])}, ${m[1]}`;
-}
+// toISODay (local "YYYY-MM-DD") + formatDay ("MMM D, YYYY") come from the shared
+// nutrition-format module; addDays (the noon-anchored day-shift) from the engine. Both
+// imported above so the whole feature shares one implementation of each.

@@ -8,13 +8,12 @@ import {
   BadRequestError,
 } from "@/lib/store";
 import { VALID_DOMAIN, type CalendarEvent, type CaseDomain } from "@/lib/types";
-import { resolveActor, storeErrorToResponse } from "@/lib/route-helpers";
+import { resolveActor, storeErrorToResponse, isISODate } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
 
-// Calendar-day ("YYYY-MM-DD") and 24h time ("HH:MM") shape guards. Pure string
-// shape — calendar/timezone correctness is out of scope (the day is the contract).
-const isISODate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+// 24h time ("HH:MM") shape guard. Pure string shape — calendar/timezone correctness is out
+// of scope. (The calendar-day guard `isISODate` is shared from @/lib/route-helpers.)
 const isHHMM = (v: unknown): v is string => typeof v === "string" && /^\d{2}:\d{2}$/.test(v);
 
 // GET /api/events?from=&to=&caseId=&domain= — default returns ALL events.

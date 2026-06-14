@@ -1,16 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { readDB, mutate, upsertWeight } from "@/lib/store";
 import { assertAddonEnabled } from "@/lib/addons";
-import { resolveActor, storeErrorToResponse } from "@/lib/route-helpers";
+import { resolveActor, storeErrorToResponse, isISODate } from "@/lib/route-helpers";
+// LB_TO_KG (the exact 1 lb = 0.45359237 kg factor) is single-sourced in lib/nutrition-format;
+// the route converts at its boundary so the store NEVER sees a pound (storage is always kg).
+import { LB_TO_KG } from "@/lib/nutrition-format";
 
 export const dynamic = "force-dynamic";
-
-// Calendar-day ("YYYY-MM-DD") shape guard — pure string shape, like the events route.
-const isISODate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
-
-// Pounds → kilograms (the canonical storage unit is ALWAYS kg; the route converts at its
-// boundary so the store never sees a pound). Exact NIST conversion factor.
-const LB_TO_KG = 0.45359237;
 
 // GET /api/nutrition/weight?from=&to= — default returns ALL weigh-ins sorted ASCENDING by
 // date. `from`/`to` filter on e.date by string compare (ISO days sort lexically), the

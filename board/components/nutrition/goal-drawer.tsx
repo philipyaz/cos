@@ -23,10 +23,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { NutritionGoal, BiologicalSex, ActivityLevel } from "@/lib/types";
 import { VALID_BIOLOGICAL_SEX, VALID_ACTIVITY_LEVEL } from "@/lib/types";
 import { setGoal, upsertWeight } from "@/lib/nutrition-client";
+import { kgToDisplay, displayToKg } from "@/lib/nutrition-format";
 import { IconWarning } from "@/components/icons";
-
-// Pounds → kilograms (the canonical store unit). Mirrors the route boundary's factor.
-const LB_PER_KG = 0.45359237;
 
 // Enum → human label for the selects (kept local so the drawer stays self-contained).
 const SEX_LABEL: Record<BiologicalSex, string> = { male: "Male", female: "Female" };
@@ -90,9 +88,6 @@ export function GoalDrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // The unit suffix shown on the weight fields' labels (kg / lb).
-  const unitLabel = unit;
-
   // Switching the unit re-expresses the two weight FIELDS in the new unit so the user isn't
   // surprised by a number that suddenly means something else. Parses the current value in
   // the OLD unit and re-formats it in the NEW one (blank stays blank). Memoized handler.
@@ -101,7 +96,7 @@ export function GoalDrawer({
       const reExpress = (raw: string): string => {
         const v = raw.trim();
         if (v === "" || !Number.isFinite(Number(v))) return raw;
-        const kg = unit === "lb" ? Number(v) * LB_PER_KG : Number(v);
+        const kg = displayToKg(Number(v), unit);
         return formatWeight(kg, next);
       };
       setTargetWeight((prev) => reExpress(prev));
@@ -117,7 +112,7 @@ export function GoalDrawer({
     if (v === "") return null;
     const num = Number(v);
     if (!Number.isFinite(num) || num <= 0) return null;
-    return unit === "lb" ? num * LB_PER_KG : num;
+    return displayToKg(num, unit);
   };
 
   // ── Save ──────────────────────────────────────────────────────────────────────
@@ -132,7 +127,7 @@ export function GoalDrawer({
       return setError("Height (cm) must be a positive number.");
     if (!activity) return setError("Activity level is required.");
     const targetKg = toKg(targetWeight);
-    if (targetKg == null) return setError(`Target weight must be a positive number (${unitLabel}).`);
+    if (targetKg == null) return setError(`Target weight must be a positive number (${unit}).`);
     // Rate is optional in the contract (defaults 0.5); validate only when typed.
     const rateTrim = rate.trim();
     let rateN: number | undefined;
@@ -144,7 +139,7 @@ export function GoalDrawer({
     // Today's weight is optional; when present it must be a positive number.
     const todayKg = toKg(todayWeight);
     if (todayWeight.trim() !== "" && todayKg == null)
-      return setError(`Today's weight must be a positive number (${unitLabel}).`);
+      return setError(`Today's weight must be a positive number (${unit}).`);
 
     setError(null);
     setSaving(true);
@@ -300,7 +295,7 @@ export function GoalDrawer({
           {/* Target weight (in the chosen unit) + desired loss rate, side by side. */}
           <div className="flex gap-3">
             <div className="flex-1">
-              <Field label={`Target weight (${unitLabel})`}>
+              <Field label={`Target weight (${unit})`}>
                 <input
                   type="number"
                   inputMode="decimal"
@@ -309,7 +304,7 @@ export function GoalDrawer({
                   value={targetWeight}
                   onChange={(e) => setTargetWeight(e.target.value)}
                   placeholder={unit === "lb" ? "e.g. 165" : "e.g. 75"}
-                  aria-label={`Target weight in ${unitLabel}`}
+                  aria-label={`Target weight in ${unit}`}
                   className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 tabular-nums outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
                 />
               </Field>
@@ -335,7 +330,7 @@ export function GoalDrawer({
           </p>
 
           {/* Today's weight — optional opening/current weigh-in recorded alongside the goal. */}
-          <Field label={`Today's weight (${unitLabel}) — optional`}>
+          <Field label={`Today's weight (${unit}) — optional`}>
             <input
               type="number"
               inputMode="decimal"
@@ -344,7 +339,7 @@ export function GoalDrawer({
               value={todayWeight}
               onChange={(e) => setTodayWeight(e.target.value)}
               placeholder={isEdit ? "Log today's weigh-in" : "Record your current weight"}
-              aria-label={`Today's weight in ${unitLabel}`}
+              aria-label={`Today's weight in ${unit}`}
               className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 tabular-nums outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
             />
           </Field>
@@ -388,8 +383,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 // Format a canonical-kg weight into the chosen DISPLAY unit, to one decimal, as a bare
-// string suitable for an input value (kg passes through; lb multiplies by 1/0.45359237).
+// string suitable for an input value (via the shared kgToDisplay; kg passes through).
 function formatWeight(kg: number, unit: "kg" | "lb"): string {
-  const v = unit === "lb" ? kg / LB_PER_KG : kg;
+  const v = kgToDisplay(kg, unit);
   return String(Math.round(v * 10) / 10);
 }

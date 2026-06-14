@@ -16,6 +16,7 @@
 
 import type { WeightEntry } from "@/lib/types";
 import type { DayAdherence, AdherenceStatus } from "@/lib/nutrition-targets";
+import { addDays, EWMA_ALPHA } from "@/lib/nutrition-targets";
 
 // Fixed drawing surface (viewBox units; the SVG itself is responsive). Generous left/right
 // gutters leave room for the two axes' tick labels; the bottom gutter holds the day ticks.
@@ -245,7 +246,8 @@ function buildChartDays(
   // EWMA trend over the WHOLE series (ascending), recording the running ema at each weigh-in
   // day so a day in the window picks up the trend value as of that day's most recent weigh-in.
   const sorted = [...weights].filter((w) => w.date <= today).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  const EWMA_ALPHA = 0.25; // mirrors the engine's smoothing factor (kept local to stay I/O-free)
+  // EWMA_ALPHA + addDays are imported from the engine so the chart's client-side per-day trend
+  // uses the SAME smoothing factor + day-arithmetic the engine's weightTrendKg does (no drift).
   const emaByDay = new Map<string, number>();
   let ema: number | null = null;
   for (const w of sorted) {
@@ -276,17 +278,6 @@ function buildChartDays(
     cursor = addDays(cursor, 1);
   }
   return out;
-}
-
-// "YYYY-MM-DD" + n days, UTC-noon anchored (no DST off-by-one) — mirrors nutrition-targets.
-function addDays(day: string, n: number): string {
-  const [y, m, d] = day.split("-").map((s) => parseInt(s, 10));
-  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
-  dt.setUTCDate(dt.getUTCDate() + n);
-  const yy = dt.getUTCFullYear();
-  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(dt.getUTCDate()).padStart(2, "0");
-  return `${yy}-${mm}-${dd}`;
 }
 
 // The day-of-month for an x-axis tick, read straight from the "YYYY-MM-DD" string parts

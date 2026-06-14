@@ -1,19 +1,9 @@
 import { NextResponse } from "next/server";
 import { readDB } from "@/lib/store";
 import { computeNutritionTargets } from "@/lib/nutrition-targets";
+import { toISODay } from "@/lib/nutrition-format";
 
 export const dynamic = "force-dynamic";
-
-// The server-LOCAL calendar day as "YYYY-MM-DD". The engine is clockless (it takes `today`
-// as a string), so the ONLY clock read in the whole feature lives here. We use the local
-// date parts (not toISOString, which is UTC) so "today" matches the user's wall-calendar.
-function localToday(): string {
-  const now = new Date();
-  const yy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  return `${yy}-${mm}-${dd}`;
-}
 
 // GET /api/nutrition/targets — the render-ready weight-loss targets envelope, computed over
 // the goal singleton + the weigh-in series + the food log via the pure engine. READ-ONLY and
@@ -26,7 +16,9 @@ export async function GET() {
     goal: db.nutritionGoal ?? null,
     weights: db.weights ?? [],
     foodLogs: db.foodLogs ?? [],
-    today: localToday(),
+    // The server-LOCAL "YYYY-MM-DD" — the engine is clockless (takes `today` as a string),
+    // so this is the only clock read; local parts (not UTC) match the user's wall-calendar.
+    today: toISODay(new Date()),
   });
   return NextResponse.json({ targets, version: db.version });
 }

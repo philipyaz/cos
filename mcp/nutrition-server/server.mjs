@@ -83,9 +83,11 @@ const MEAL_PLAN_STATUS = ["planned", "cooked", "skipped"];
 const ACTIVITY_LEVEL = ["sedentary", "light", "moderate", "very_active", "extra_active"];
 const BIOLOGICAL_SEX = ["male", "female"];
 const WEIGHT_UNIT = ["kg", "lb"];
-// Pounds → kilograms (the route does this conversion canonically; mirrored here only for
-// the log_weight summary rendering, never for the wire payload — we forward the raw input).
+// Pounds → kilograms. The ROUTE does the canonical lb→kg conversion for the wire payload (we
+// forward the caller's raw input unit); LB_TO_KG is mirrored here ONLY for the kg→lb DISPLAY
+// twin in the weigh-in (list/log) + goal renders. `kgToLb` is that one-line display helper.
 const LB_TO_KG = 0.45359237;
+const kgToLb = (kg) => `${(kg / LB_TO_KG).toFixed(1)} lb`;
 
 // The add-on guardrail, baked into the write tool descriptions so the agent knows a
 // disabled add-on rejects writes (and where to enable it).
@@ -616,6 +618,24 @@ function mealLine(e) {
 
 // ── Read tools ───────────────────────────────────────────────────────────────
 
+// Shared day-grouping for the list renders (food log + meal plan): bucket entries by their
+// ISO `date`, return the days chronologically, each paired with that day's entries sorted by
+// meal slot then id. `slotRank` ranks the four meal slots; an unknown slot sorts last.
+const slotRank = (s) => {
+  const i = MEAL_SLOT.indexOf(s);
+  return i === -1 ? MEAL_SLOT.length : i;
+};
+function groupByDayThenSlot(entries) {
+  const byDay = new Map();
+  for (const e of entries) {
+    if (!byDay.has(e.date)) byDay.set(e.date, []);
+    byDay.get(e.date).push(e);
+  }
+  return [...byDay.keys()]
+    .sort((a, b) => a.localeCompare(b))
+    .map((day) => [day, byDay.get(day).sort((a, b) => slotRank(a.slot) - slotRank(b.slot) || a.id.localeCompare(b.id))]);
+}
+
 async function handleListFoodLog(args) {
   const sp = new URLSearchParams();
   for (const k of ["from", "to", "date"]) {
@@ -632,23 +652,9 @@ async function handleListFoodLog(args) {
   const filters = qs ? ` (${qs.replace(/&/g, ", ")})` : "";
   if (!entries.length) return text(`No food-log entries${filters}.`);
 
-  // Group by day, sorted chronologically; within a day, by slot order then id.
-  const slotRank = (s) => {
-    const i = MEAL_SLOT.indexOf(s);
-    return i === -1 ? MEAL_SLOT.length : i;
-  };
-  const byDay = new Map();
-  for (const e of entries) {
-    if (!byDay.has(e.date)) byDay.set(e.date, []);
-    byDay.get(e.date).push(e);
-  }
-  const days = [...byDay.keys()].sort((a, b) => a.localeCompare(b));
-
+  // Group by day (chronological), each day's entries by slot then id — see groupByDayThenSlot.
   const lines = [`Food log (${entries.length})${filters}:`];
-  for (const day of days) {
-    const dayEntries = byDay
-      .get(day)
-      .sort((a, b) => slotRank(a.slot) - slotRank(b.slot) || a.id.localeCompare(b.id));
+  for (const [day, dayEntries] of groupByDayThenSlot(entries)) {
     // Per-day calorie rollup (only counts numeric calories).
     const kcal = dayEntries.reduce((sum, e) => sum + (typeof e.calories === "number" ? e.calories : 0), 0);
     lines.push(`${day} — ${dayEntries.length} entr${dayEntries.length === 1 ? "y" : "ies"}, ${kcal} kcal`);
@@ -983,23 +989,9 @@ async function handleListMealPlan(args) {
   const filters = qs ? ` (${qs.replace(/&/g, ", ")})` : "";
   if (!entries.length) return text(`No meal-plan entries${filters}.`);
 
-  // Per-day agenda: group by day (chronological); within a day, by slot order then id.
-  const slotRank = (s) => {
-    const i = MEAL_SLOT.indexOf(s);
-    return i === -1 ? MEAL_SLOT.length : i;
-  };
-  const byDay = new Map();
-  for (const e of entries) {
-    if (!byDay.has(e.date)) byDay.set(e.date, []);
-    byDay.get(e.date).push(e);
-  }
-  const days = [...byDay.keys()].sort((a, b) => a.localeCompare(b));
-
+  // Per-day agenda: group by day (chronological), each day's entries by slot then id.
   const lines = [`Meal plan (${entries.length})${filters}:`];
-  for (const day of days) {
-    const dayEntries = byDay
-      .get(day)
-      .sort((a, b) => slotRank(a.slot) - slotRank(b.slot) || a.id.localeCompare(b.id));
+  for (const [day, dayEntries] of groupByDayThenSlot(entries)) {
     lines.push(`${day} — ${dayEntries.length} meal${dayEntries.length === 1 ? "" : "s"}`);
     for (const e of dayEntries) lines.push(mealLine(e));
   }
@@ -1104,8 +1096,7 @@ async function handleRemoveMealPlan(args) {
 // One-line render of a weigh-in. Weight is canonical kg (with one decimal) plus a pounds
 // twin for the reader, since people often think in pounds even when storage is kg.
 function weightLine(w) {
-  const lb = `${(w.weightKg / LB_TO_KG).toFixed(1)} lb`;
-  return `  - ${w.date}  ${w.weightKg.toFixed(1)} kg (${lb})${w.note ? `  — ${w.note}` : ""}`;
+  return `  - ${w.date}  ${w.weightKg.toFixed(1)} kg (${kgToLb(w.weightKg)})${w.note ? `  — ${w.note}` : ""}`;
 }
 
 async function handleLogWeight(args) {
@@ -1138,11 +1129,10 @@ async function handleLogWeight(args) {
   if (errorResult) return errorResult;
 
   const w = data.entry;
-  const lb = `${(w.weightKg / LB_TO_KG).toFixed(1)} lb`;
   const verb = data.created ? "Logged" : "Updated";
   return text(
     `${verb} ${w.id} — ${w.date}\n` +
-      `Weight: ${w.weightKg.toFixed(1)} kg (${lb})${w.note ? `\nNote: ${w.note}` : ""}\n` +
+      `Weight: ${w.weightKg.toFixed(1)} kg (${kgToLb(w.weightKg)})${w.note ? `\nNote: ${w.note}` : ""}\n` +
       `${data.created ? "Recorded a new weigh-in." : "Updated the existing weigh-in for that day."}`
   );
 }
@@ -1198,7 +1188,7 @@ async function handleGetNutritionGoal() {
     `Age: ${g.age} years`,
     `Height: ${g.heightCm} cm`,
     `Activity: ${g.activity}`,
-    `Target weight: ${g.targetWeightKg} kg (${(g.targetWeightKg / LB_TO_KG).toFixed(1)} lb)`,
+    `Target weight: ${g.targetWeightKg} kg (${kgToLb(g.targetWeightKg)})`,
     `Desired loss rate: ${g.rateKgPerWeek} kg/week (clamped for safety by the targets engine)`,
     `Weight unit (display): ${unit}`,
   ];

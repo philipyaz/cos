@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { readDB } from "@/lib/store";
 import { isAddonEnabled } from "@/lib/addons";
 import { computeNutritionTargets } from "@/lib/nutrition-targets";
+import { toISODay } from "@/lib/nutrition-format";
 import { TopBar } from "@/components/topbar";
 import { FoodLogView } from "@/components/nutrition/food-log-view";
 
@@ -25,7 +26,7 @@ export default async function FoodLogPage() {
   // pass `today` in). Both come from the SAME new Date() so they can't disagree.
   const clock = new Date();
   const now = clock.toISOString();
-  const today = toLocalISODay(clock);
+  const today = toISODay(clock);
 
   // The weight-loss vertical's SSR seed. The targets engine is pure + always resolvable, so
   // we compute the envelope here over the goal/weights/foodLogs and hand it to the view (the
@@ -48,13 +49,4 @@ export default async function FoodLogPage() {
       />
     </>
   );
-}
-
-// "YYYY-MM-DD" for a Date in LOCAL time — the calendar day the targets engine projects
-// against. Mirrors the food-log view's toISODay so SSR `today` matches the client's "Today".
-function toLocalISODay(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }
