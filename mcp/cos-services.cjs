@@ -92,6 +92,33 @@ const SERVICES = [
   },
 ];
 
+// Optional: WhatsApp add-on (only if whatsapp-mcp repo is installed)
+const WHATSAPP_MCP_DIR = (process.env.WHATSAPP_MCP_DIR || 'C:/Users/kmy38/Code/whatsapp-mcp').replace(/\\/g, '/');
+const WHATSAPP_BRIDGE_BIN = path.join(WHATSAPP_MCP_DIR, 'whatsapp-bridge', 'whatsapp-bridge.exe');
+if (fs.existsSync(WHATSAPP_BRIDGE_BIN)) {
+  SERVICES.push(
+    {
+      name: 'mcp-whatsappbridge',
+      cmd: WHATSAPP_BRIDGE_BIN,
+      args: [],
+      cwd: path.join(WHATSAPP_MCP_DIR, 'whatsapp-bridge'),
+      env: { WHATSAPP_BRIDGE_PORT: process.env.WHATSAPP_GO_PORT || '8010' },
+    },
+    {
+      name: 'mcp-whatsapp',
+      cmd: process.execPath,
+      args: [SG, '--stdio', `${UV} run --directory ${WHATSAPP_MCP_DIR}/whatsapp-mcp-server main.py`, '--outputTransport', 'streamableHttp', '--streamableHttpPath', '/mcp', '--port', process.env.WHATSAPP_MCP_BRIDGE_PORT || '8006', '--cors', '--logLevel', 'info'],
+      cwd: path.join(WHATSAPP_MCP_DIR, 'whatsapp-mcp-server'),
+      env: {
+        WHATSAPP_MCP_DIR: WHATSAPP_MCP_DIR,
+        WHATSAPP_DB_PATH: `${WHATSAPP_MCP_DIR}/whatsapp-bridge/store/messages.db`,
+        WHATSMEOW_DB_PATH: `${WHATSAPP_MCP_DIR}/whatsapp-bridge/store/whatsapp.db`,
+        WHATSAPP_API_URL: `http://localhost:${process.env.WHATSAPP_GO_PORT || '8010'}/api`,
+      },
+    },
+  );
+}
+
 function readPids() {
   try { return JSON.parse(fs.readFileSync(PID_FILE, 'utf8')); } catch { return {}; }
 }
@@ -160,7 +187,7 @@ function stop() {
 
 function status() {
   const pids = readPids();
-  const ports = { 'mcp-board': 8001, 'mcp-calendar': 8003, 'mcp-guard': 8004, 'mcp-vault': 8005, 'mcp-nutrition': 8007, 'mcp-guardsvc': 8009, 'mcp-search': 8008 };
+  const ports = { 'mcp-board': 8001, 'mcp-calendar': 8003, 'mcp-guard': 8004, 'mcp-vault': 8005, 'mcp-nutrition': 8007, 'mcp-whatsappbridge': 8010, 'mcp-whatsapp': 8006, 'mcp-guardsvc': 8009, 'mcp-search': 8008 };
   console.log('  Service          Port   PID      Status');
   console.log('  ───────────────────────────────────────────');
   for (const svc of SERVICES) {
