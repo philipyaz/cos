@@ -22,11 +22,53 @@
 # return an explicit UNTRUSTED verdict, they do NOT pretend content is clean.
 # This script's WARN here is only about boot timing; the safety is in the MCP.
 #
+# On Windows (no launchctl), this script delegates to mcp/cos-services.cjs instead
+# (spawns processes hidden via windowsHide:true — no terminal windows).
+#
 # Always exits 0 (best-effort): a bridge hiccup must not block the app from starting.
 set -u
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+
+# --- Windows path: if no launchd (not macOS), use cos-services.cjs instead ---
+if ! command -v launchctl >/dev/null 2>&1; then
+  # Source config
+  if [ -f "$REPO/config/load-config.sh" ]; then
+    . "$REPO/config/load-config.sh"
+  fi
+  # Ensure MCP server deps are installed (silent, fast if already up-to-date)
+  for d in "$REPO"/mcp/board-server "$REPO"/mcp/calendar-server "$REPO"/mcp/guard-server "$REPO"/mcp/vault-server "$REPO"/mcp/nutrition-server; do
+    [ -d "$d/node_modules" ] || (cd "$d" && npm install --prefer-offline --silent 2>/dev/null)
+  done
+  # Start services (hidden, no terminal windows) if not already running
+  node "$REPO/mcp/cos-services.cjs" start
+  sleep 2
+  # Probe bridges
+  for pair in "board ${BOARD_BRIDGE_PORT:-8001}" "calendar ${CALENDAR_BRIDGE_PORT:-8003}" "guard ${GUARD_BRIDGE_PORT:-8004}" "vault ${VAULT_BRIDGE_PORT:-8005}" "nutrition ${NUTRITION_BRIDGE_PORT:-8007}"; do
+    name=$(echo "$pair" | cut -d' ' -f1)
+    port=$(echo "$pair" | cut -d' ' -f2)
+    if curl -s --max-time 2 "http://127.0.0.1:$port/mcp" >/dev/null 2>&1; then
+      echo "[mcp] $name bridge up on :$port"
+    else
+      echo "[mcp] WARN: $name bridge DOWN on :$port — see mcp/logs/$name.err.log"
+    fi
+  done
+  # Probe sidecars
+  if curl -s --max-time 2 "http://127.0.0.1:${GUARD_SIDECAR_PORT:-8009}/healthz" | grep -q '"ok":true' 2>/dev/null; then
+    echo "[mcp] guardsvc up on :${GUARD_SIDECAR_PORT:-8009}"
+  else
+    echo "[mcp] WARN: guardsvc starting on :${GUARD_SIDECAR_PORT:-8009}"
+  fi
+  if curl -s --max-time 2 "http://127.0.0.1:${SEARCH_SIDECAR_PORT:-8008}/healthz" | grep -q '"ok":true' 2>/dev/null; then
+    echo "[mcp] search up on :${SEARCH_SIDECAR_PORT:-8008}"
+  else
+    echo "[mcp] WARN: search starting on :${SEARCH_SIDECAR_PORT:-8008}"
+  fi
+  exit 0
+fi
+# --- End Windows path ---
+
 U=$(id -u)
 LA="$HOME/Library/LaunchAgents"
-REPO=$(cd "$(dirname "$0")/.." && pwd)
 
 # Source the machine config (REPO_ROOT + the exported *_BRIDGE_PORT / *_SIDECAR_PORT
 # vars) so a port override in config/cos.env propagates to the probes below. Guarded
