@@ -6,6 +6,18 @@ automatically by [release-please](https://github.com/googleapis/release-please) 
 sections by hand. For the versioning policy and how a release is cut, see
 [Releases & versioning](https://philipyaz.github.io/cos/reference/releasing/).
 
+## [0.2.0](https://github.com/philipyaz/cos/compare/v0.1.0...v0.2.0) (2026-06-14)
+
+
+### Features
+
+* Add-ons framework + Nutrition & Chef add-on (food log, pantry, meal plan, weight loss) ([#17](https://github.com/philipyaz/cos/issues/17)) ([222b2a8](https://github.com/philipyaz/cos/commit/222b2a82ee41a5b29a9f97a2219677c7c22e11ae))
+
+
+### Documentation
+
+* release & versioning docs, community-health files, and control-model accuracy fixes ([#15](https://github.com/philipyaz/cos/issues/15)) ([f5ede89](https://github.com/philipyaz/cos/commit/f5ede893ecff0b9682cb36bf3ccd940b37025303))
+
 ## [0.1.0](https://github.com/philipyaz/cos/releases/tag/v0.1.0) (2026-06-13)
 
 First open-source release of Cos — a personal "chief of staff" that lays your work and
