@@ -12,6 +12,11 @@ task, plus a short explanation of the intent.
 - [`mail.md`](./mail.md) — important / unread email (the Gmail MCP). Board-reconciliation companion:
   the `/mail-to-board` skill (sweeps **received + sent** mail onto the board, respecting manual board edits).
 - [`calendar.md`](./calendar.md) — meeting prep + Google Meet recaps (the Google Calendar MCP).
+- [`unanswered.md`](./unanswered.md) — messages still awaiting **your reply**, across WhatsApp + Gmail
+  (the `whatsapp` + Gmail MCPs) via `/unanswered-messages`: flag the reply-owed ones onto the board's
+  **Unanswered** surface, mark them answered once you reply. **Not the knowledge router** — it's a
+  board-first sweep (no `/second-brain-ingest`), read-only on both channels, with **its own** watermark
+  (`cos/answer-checked` + `config/unanswered-messages-state.json`, distinct from the reconcilers').
 - [`board-organize.md`](./board-organize.md) — periodic board housekeeping (the `board` MCP) via
   `/board-organize`: cluster the flat cases the reconcilers leave into Initiatives ▸ Workstreams,
   grounded in priorities, never re-homing what a human placed. **Not a channel-ingest recipe** — it
@@ -80,6 +85,7 @@ We don't ship intervals. Reasonable starting points (tune to taste in the schedu
 | Voice | every 5–15 min |
 | Mail | every 10–15 min |
 | Calendar | every 30–60 min |
+| Unanswered | every 15 min |
 | Board organize | every 2–6 h (or daily) |
 
 Because every recipe is idempotent, running them more often is cheap and safe — extra cycles that

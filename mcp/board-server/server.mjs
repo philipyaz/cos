@@ -718,6 +718,93 @@ async function handleUpdateMessage(args) {
   );
 }
 
+// Store a brand-new message and flag it needs-a-reply (it lands in the board's
+// 'Unanswered messages' view). Created standalone; caseId/reminderId ALSO link it.
+async function handleAddUnansweredMessage(args) {
+  if (!MESSAGE_SOURCE.includes(args.source)) {
+    return err(`'source' must be one of: ${MESSAGE_SOURCE.join(", ")}.`);
+  }
+  if (typeof args.from !== "string" || args.from.trim() === "") {
+    return err("'from' is required.");
+  }
+
+  const payload = { source: args.source, from: args.from };
+  // `url` forwards the original-message deep-link (e.g. the Gmail thread URL) — the
+  // board route validates it (normalizeMessageUrl) and only stores an absolute http(s) one.
+  // `context` is the one-sentence line shown in the unanswered view.
+  for (const k of ["subject", "preview", "body", "receivedAt", "url", "context", "caseId", "reminderId"]) {
+    if (typeof args[k] === "string" && args[k] !== "") payload[k] = args[k];
+  }
+  if (typeof args.read === "boolean") payload.read = args.read;
+  // needsAnswer defaults true server-side — this tool always flags.
+
+  const { data, errorResult } = await api("POST", "/api/messages", payload);
+  if (errorResult) return errorResult;
+
+  const m = data.message;
+  return text(
+    `Stored unanswered message ${m.id} — [${m.source}] ${m.from}${m.subject ? ` — ${m.subject}` : ""}${
+      m.caseId ? `, linked to ${m.caseId}` : ""
+    }${m.reminderId ? `, on ${m.reminderId}` : ""}`
+  );
+}
+
+// Flag an EXISTING message as needing a reply (it appears in the unanswered view).
+async function handleMarkMessageUnanswered(args) {
+  const id = str(args.id);
+  if (!id) return err("'id' is required, e.g. 'M-1'.");
+
+  const payload = { needsAnswer: true };
+  if (typeof args.context === "string" && args.context !== "") payload.context = args.context;
+
+  const { data, errorResult } = await api("PATCH", `/api/messages/${encodeURIComponent(id)}`, payload);
+  if (errorResult) return errorResult;
+
+  const m = data.message;
+  return text(
+    `Flagged message ${m.id} as unanswered — [${m.source}] ${m.from}${m.subject ? ` — ${m.subject}` : ""}`
+  );
+}
+
+// Mark a message answered — a pure status flip that drops it from the unanswered
+// view (stamps answeredAt server-side). No cascade to any linked case/reminder.
+async function handleMarkMessageAnswered(args) {
+  const id = str(args.id);
+  if (!id) return err("'id' is required, e.g. 'M-1'.");
+
+  const { data, errorResult } = await api("PATCH", `/api/messages/${encodeURIComponent(id)}`, {
+    answered: true,
+  });
+  if (errorResult) return errorResult;
+
+  const m = data.message;
+  return text(
+    `Marked message ${m.id} answered — [${m.source}] ${m.from}${m.subject ? ` — ${m.subject}` : ""}`
+  );
+}
+
+// List the messages the user still owes a reply to (needsAnswer, not answered),
+// newest first; `limit` trims the summary client-side.
+async function handleListUnansweredMessages(args) {
+  const { data, errorResult } = await api("GET", "/api/messages?status=unanswered");
+  if (errorResult) return errorResult;
+
+  let messages = data.messages ?? [];
+  if (!messages.length) return text("No unanswered messages — nothing awaiting a reply.");
+  const limit = typeof args.limit === "number" && args.limit > 0 ? args.limit : null;
+  const shown = limit ? messages.slice(0, limit) : messages;
+  const lines = [`Unanswered messages (${messages.length}):`];
+  for (const m of shown) {
+    lines.push(
+      `  - ${m.id} [${m.source}] ${m.from}${m.subject ? ` — ${m.subject}` : ""}` +
+        (m.caseId ? ` → ${m.caseId}` : "") +
+        (m.context ? `\n      ${m.context}` : "")
+    );
+  }
+  if (limit && messages.length > limit) lines.push(`  … and ${messages.length - limit} more.`);
+  return text(lines.join("\n"));
+}
+
 // ── Reminder tools ───────────────────────────────────────────────────────────
 // Reminders are lightweight nudges (CHECK/DO) that ride the board API at
 // /api/reminders. reminder.caseId optionally links to ANY tier (initiative/
@@ -1291,6 +1378,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleLinkMessage(args);
     case "update_message":
       return handleUpdateMessage(args);
+    case "add_unanswered_message":
+      return handleAddUnansweredMessage(args);
+    case "mark_message_unanswered":
+      return handleMarkMessageUnanswered(args);
+    case "mark_message_answered":
+      return handleMarkMessageAnswered(args);
+    case "list_unanswered_messages":
+      return handleListUnansweredMessages(args);
     // reminders
     case "create_reminder":
       return handleCreateReminder(args);

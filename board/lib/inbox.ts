@@ -102,6 +102,16 @@ export function selectInboxMessages(
     .sort((a, b) => (new Date(a.receivedAt).getTime() - new Date(b.receivedAt).getTime()) * dir);
 }
 
+// The messages the user still owes a reply to, newest-first. UNANSWERED ===
+// flagged as awaiting a reply (needsAnswer) AND not yet answered (no answeredAt);
+// marking answered sets answeredAt, so the row leaves this view. Pure (no I/O),
+// mirroring selectInboxMessages — the single source of truth for the unanswered set.
+export function selectUnansweredMessages(messages: MessageRecord[]): MessageRecord[] {
+  return messages
+    .filter((m) => m.needsAnswer === true && !m.answeredAt)
+    .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime());
+}
+
 // The text to render as a message's full content in a reading pane. Prefer the
 // real `body`; when it's empty/whitespace — a SUMMARY-ONLY stub (e.g. a Gmail
 // message linked with just a preview, or one whose raw body the guard withheld) —

@@ -4,6 +4,8 @@ The Cos Board is the action surface of a local-first, agent-native personal oper
 
 > _Note (2026-05-31): Living spec. Priorities and sizing are estimates for a single-user, local-only build; phasing is the recommended build order, not a contract._
 
+> **See also — [Unanswered messages](unanswered-messages.md):** the board view of *"messages I still owe a reply to"* — an additive flag (`needsAnswer` / `answeredAt`) on the existing `MessageRecord`, filled by the `/unanswered-messages` sweep and cleared the moment you reply.
+
 ## Where the board is today
 
 - **Read-only SSR display.** The kanban renders from `force-dynamic` server reads of `board/data/cases.json`. No drag-drop, no inline editing, the top **Filter** button is dead, and per-column **+** / **...** buttons do nothing.

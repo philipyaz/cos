@@ -99,6 +99,8 @@ const nowISO = (): string => new Date().toISOString();
 // events/reminders/priorities); Settings.addons rides through db.settings opaquely.
 // v10 carries db.weights forward when it is an array (like the v9 arrays) and
 // db.nutritionGoal forward when it is an object (the singleton — mirrors db.settings).
+// v11 (MessageRecord.needsAnswer/answeredAt/context — the unanswered-messages flags) is
+// likewise a no-op here: the optionals ride through the messages[] array verbatim.
 export function migrate(raw: unknown): DBShape {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
@@ -1111,6 +1113,9 @@ export function cleanCases(db: DBShape, ids: string[]): { cases: number; message
       continue;
     }
     const stillReferenced =
+      // A still-owed reply must survive its case's deletion (it stays in the
+      // unanswered view even with no case); its dangling caseId is cleared below.
+      (m.needsAnswer === true && !m.answeredAt) ||
       Boolean(m.reminderId) ||
       survivingMsgRefs.has(m.id) ||
       (m.caseId !== undefined && survivingCaseIds.has(m.caseId));

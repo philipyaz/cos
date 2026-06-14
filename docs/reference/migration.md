@@ -126,3 +126,12 @@ migrates older files up to the current version on read (`store.ts` `migrate()`).
   `board/lib/message-url.ts` (`normalizeMessageUrl`) as an absolute http(s) URL on every message write
   path (so the stored value is always safe to render as an `<a href>`). Full design:
   [board features](../features/board.md).
+- **v10 → v11 — the unanswered-messages fields** (`MessageRecord.needsAnswer?` / `answeredAt?` /
+  `context?`). A message you still owe a reply to is the **same** `MessageRecord` carrying a status flag —
+  `needsAnswer` (awaiting a reply), `answeredAt` (ISO; absent ⇒ still unanswered, set on mark-answered),
+  and `context` (the one-sentence line shown in the view). **Purely additive + back-compatible:** old v10
+  files read unchanged — `migrate()` is a no-op for them (the `messages[]` array rides through verbatim),
+  and an absent `needsAnswer` reads as not-flagged. **No new enums.** The unanswered set is the pure
+  predicate `needsAnswer && !answeredAt` (`board/lib/inbox.ts` `selectUnansweredMessages`), filled by the
+  `/unanswered-messages` sweep and the board MCP tools, and cleared the moment you reply. Full design:
+  [Unanswered messages](../features/unanswered-messages.md).
