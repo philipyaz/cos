@@ -422,3 +422,126 @@ Each component skill owns its own troubleshooting — jump straight there:
 fallback, cold sidecar), **/mcp-bridge-setup** (the node/simdjson + pm2 gotchas, a bridge DOWN,
 Cowork can't see a server), **/backup-recovery** (bad magic / auth-tag throw / sha256 mismatch on
 restore). Re-run only the failing step, re-check its CHECKPOINT, then resume the sequence.
+
+---
+
+## Windows setup (alternative to the macOS sequence above)
+
+On **Windows 10/11**, the system uses **`mcp/cos-services.cjs`** (a lightweight Node process manager
+with `windowsHide: true`) instead of launchd plists. The bridges, sidecars, ports, and `.mcp.json`
+are identical — only the process supervision layer differs. No terminal windows appear.
+
+### Prerequisites (Windows)
+- [ ] **node + npm** (LTS via nodejs.org installer or winget). `node -v`.
+- [ ] **supergateway** — `npm install -g supergateway`
+- [ ] **uv** — `pip install uv` (lands in `%LOCALAPPDATA%\Python\…\Scripts\uv.exe`)
+- [ ] **ANTHROPIC_API_KEY** in `config/secrets.env` (same as macOS)
+- [ ] **Git Bash** (ships with Git for Windows) — `ensure-bridges.sh` is a shell script
+
+### The Windows sequence
+
+#### Step 0 — seed runtime stores
+```sh
+cd "$(git rev-parse --show-toplevel)"
+cp tests/fixtures/board-seed.json board/data/cases.json   # or skip for empty board
+cp config/settings.example.json config/settings.json      # EDIT principalEmail
+```
+
+#### Step 0.5 — generate `config/cos.env`
+Write `config/cos.env` with Windows-appropriate paths. Key differences from macOS:
+```sh
+# Key values to set (example for a typical Windows install):
+BREW_PREFIX="C:/Users/<you>/AppData/Roaming/npm"        # npm global prefix
+NODE_BIN="C:/Program Files/nodejs/node.exe"
+UV_BIN="C:/Users/<you>/AppData/Local/Python/.../Scripts/uv.exe"
+SUPERGATEWAY_BIN="C:/Users/<you>/AppData/Roaming/npm/supergateway.cmd"
+LAUNCH_AGENTS_DIR=""                                     # unused on Windows
+COWORK_CONFIG="C:/Users/<you>/AppData/Roaming/Claude/claude_desktop_config.json"
+VAULT_NAME="<your-vault-name>"
+# Ports: same as macOS (3000, 8001–8009)
+```
+
+#### Step 1 — setup-vault
+Same as macOS: `cp -R vault/example-vault vault/<name>`, set `VAULT_NAME` in `cos.env`,
+confirm gitignored. No platform difference.
+
+#### Step 2 — guard sidecar (heuristic mode)
+On Windows, the guard sidecar runs in **heuristic-only** mode by default (the gated
+Llama-Prompt-Guard-2 model requires CUDA or macOS Metal). Provision the venv once:
+```sh
+uv sync --directory guard          # creates guard/.venv with base deps
+```
+The `cos-services.cjs` manager calls `guard/.venv/Scripts/uvicorn.exe` directly.
+To upgrade to the real model later: install CUDA toolkit, then
+`uv sync --directory guard --extra model` and change `COS_GUARD_MODEL` in `cos-services.cjs`.
+
+#### Step 3 — MCP bridges (cos-services.cjs replaces launchd)
+Instead of installing launchd plists + running `launchctl`, Windows uses:
+```sh
+# Install npm deps for each MCP server
+for d in mcp/board-server mcp/calendar-server mcp/guard-server mcp/vault-server mcp/nutrition-server; do
+  (cd "$d" && npm install)
+done
+
+# Provision sidecars (creates .venv)
+uv sync --directory guard
+uv sync --directory search
+
+# Start all services (hidden, no terminal windows)
+node mcp/cos-services.cjs start
+```
+
+**How it works:** `mcp/cos-services.cjs` spawns each process with Node's `windowsHide: true` +
+`detached: true`, so no console windows appear. It tracks PIDs in `mcp/logs/.cos-services.pid`
+and uses `taskkill /T /F` to stop process trees.
+
+Commands:
+- `node mcp/cos-services.cjs start`   — start all (idempotent, skips already-running)
+- `node mcp/cos-services.cjs stop`    — stop all
+- `node mcp/cos-services.cjs status`  — show running services + PIDs
+- `node mcp/cos-services.cjs restart` — stop + start
+
+The bridge launcher scripts live at `mcp/launchers/bridge-{board,calendar,guard,vault,nutrition}.cjs`
+— they spawn supergateway with the correct args, avoiding MSYS/Git-Bash path mangling (which
+converts `/mcp` → `C:/Program Files/Git/mcp`).
+
+**CHECKPOINT** — same as macOS (all ports respond to MCP `initialize`):
+```sh
+for port in 8001 8003 8004 8005 8007; do
+  curl -s --max-time 3 -X POST "http://127.0.0.1:$port/mcp" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}' \
+    | grep -o '"name":"[a-z]*"'
+done
+# expect: board / calendar / guard / vault / nutrition
+curl -s http://127.0.0.1:8009/healthz   # guard sidecar
+curl -s http://127.0.0.1:8008/healthz   # search sidecar
+```
+
+#### Step 4 — backup (Windows adaptation)
+The backup script (`node backup/backup.mjs`) is cross-platform Node. The only difference:
+- **Recovery key**: On macOS it lives in the Keychain (`cos-backup-key`). On Windows, set it as
+  the environment variable `COS_BACKUP_KEY` (or store it in Windows Credential Manager via
+  `cmdkey /generic:cos-backup-key /user:cos /pass:<passphrase>`).
+- **Scheduled run**: Instead of a launchd plist, use Windows Task Scheduler:
+  ```powershell
+  schtasks /create /tn "cos-backup" /tr "node C:\Projects\cos\backup\backup.mjs" /sc daily /st 03:30
+  ```
+
+### Day-to-day on Windows
+- **`cd board && npm run dev`** — calls `ensure-bridges.sh`, which detects Windows (no `launchctl`),
+  runs `node mcp/cos-services.cjs start`, probes all ports, then starts Next.js. Same output as macOS.
+- **Health check**: `node mcp/cos-services.cjs status` or `sh mcp/ensure-bridges.sh`
+- **Logs**: `mcp/logs/{board,calendar,guard,vault,nutrition,guardsvc,search}.{out,err}.log`
+- **Auto-start on login** (optional): Add a shortcut to
+  `node C:\Projects\cos\mcp\cos-services.cjs start` in `shell:startup`.
+
+### Windows-specific gotchas
+- **MSYS path mangling**: Git Bash converts `/mcp` in CLI args to `C:/Program Files/Git/mcp`. The
+  launcher `.cjs` scripts avoid this by passing args via Node's `spawn()` (not shell). Never run
+  supergateway directly from Git Bash with a `/`-prefixed path arg.
+- **Firewall**: Windows Defender may prompt on first run to allow `node.exe` and `uvicorn.exe` to
+  listen on localhost. Allow private network access.
+- **Port conflicts**: Check with `netstat -ano | findstr :8001` (or any port).
+- **No terminal windows**: If processes spawn visible consoles, ensure you're using
+  `cos-services.cjs` (not pm2, which can't hide windows without a Windows Service wrapper).
