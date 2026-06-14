@@ -1,6 +1,6 @@
 ---
 name: cos-setup
-description: The single first-run entry point that stands up the WHOLE Cos system, sequencing the four component setup skills in dependency order — setup-vault → guard-setup → mcp-bridge-setup → backup-recovery. Use when setting up the chief of staff system, doing a first-run setup, onboarding a new machine, or asking for the full setup; also when you're unsure which component skill to run first and want the guided end-to-end runbook.
+description: The single first-run entry point that stands up the WHOLE Cos system, sequencing the four component setup skills in dependency order — setup-vault → guard-setup → mcp-bridge-setup → backup-recovery — and ENDING with cos-onboarding, the verify-and-start-using-it handoff. Use when setting up the chief of staff system, doing a first-run setup, onboarding a new machine, or asking for the full setup; also when you're unsure which component skill to run first and want the guided end-to-end runbook.
 allowed-tools: Bash, Read
 ---
 
@@ -12,7 +12,10 @@ each step produces what the next one needs: the **vault** must exist before the 
 it and before backup has something to protect; the **guard model** must be configured before the
 guard bridge can report a real classifier; **all the bridges + sidecars** must be wired before
 backup can snapshot live, populated stores. Run the four sub-skills **in order**, stop at each
-**CHECKPOINT**, and only advance when it passes. End with the **§ End-to-end verification**.
+**CHECKPOINT**, and only advance when it passes. Then run the **§ End-to-end verification** and
+hand off with **Step 5 — `/cos-onboarding`**, which verifies the whole system is up, explains
+day-to-day use, and schedules the starter recipes. Wiring the system is only half the job — a user
+left at "it's installed, now what?" is the failure this last step exists to prevent.
 
 Every shell step below begins with the loader line
 `source "$(git rev-parse --show-toplevel)/config/load-config.sh"`, which exports `$REPO_ROOT`
@@ -288,8 +291,14 @@ fi
   machinery Step 3 set up, and `/whatsapp-triage` depends on the **board** + **guard** MCPs already
   being live (Steps 2–3). Its external `store/` is **not** covered by Step 4's backup (that protects
   the Cos repo's own stores), so its position relative to Step 4 doesn't matter.
-- **Prereq** — **go** (builds the bridge), **uv**, **supergateway**, the **whatsapp-mcp checkout**
-  at `$WHATSAPP_MCP_DIR`, and a **phone running WhatsApp** for the QR pairing.
+- **Prereq (this is the most hands-on add-on — flag these UP FRONT so the user isn't surprised)** —
+  **go** (`brew install go`; there is **no prebuilt binary** — the bridge is compiled with
+  `go build`), **uv**, **supergateway**, the **whatsapp-mcp checkout** at `$WHATSAPP_MCP_DIR` (lives
+  **outside** this repo), and — the step people get stuck on — **a phone running WhatsApp for a
+  one-time QR pairing**. The pairing is **human-in-the-loop**: the bridge prints a QR you scan from
+  the phone (**WhatsApp → Settings → Linked Devices → Link a Device**); it cannot be skipped or
+  automated, and until the log shows `Connected to WhatsApp` the MCP has no data. Budget a few
+  minutes for it.
 - **Run** — invoke **`/whatsapp-mcp-setup`** (clone/build → QR pair → install both LaunchAgents →
   register both clients → wire `ensure-bridges.sh` → verify `list_chats`).
 - **CHECKPOINT** — the whatsapp MCP answers and returns chat data:
@@ -373,48 +382,26 @@ Start each shell with `source "$(git rev-parse --show-toplevel)/config/load-conf
 
 If all four pass, the Cos system is fully stood up: vault populated, guard classifying,
 all bridges live for Cowork + Claude Code, and the live data under encrypted off-site backup.
-Tell the user so, then hand off with the **first-open** and **Day-to-day** notes below.
+Tell the user so — then **don't stop here**: run **Step 5** to hand it over.
 
-## First open in Claude Cowork — confirm the connectors + allow their tools
-The config is wired, but **Cowork reads `claude_desktop_config.json` only at launch** and gates tool
-calls behind a permission prompt. Walk the user through the one-time activation:
+### Step 5 — cos-onboarding (START USING IT: verify, explain, schedule)
+The four steps + the verification above prove the system is *wired*; they do **not** leave the user
+knowing what to do with it. Invoke **`/cos-onboarding`** as the final move — it is the
+"you're set up, now actually use it" handoff and owns everything that used to be tacked on here:
 
-1. **Quit + reopen Cowork (⌘Q)** so it re-reads the config.
-2. **Settings → Connectors** — confirm the local MCP servers (**board**, **calendar**, **guard**,
-   **vault**, plus **openwhispr**/**whatsapp**/**nutrition** if added) are listed and enabled. They run as local
-   stdio `command` servers (not custom HTTP connectors), so they appear automatically once the config
-   is read — if they don't, it didn't parse: re-check §5 of **/mcp-bridge-setup**.
-3. **Allow their tools** — the first time an agent calls a server's tool, Cowork asks for permission;
-   choose **"Always allow"** per server so routine agent runs aren't interrupted by a prompt every
-   call (or approve per-tool if you prefer — "Always allow" is the smooth default for your own local
-   servers).
+- **The first-open Cowork activation** — ⌘Q-reopen so Cowork re-reads `claude_desktop_config.json`,
+  confirm the connectors are listed/enabled, and **"Always allow"** each server's tools. (Cowork
+  reads its config **only at launch** and re-prompts after any MCP change — the recurring gotcha.)
+- **The day-to-day mental model** — the bridges are launchd-managed and need no action each session;
+  `npm run dev` / `mcp/ensure-bridges.sh` self-heal + health-check them; Guard ships OFF, backups run
+  nightly.
+- **Starting to use it** — schedules the **starter recipes** as Cowork scheduled tasks: the minimal
+  set is the **mail** reconciler (`/mail-to-board`), the **WhatsApp** reconciler (`/whatsapp-triage`,
+  needs the Step 3.5 add-on), and the **board housekeeper** (`/board-organize`), plus the
+  `config/auto-sync.json` posture.
 
-(Claude Code uses the HTTP bridges via `.mcp.json` and skips this — the connector-approval step is
-Cowork-only.)
-
-## Day-to-day: running Cos in later sessions
-After setup, most of it runs itself — make sure the user knows how to live with it and how to check health:
-
-- **The bridges + sidecars are launchd-managed.** The core four (`board`, `calendar`, `guard`,
-  `vault`), the `search`/`guardsvc` uv sidecars, and any optional add-ons you wired
-  (`openwhispr`/`whatsapp`/`nutrition`) start at login and **crash-restart** on their own
-  (`KeepAlive`). A normal next session needs **no action** — Cowork and Claude Code reach them
-  through the bridges whether or not the board dev app is running.
-- **Starting the board self-heals them.** `cd board && npm run dev` (or `npm run start`) runs
-  `mcp/ensure-bridges.sh` *first*, which bootstraps + kickstarts every service and prints one line each
-  (`[mcp] vault bridge up on :$VAULT_BRIDGE_PORT` … or `WARN: <name> bridge DOWN on :<port> — see
-  mcp/logs/<name>.err.log`). Reading that startup block IS the fastest health check.
-- **One-shot health check anytime:** run `mcp/ensure-bridges.sh` directly — it is re-runnable and never
-  stops anything, so it's the canonical "is everything up?" probe. Backstops: `launchctl list | grep
-  chiefofstaff` (each agent + last exit code; `0` = clean) and `curl -s "$GUARD_SIDECAR_URL/healthz"` /
-  `curl -s "$SEARCH_SIDECAR_URL/healthz"` for the sidecars.
-- **In-app health surfaces:** **`/security`** (guard model, deps, master toggle), **`/backups`** (last
-  snapshot + recovery-key readiness), **`/vault`** (vault wiring + Obsidian deep-link).
-- **When a client can't see a server:** re-run `mcp/ensure-bridges.sh`; if it's still missing, re-run
-  **/mcp-bridge-setup**. Per-service logs for any WARN/DOWN live in `mcp/logs/<name>.{err,out}.log`.
-- **The two standing gestures:** Guard ships **OFF** — flip it ON in `/security` once its model deps are
-  ready (or deliberately leave it OFF; see **/guard-setup**). Backups then run **nightly at 03:30** on
-  their own once **/backup-recovery** is set up.
+`/cos-onboarding` is **re-runnable** — point the user back at it anytime they ask "is everything
+running / what do I do day to day?". Running it is what turns a finished install into a used product.
 
 ## If something fails
 Each component skill owns its own troubleshooting — jump straight there:

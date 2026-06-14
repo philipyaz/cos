@@ -128,7 +128,7 @@ Then run the **`cos-setup`** skill in **Claude Code** — the single first-run e
 setup-vault → guard-setup → mcp-bridge-setup → backup-recovery
 ```
 
-When it finishes, open the board at your `$BOARD_URL` (`http://localhost:$BOARD_PORT` by default) and start triaging.
+It finishes by running **`cos-onboarding`** — the "you're set up, now actually use it" handoff: it verifies the whole system is up, explains how Cos runs day to day, and helps you schedule the [starter recipes](#recipes--what-to-schedule-in-cowork) in Cowork. Re-run it anytime to check health or refresh how things work. When it's done, open the board at your `$BOARD_URL` (`http://localhost:$BOARD_PORT` by default) and start triaging.
 
 > **Skills in Cowork.** Claude **Code** loads the repo's `.claude/skills/` directly. Claude **Cowork Desktop** adds custom skills through its **UI** (it doesn't read the repo filesystem), so `cos-setup` (via `setup-vault`) packages the runtime **`vault-operations`** skill — which drives the vault's async **submit-then-poll** ingest — into a ZIP for you to upload via **Customize → `+` (Skills) → Create skill**. (Even without it, the `ingest`/`ingest_status` tool descriptions carry the same guidance.)
 

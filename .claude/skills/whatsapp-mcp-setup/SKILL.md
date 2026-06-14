@@ -65,6 +65,15 @@ optional `openwhispr` voice add-on):
 > username, or ports.
 
 ## Prerequisites
+
+> **This is the most hands-on add-on — set expectations before starting.** Unlike the core servers,
+> it (a) needs a **Go toolchain** to *compile* the bridge (no prebuilt binary), (b) lives in an
+> **external checkout** outside this repo, and (c) requires a **one-time, human-in-the-loop QR
+> pairing** from **a phone running WhatsApp** (§3) — you scan a QR the bridge prints in the terminal
+> (**WhatsApp → Settings → Linked Devices → Link a Device**). The pairing cannot be skipped or
+> automated, and **until the bridge logs `Connected to WhatsApp` the MCP returns no data**. Budget a
+> few minutes for it and have the phone to hand.
+
 - **`go`** (Homebrew: `brew install go`) — builds the whatsmeow bridge (`go build`). Required; the
   bridge is a compiled binary, there is no prebuilt one.
 - **`uv`** (Homebrew: `brew install uv`) — runs the Python MCP server and provisions its venv
