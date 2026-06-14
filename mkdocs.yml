@@ -121,9 +121,17 @@ nav:
       - Triage skills: architecture/triage-skills.md
       - MCP servers: architecture/mcp-servers.md
       - Platform API: architecture/platform-api.md
+      - Add-ons: architecture/addons.md
       - Case hierarchy: architecture/hierarchy.md
   - Security:
       - Prompt-injection guard: security/guard.md
+  - Features:
+      - Board: features/board.md
+      - Calendar: features/calendar.md
+      - Reminders: features/reminders.md
+      - Priorities: features/priorities.md
+      - Activity: features/activity.md
+      - Nutrition & Chef: features/nutrition.md
   - Subsystems:
       - Semantic search: reference/search.md
       - Encrypted backup: reference/backup.md

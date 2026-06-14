@@ -61,6 +61,32 @@
 #      shows up in / drops from `starred`, the missing-text / non-number-position
 #      400s + unknown-PRI 404s, and delete. Snapshots+restores cases.json
 #      (priorities + the starred flags live there). Skipped when no board is up.
+#  10c. api-nutrition-gate — ONLY if a board is running: the v9 Add-ons GATE contract
+#      for the Nutrition food-log API (/api/nutrition/log + /api/addons[/:id]). A
+#      DISABLED add-on rejects every WRITE with 404 while its GET reads still return
+#      data (reads are ungated); enabling via PATCH /api/addons/nutrition flips the
+#      gate live AND bumps db.version; unknown-id 404 + non-boolean-enabled 400.
+#      Snapshots+restores cases.json (settings.addons + foodLogs live there). Skipped
+#      when no board is up.
+#  10d. api-nutrition-foodlog — ONLY if a board is running: the v9 food-log API
+#      (/api/nutrition/log[/:id]) after enabling the add-on: create→FOOD-<n>+version
+#      bump (estimated defaults true, macros + health persist), list + from/to/slot/
+#      date filters, GET-by-id, PATCH persist (an x-actor:agent write round-trips),
+#      the missing-date/slot/description + non-number-calories + bad-slot/bad-health
+#      400s, and delete. Snapshots+restores cases.json. Skipped when no board is up.
+#  10g. api-nutrition-weight — ONLY if a board is running: the v10 weight-loss API
+#      (/api/nutrition/weight[/:id] + /goal + /targets) after enabling the add-on:
+#      create→WEIGHT-<n>+version bump (weightKg + note persist), UPSERT BY DAY (a
+#      re-POST for the same date is a 200 update, created:false, same id — one point
+#      per day), lb→kg at the boundary (a weightLb-only POST stores canonical kg), list
+#      ASC-by-date + the from/to window, GET-by-id, PATCH persist (an x-actor:agent
+#      write round-trips), PUT/GET the goal singleton, GET /targets → a configured
+#      envelope (numeric dailyCalorieTarget + P/F/C macros + the always-on
+#      not-medical-advice flag), the missing-date / neither-weightKg-nor-weightLb +
+#      bad-goal (bad sex/activity, non-positive age) 400s, the GATE (a DISABLED add-on
+#      404s POST /weight + PUT /goal while GET /weight + /goal + /targets stay 200), and
+#      delete. Snapshots+restores cases.json (weights + nutritionGoal + settings.addons
+#      live there → net-zero). Skipped when no board is up.
 #  11. api-trust — ONLY if a board is running: drives the guard sender-trust
 #      WHITELIST API via the board's thin PROXY routes (/api/trust[/:email] →
 #      the guard sidecar :8009): GET always-200 online shape, add (default
@@ -472,6 +498,125 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-priorities: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-priorities"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10c. api-nutrition-gate (only when a board is healthy) ------------------
+# The v9 Add-ons GATE contract for the Nutrition food-log API: a DISABLED add-on
+# rejects every WRITE (POST/PATCH/DELETE /api/nutrition/log) with 404 while its GET
+# reads still return data; enabling via PATCH /api/addons/nutrition flips the gate
+# live AND bumps db.version; an unknown add-on id 404s and a non-boolean enabled 400s.
+# Snapshots + restores board/data/cases.json (settings.addons + foodLogs live there →
+# net-zero). Skipped when no board.
+echo
+echo "--- [10c] api-nutrition-gate (live board) -------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-gate.mjs"; then
+    echo "api-nutrition-gate: PASS"
+  else
+    echo "api-nutrition-gate: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-gate"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10d. api-nutrition-foodlog (only when a board is healthy) ---------------
+# The v9 food-log API (board/app/api/nutrition/log[/:id]) with the add-on ENABLED:
+# create bumps version + mints a FOOD-<n> id (estimated defaults true; macros + health
+# persist); GET lists it and the from/to + slot + date filters narrow correctly;
+# GET-by-id; PATCH persists (incl. an x-actor:agent agent-attributed write); the
+# missing-date/slot/description + non-number-calories + bad-slot/bad-health writes are
+# rejected with 400; DELETE drops the id. Snapshots + restores board/data/cases.json
+# (foodLogs + settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10d] api-nutrition-foodlog (live board) ----------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-foodlog.mjs"; then
+    echo "api-nutrition-foodlog: PASS"
+  else
+    echo "api-nutrition-foodlog: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-foodlog"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10e. api-nutrition-pantry (only when a board is healthy) ----------------
+# The v9 pantry API (board/app/api/nutrition/pantry[/:id]) with the add-on ENABLED:
+# create bumps version + mints a PANTRY-<n> id (name + quantity/unit/category/location/
+# expiresAt/lowStock persist); GET lists it and the category/location/expiringBefore/
+# lowStock filters narrow correctly; GET-by-id; PATCH persists (an x-actor:agent write
+# round-trips); the missing-name + bad-category/bad-location + non-number-quantity +
+# non-boolean-lowStock + bad-expiresAt writes are rejected with 400; the GATE (a DISABLED
+# add-on 404s every WRITE while GET still returns); DELETE drops the id. Snapshots +
+# restores board/data/cases.json (pantry + settings.addons live there → net-zero).
+# Skipped when no board.
+echo
+echo "--- [10e] api-nutrition-pantry (live board) -----------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-pantry.mjs"; then
+    echo "api-nutrition-pantry: PASS"
+  else
+    echo "api-nutrition-pantry: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-pantry"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10f. api-nutrition-mealplan (only when a board is healthy) --------------
+# The v9 meal-plan API (board/app/api/nutrition/plan[/:id]) with the add-on ENABLED:
+# create bumps version + mints a MEAL-<n> id (date/slot/title persist; status defaults
+# "planned"; SOFT pantryItemIds tolerated — a dangling ref is allowed); the eventId
+# RELATIONAL check (a real EVT-<n> from POST /api/events links + sticks; an UNKNOWN
+# eventId → 400; PATCH eventId:null UNLINKS); GET lists it and the from/to + slot +
+# status filters narrow; GET-by-id; PATCH persists a status transition planned→cooked
+# (an x-actor:agent write round-trips); the missing-date/slot/title + bad-slot/bad-status
+# writes are rejected with 400; the GATE (a DISABLED add-on 404s every WRITE while GET
+# still returns); DELETE drops the id. Snapshots + restores board/data/cases.json
+# (mealPlan + events + settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10f] api-nutrition-mealplan (live board) ---------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-mealplan.mjs"; then
+    echo "api-nutrition-mealplan: PASS"
+  else
+    echo "api-nutrition-mealplan: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-mealplan"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10g. api-nutrition-weight (only when a board is healthy) ----------------
+# The v10 weight-loss API (board/app/api/nutrition/weight[/:id] + /goal + /targets) with the
+# add-on ENABLED: create bumps version + mints a WEIGHT-<n> id (weightKg + note persist);
+# UPSERT BY DAY (a re-POST for the same date is a 200 update, created:false, same id — one
+# point per day); lb→kg at the boundary (a weightLb-only POST stores canonical kg); GET lists
+# it ASC-by-date and the from/to window narrows; GET-by-id; PATCH persists (an x-actor:agent
+# write round-trips); PUT then GET the goal SINGLETON; GET /targets returns a CONFIGURED
+# envelope (numeric dailyCalorieTarget + P/F/C macros + the always-on not-medical-advice
+# flag); the missing-date / neither-weightKg-nor-weightLb + bad-goal (bad sex/activity,
+# non-positive age) writes are rejected with 400; the GATE (a DISABLED add-on 404s POST
+# /weight + PUT /goal while GET /weight + /goal + /targets stay 200); DELETE drops the id.
+# Snapshots + restores board/data/cases.json (weights + nutritionGoal + settings.addons live
+# there → net-zero). Skipped when no board.
+echo
+echo "--- [10g] api-nutrition-weight (live board) -----------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-weight.mjs"; then
+    echo "api-nutrition-weight: PASS"
+  else
+    echo "api-nutrition-weight: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-weight"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."

@@ -35,10 +35,10 @@ username. The only value still derived inline is `$U=$(id -u)`, which `launchctl
 
 The whole system runs on these ports — keep them free
 (`lsof -nP -iTCP:<port> -sTCP:LISTEN`): **3000** board app · **8001** board · **8003** calendar ·
-**8004** guard · **8005** vault (core bridges) · **8002** openwhispr · **8006** whatsapp (optional
-add-on bridges) · **8008** search · **8009** guard · **8010** whatsapp-go (sidecars). The `8002`
-(openwhispr) and `8006`/`8010` (WhatsApp) ports are only needed if you run those optional add-ons
-(Steps 3.4 / 3.5).
+**8004** guard · **8005** vault (core bridges) · **8002** openwhispr · **8006** whatsapp · **8007**
+nutrition (optional add-on bridges) · **8008** search · **8009** guard · **8010** whatsapp-go
+(sidecars). The `8002` (openwhispr), `8006`/`8010` (WhatsApp), and `8007` (Nutrition & Chef) ports
+are only needed if you run those optional add-ons (Steps 3.4 / 3.5 / 3.6).
 
 ---
 
@@ -125,6 +125,10 @@ GUARD_SIDECAR_PORT="8009"
 WHATSAPP_MCP_DIR="$HOME/Code/whatsapp-mcp"
 WHATSAPP_MCP_BRIDGE_PORT="8006"
 WHATSAPP_GO_PORT="8010"
+# Nutrition & Chef add-on (optional; built-in in-repo mcp/nutrition-server, wired by
+# nutrition-mcp-setup). NUTRITION_BRIDGE_PORT is the supergateway HTTP bridge for Claude Code;
+# the add-on is gated per-board via Settings.addons, so naming the port only documents it.
+NUTRITION_BRIDGE_PORT="8007"
 EOF
   mv "$tmp" config/cos.env
   echo "Wrote config/cos.env — review it, then continue. setup-vault (Step 1) fills VAULT_NAME."
@@ -297,6 +301,33 @@ fi
     | grep -o '"name":"whatsapp"' && echo "whatsapp MCP OK"
   ```
 
+### Step 3.6 — nutrition-mcp-setup (OPTIONAL: the Nutrition & Chef add-on)
+- **What it does** — wires the built-in **`nutrition`** add-on MCP (a thin in-repo Node `fetch`
+  wrapper over the board's `/api/nutrition/*` routes, fronted by a supergateway + launchd bridge on
+  `:8007`, plus a direct Cowork stdio entry), then **ENABLES** the add-on
+  (`Settings.addons.nutrition.enabled`) so its food-log / pantry / meal-plan **writes** land and the
+  three `/nutrition/*` nav pages appear — so the **`/nutrition-chef`** operator skill can log meals,
+  track the pantry, and plan a week. Entirely optional and the SIMPLEST add-on (no sidecar, no
+  external repo, no secret); skip it if you don't want nutrition on the board.
+- **Why HERE (after the core bridges)** — it reuses the same supergateway/launchd/`ensure-bridges.sh`
+  machinery Step 3 set up, and it is a pure wrapper over the **board** API (Steps 1–3 must be live).
+  Its data rides `cases.json`, so it is covered by Step 4's backup automatically — but its position
+  relative to Step 4 doesn't matter.
+- **Prereq** — node + supergateway (from Step 3) and the **board** reachable on `CRM_BASE_URL`.
+  There is nothing external to install, clone, build, pair, or authenticate.
+- **Run** — invoke **`/nutrition-mcp-setup`** (confirm `NUTRITION_BRIDGE_PORT=8007` → install the
+  `:8007` bridge plist → register both clients → ENABLE the add-on → verify a `log_food` write
+  round-trips).
+- **CHECKPOINT** — the nutrition MCP answers and the add-on is enabled:
+  ```sh
+  source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+  curl -s -X POST "$NUTRITION_BRIDGE_URL/mcp" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}' \
+    | grep -o '"name":"nutrition"' && echo "nutrition MCP OK"
+  curl -s "$BOARD_URL/api/addons" | grep -o '"id":"nutrition"[^}]*"enabled":true' && echo "add-on enabled"
+  ```
+
 ### Step 4 — backup-recovery (LAST: protect the now-populated stores)
 - **What it does** — stands up **daily AES-256-GCM-encrypted, off-site** snapshots of the live
   stores (board `board/data/`, guard `guard/data/`, `config/`, and the **vault**) to a private
@@ -325,8 +356,8 @@ Run from the repo root with the board dev app up (`cd board && npm run dev`, por
 Start each shell with `source "$(git rev-parse --show-toplevel)/config/load-config.sh"`:
 
 1. **All four core bridges answer** (the step-3 loop) → `board / calendar / guard / vault` (plus
-   `openwhispr` on `:8002` if you ran the Step 3.4 add-on). `launchctl list | grep chiefofstaff`
-   shows each with exit 0.
+   `openwhispr` on `:8002`, `whatsapp` on `:8006`, and/or `nutrition` on `:8007` if you ran the
+   Step 3.4 / 3.5 / 3.6 add-ons). `launchctl list | grep chiefofstaff` shows each with exit 0.
 2. **Guard sidecar healthy** — `curl -s "$GUARD_SIDECAR_URL/healthz"` → `{"ok":true,
    "classifier":"model:…"}` (or the deliberate `heuristic-fallback`). The **search** sidecar is
    best-effort: `curl -s "$SEARCH_SIDECAR_URL/healthz"` → `{"ok":true}` (a cold/absent one just
@@ -350,7 +381,7 @@ calls behind a permission prompt. Walk the user through the one-time activation:
 
 1. **Quit + reopen Cowork (⌘Q)** so it re-reads the config.
 2. **Settings → Connectors** — confirm the local MCP servers (**board**, **calendar**, **guard**,
-   **vault**, plus **openwhispr**/**whatsapp** if added) are listed and enabled. They run as local
+   **vault**, plus **openwhispr**/**whatsapp**/**nutrition** if added) are listed and enabled. They run as local
    stdio `command` servers (not custom HTTP connectors), so they appear automatically once the config
    is read — if they don't, it didn't parse: re-check §5 of **/mcp-bridge-setup**.
 3. **Allow their tools** — the first time an agent calls a server's tool, Cowork asks for permission;
@@ -364,10 +395,11 @@ Cowork-only.)
 ## Day-to-day: running Cos in later sessions
 After setup, most of it runs itself — make sure the user knows how to live with it and how to check health:
 
-- **The bridges + sidecars are launchd-managed.** All nine (`board`, `calendar`, `guard`, `vault`, the
-  optional `openwhispr`/`whatsapp` add-ons, and the `search`/`guardsvc` uv sidecars) start at login and
-  **crash-restart** on their own (`KeepAlive`). A normal next session needs **no action** — Cowork and
-  Claude Code reach them through the bridges whether or not the board dev app is running.
+- **The bridges + sidecars are launchd-managed.** The core four (`board`, `calendar`, `guard`,
+  `vault`), the `search`/`guardsvc` uv sidecars, and any optional add-ons you wired
+  (`openwhispr`/`whatsapp`/`nutrition`) start at login and **crash-restart** on their own
+  (`KeepAlive`). A normal next session needs **no action** — Cowork and Claude Code reach them
+  through the bridges whether or not the board dev app is running.
 - **Starting the board self-heals them.** `cd board && npm run dev` (or `npm run start`) runs
   `mcp/ensure-bridges.sh` *first*, which bootstraps + kickstarts every service and prints one line each
   (`[mcp] vault bridge up on :$VAULT_BRIDGE_PORT` … or `WARN: <name> bridge DOWN on :<port> — see

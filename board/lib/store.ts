@@ -13,6 +13,13 @@ import type {
   Reminder,
   ReminderTask,
   PriorityNote,
+  FoodLogEntry,
+  PantryItem,
+  MealPlanEntry,
+  WeightEntry,
+  NutritionGoal,
+  ActivityLevel,
+  BiologicalSex,
   MessageRecord,
   CaseNote,
   Task,
@@ -21,11 +28,16 @@ import type {
   CaseDomain,
   CaseKind,
   ReminderStatus,
+  MealSlot,
+  HealthRating,
+  PantryCategory,
+  PantryLocation,
+  MealPlanStatus,
   TaskStatus,
   Priority,
   Actor,
 } from "./types";
-import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, caseKind } from "./types";
+import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, caseKind } from "./types";
 import {
   hierarchyViolation,
   rollupFor,
@@ -83,6 +95,10 @@ const nowISO = (): string => new Date().toISOString();
 // CaseRecord.starred is an optional that rides through migrateCase's spread.
 // v8 (MessageRecord.url) is likewise a no-op here — the optional original-message
 // deep-link rides through the messages[] array verbatim (no per-message transform).
+// v9 carries db.foodLogs/pantryItems/mealPlanEntries forward when present (like
+// events/reminders/priorities); Settings.addons rides through db.settings opaquely.
+// v10 carries db.weights forward when it is an array (like the v9 arrays) and
+// db.nutritionGoal forward when it is an object (the singleton — mirrors db.settings).
 export function migrate(raw: unknown): DBShape {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
@@ -102,6 +118,12 @@ export function migrate(raw: unknown): DBShape {
   if (Array.isArray(obj.events)) db.events = obj.events as DBShape["events"];
   if (Array.isArray(obj.reminders)) db.reminders = obj.reminders as DBShape["reminders"];
   if (Array.isArray(obj.priorities)) db.priorities = obj.priorities as DBShape["priorities"];
+  if (Array.isArray(obj.foodLogs)) db.foodLogs = obj.foodLogs as DBShape["foodLogs"];
+  if (Array.isArray(obj.pantryItems)) db.pantryItems = obj.pantryItems as DBShape["pantryItems"];
+  if (Array.isArray(obj.mealPlanEntries)) db.mealPlanEntries = obj.mealPlanEntries as DBShape["mealPlanEntries"];
+  if (Array.isArray(obj.weights)) db.weights = obj.weights as DBShape["weights"];
+  // The goal is a SINGLETON object (not an array) — carry it forward like db.settings.
+  if (obj.nutritionGoal && typeof obj.nutritionGoal === "object") db.nutritionGoal = obj.nutritionGoal as DBShape["nutritionGoal"];
   if (Array.isArray(obj.pending)) db.pending = obj.pending as DBShape["pending"];
   if (Array.isArray(obj.views)) db.views = obj.views as DBShape["views"];
   if (Array.isArray(obj.labels)) db.labels = obj.labels as DBShape["labels"];
@@ -146,6 +168,18 @@ function validateDB(db: DBShape): void {
   for (const p of db.priorities ?? []) {
     if (!p || typeof p.id !== "string" || !p.id) throw new Error("invalid priority: missing id");
   }
+  for (const x of db.foodLogs ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid food log: missing id");
+  }
+  for (const x of db.pantryItems ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid pantry item: missing id");
+  }
+  for (const x of db.mealPlanEntries ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid meal plan entry: missing id");
+  }
+  for (const x of db.weights ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid weight entry: missing id");
+  }
 }
 
 async function ensureFile(): Promise<void> {
@@ -153,7 +187,7 @@ async function ensureFile(): Promise<void> {
     await fs.access(DATA_FILE);
   } catch {
     await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [] };
+    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [], foodLogs: [], pantryItems: [], mealPlanEntries: [], weights: [] };
     await fs.writeFile(DATA_FILE, JSON.stringify(empty, null, 2), "utf8");
   }
 }
@@ -166,6 +200,10 @@ function parseAndMigrate(text: string): DBShape {
   if (!db.events) db.events = [];
   if (!db.reminders) db.reminders = [];
   if (!db.priorities) db.priorities = [];
+  if (!db.foodLogs) db.foodLogs = [];
+  if (!db.pantryItems) db.pantryItems = [];
+  if (!db.mealPlanEntries) db.mealPlanEntries = [];
+  if (!db.weights) db.weights = []; // nutritionGoal stays optional/absent (a singleton, set on first PUT)
   if (!db.pending) db.pending = [];
   if (!db.views) db.views = [];
   if (!db.labels) db.labels = [];
@@ -339,6 +377,38 @@ export function nextPriorityId(db: DBShape): string {
   return `PRI-${max + 1}`;
 }
 
+export function nextFoodLogId(db: DBShape): string {
+  const max = (db.foodLogs ?? [])
+    .map((x) => parseInt(x.id.replace(/^[A-Za-z]+-/, ""), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `FOOD-${max + 1}`;
+}
+
+export function nextPantryItemId(db: DBShape): string {
+  const max = (db.pantryItems ?? [])
+    .map((x) => parseInt(x.id.replace(/^[A-Za-z]+-/, ""), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `PANTRY-${max + 1}`;
+}
+
+export function nextMealPlanId(db: DBShape): string {
+  const max = (db.mealPlanEntries ?? [])
+    .map((x) => parseInt(x.id.replace(/^[A-Za-z]+-/, ""), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `MEAL-${max + 1}`;
+}
+
+export function nextWeightId(db: DBShape): string {
+  const max = (db.weights ?? [])
+    .map((x) => parseInt(x.id.replace(/^[A-Za-z]+-/, ""), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `WEIGHT-${max + 1}`;
+}
+
 export function nextTaskId(caseRec: CaseRecord): string {
   // Highest existing -T<k> + 1 so re-id under merge / after deletes stays unique.
   const max = caseRec.tasks
@@ -400,6 +470,28 @@ export function findReminder(db: DBShape, id: string): Reminder | undefined {
 
 export function findPriority(db: DBShape, id: string): PriorityNote | undefined {
   return (db.priorities ?? []).find((p) => p.id === id);
+}
+
+export function findFoodLog(db: DBShape, id: string): FoodLogEntry | undefined {
+  return (db.foodLogs ?? []).find((x) => x.id === id);
+}
+
+export function findPantryItem(db: DBShape, id: string): PantryItem | undefined {
+  return (db.pantryItems ?? []).find((x) => x.id === id);
+}
+
+export function findMealPlanEntry(db: DBShape, id: string): MealPlanEntry | undefined {
+  return (db.mealPlanEntries ?? []).find((x) => x.id === id);
+}
+
+export function findWeight(db: DBShape, id: string): WeightEntry | undefined {
+  return (db.weights ?? []).find((x) => x.id === id);
+}
+
+// Find the weigh-in for a given calendar day. `date` is the UNIQUE upsert key (one
+// point per day), so this is how upsertWeight decides update-in-place vs append.
+export function findWeightByDate(db: DBShape, day: string): WeightEntry | undefined {
+  return (db.weights ?? []).find((x) => x.date === day);
 }
 
 // Reminders linked to a node — reminder.caseId is the single source of truth for
@@ -612,6 +704,206 @@ export function applyPriorityUpdate(rec: PriorityNote, patch: Record<string, unk
   if ("position" in patch) rec.position = typeof patch.position === "number" ? patch.position : undefined;
   rec.updatedAt = nowISO();
   return rec;
+}
+
+// An OPTIONAL number coercion mirroring toOptionalString: null/""/non-number clears
+// the field (undefined), a finite number is kept. Used by the nutrition chokepoints
+// for the optional numeric fields (macros / quantity / servings).
+const toOptionalNumber = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isFinite(v) ? v : undefined;
+
+// Merge a partial patch onto a food-log entry. Only the keys present in `patch` are
+// touched (so `null`/"" clears an optional, an absent key leaves it). Identity
+// (id, createdAt) is never changed here. This is the single un-validating coercive
+// chokepoint (mirrors applyEventUpdate): an empty `description` is ignored, `slot`/
+// `health` are validated against their VALID_ arrays (an out-of-enum value is ignored;
+// health additionally clears on null/""), and a non-number `calories` is ignored
+// (the required field is never blanked).
+export function applyFoodLogUpdate(rec: FoodLogEntry, patch: Record<string, unknown>): FoodLogEntry {
+  if ("date" in patch && typeof patch.date === "string") rec.date = patch.date;
+  if ("slot" in patch && VALID_MEAL_SLOT.includes(patch.slot as MealSlot)) rec.slot = patch.slot as MealSlot;
+  if ("description" in patch && typeof patch.description === "string" && patch.description.trim() !== "") {
+    rec.description = patch.description.trim();
+  }
+  if ("items" in patch) rec.items = Array.isArray(patch.items) ? patch.items.map(String) : undefined;
+  if ("calories" in patch && typeof patch.calories === "number" && Number.isFinite(patch.calories)) {
+    rec.calories = patch.calories;
+  }
+  if ("protein" in patch) rec.protein = toOptionalNumber(patch.protein);
+  if ("carbs" in patch) rec.carbs = toOptionalNumber(patch.carbs);
+  if ("fat" in patch) rec.fat = toOptionalNumber(patch.fat);
+  if ("health" in patch) {
+    rec.health =
+      patch.health != null && VALID_HEALTH_RATING.includes(patch.health as HealthRating)
+        ? (patch.health as HealthRating)
+        : undefined;
+  }
+  if ("estimated" in patch) rec.estimated = Boolean(patch.estimated);
+  if ("note" in patch) rec.note = toOptionalString(patch.note);
+  rec.updatedAt = nowISO();
+  return rec;
+}
+
+// Merge a partial patch onto a pantry item. Same coercive chokepoint contract as
+// applyFoodLogUpdate: an empty `name` is ignored (the required field is never blanked),
+// `category`/`location` are validated against their VALID_ arrays (out-of-enum / null/""
+// clears), optional numbers/strings clear on null/"". `lowStock` stores a bare boolean.
+export function applyPantryUpdate(rec: PantryItem, patch: Record<string, unknown>): PantryItem {
+  if ("name" in patch && typeof patch.name === "string" && patch.name.trim() !== "") rec.name = patch.name.trim();
+  if ("quantity" in patch) rec.quantity = toOptionalNumber(patch.quantity);
+  if ("unit" in patch) rec.unit = toOptionalString(patch.unit);
+  if ("category" in patch) {
+    rec.category =
+      patch.category != null && VALID_PANTRY_CATEGORY.includes(patch.category as PantryCategory)
+        ? (patch.category as PantryCategory)
+        : undefined;
+  }
+  if ("location" in patch) {
+    rec.location =
+      patch.location != null && VALID_PANTRY_LOCATION.includes(patch.location as PantryLocation)
+        ? (patch.location as PantryLocation)
+        : undefined;
+  }
+  if ("expiresAt" in patch) rec.expiresAt = toOptionalString(patch.expiresAt);
+  if ("lowStock" in patch) rec.lowStock = patch.lowStock ? true : undefined;
+  if ("note" in patch) rec.note = toOptionalString(patch.note);
+  rec.updatedAt = nowISO();
+  return rec;
+}
+
+// Merge a partial patch onto a meal-plan entry. Same coercive chokepoint contract:
+// an empty `title` is ignored, `slot`/`status` are validated against their VALID_
+// arrays (out-of-enum ignored; status is required so it is never blanked), optional
+// numbers/strings/arrays clear on null/""/non-array. `eventId: null` UNLINKS the
+// opt-in calendar link; `pantryItemIds` are soft refs (their relational validity is
+// NOT checked here — dangling refs are tolerated). The RELATIONAL validity of a
+// non-empty eventId (∈ db.events) is asserted by the route inside the lock, not here.
+export function applyMealPlanUpdate(rec: MealPlanEntry, patch: Record<string, unknown>): MealPlanEntry {
+  if ("date" in patch && typeof patch.date === "string") rec.date = patch.date;
+  if ("slot" in patch && VALID_MEAL_SLOT.includes(patch.slot as MealSlot)) rec.slot = patch.slot as MealSlot;
+  if ("title" in patch && typeof patch.title === "string" && patch.title.trim() !== "") rec.title = patch.title.trim();
+  if ("recipe" in patch) rec.recipe = toOptionalString(patch.recipe);
+  if ("ingredients" in patch) rec.ingredients = Array.isArray(patch.ingredients) ? patch.ingredients.map(String) : undefined;
+  if ("servings" in patch) rec.servings = toOptionalNumber(patch.servings);
+  if ("status" in patch && VALID_MEAL_PLAN_STATUS.includes(patch.status as MealPlanStatus)) {
+    rec.status = patch.status as MealPlanStatus;
+  }
+  if ("pantryItemIds" in patch) {
+    // De-dupe + drop empties (soft refs; relational validity is NOT enforced here).
+    // An empty result collapses to undefined so clearing doesn't persist [].
+    const arr = Array.isArray(patch.pantryItemIds)
+      ? Array.from(new Set(patch.pantryItemIds.map(String).map((s) => s.trim()).filter(Boolean)))
+      : [];
+    rec.pantryItemIds = arr.length ? arr : undefined;
+  }
+  if ("eventId" in patch) rec.eventId = toOptionalString(patch.eventId); // null/"" unlinks the calendar link
+  if ("note" in patch) rec.note = toOptionalString(patch.note);
+  rec.updatedAt = nowISO();
+  return rec;
+}
+
+// ── Weight time-series + goal (v10) ────────────────────────────────────────────
+// Upsert a weigh-in BY DAY: a weight series is one-point-per-day (the date is the
+// unique key the trend / feedback-loop math relies on), so re-logging an existing day
+// UPDATES that entry in place (preserving its id + createdAt) rather than appending a
+// duplicate. Returns the entry and whether it was newly created (the route maps
+// created → 201, updated → 200). The caller passes an already-coerced weightKg (the
+// route handles the lb→kg conversion at its boundary so storage stays canonical kg).
+export function upsertWeight(
+  db: DBShape,
+  input: { date: string; weightKg: number; note?: string },
+): { entry: WeightEntry; created: boolean } {
+  if (!db.weights) db.weights = [];
+  const now = nowISO();
+  const existing = findWeightByDate(db, input.date);
+  if (existing) {
+    existing.weightKg = input.weightKg;
+    existing.note = toOptionalString(input.note);
+    existing.updatedAt = now;
+    return { entry: existing, created: false };
+  }
+  const entry: WeightEntry = {
+    id: nextWeightId(db),
+    date: input.date,
+    weightKg: input.weightKg,
+    note: toOptionalString(input.note),
+    createdAt: now,
+    updatedAt: now,
+  };
+  db.weights.push(entry);
+  return { entry, created: true };
+}
+
+// Merge a partial patch onto a weigh-in. Same coercive chokepoint contract as the v9
+// apply* helpers (mirrors applyFoodLogUpdate): identity (id, createdAt) is never changed
+// here, an absent key is left untouched, and the required numeric `weightKg` is only
+// written when it is a finite number (it is never blanked). `date` accepts any string
+// (its YYYY-MM-DD shape is validated by the route); `note` clears on null/"". NOTE: a
+// `date` change here can collide with another day's entry — uniqueness-by-day is the
+// route's concern (this is the un-validating coercive chokepoint, like the others).
+export function applyWeightUpdate(rec: WeightEntry, patch: Record<string, unknown>): WeightEntry {
+  if ("date" in patch && typeof patch.date === "string") rec.date = patch.date;
+  if ("weightKg" in patch && typeof patch.weightKg === "number" && Number.isFinite(patch.weightKg)) {
+    rec.weightKg = patch.weightKg;
+  }
+  if ("note" in patch) rec.note = toOptionalString(patch.note);
+  rec.updatedAt = nowISO();
+  return rec;
+}
+
+// Read the goal/profile SINGLETON, or undefined when none is set yet.
+export function getNutritionGoal(db: DBShape): NutritionGoal | undefined {
+  return db.nutritionGoal;
+}
+
+// Create-or-replace the goal SINGLETON (the PUT path). The caller passes already-
+// validated/coerced fields (the route enforces the enums + required numerics). createdAt
+// is PRESERVED across a replace (first-set time is sticky, like the other records);
+// updatedAt is always bumped. Optional rateKgPerWeek/weightUnit fall back to their
+// defaults (0.5 / "kg") when absent so the stored singleton is always complete.
+export function setNutritionGoal(
+  db: DBShape,
+  input: {
+    sex: BiologicalSex;
+    age: number;
+    heightCm: number;
+    activity: ActivityLevel;
+    targetWeightKg: number;
+    rateKgPerWeek?: number;
+    weightUnit?: "kg" | "lb";
+  },
+): NutritionGoal {
+  const now = nowISO();
+  const goal: NutritionGoal = {
+    sex: input.sex,
+    age: input.age,
+    heightCm: input.heightCm,
+    activity: input.activity,
+    targetWeightKg: input.targetWeightKg,
+    rateKgPerWeek: typeof input.rateKgPerWeek === "number" && Number.isFinite(input.rateKgPerWeek) ? input.rateKgPerWeek : 0.5,
+    weightUnit: input.weightUnit === "lb" ? "lb" : "kg",
+    createdAt: db.nutritionGoal?.createdAt ?? now, // sticky first-set time across replaces
+    updatedAt: now,
+  };
+  db.nutritionGoal = goal;
+  return goal;
+}
+
+// Merge a partial patch onto the EXISTING goal singleton (the PATCH path; the route
+// 404s when no goal is set yet). The single un-validating coercive chokepoint for the
+// goal: enums are validated against their VALID_ arrays (out-of-enum ignored), required
+// numerics are only written when finite + positive (never blanked to a nonsense value),
+// and weightUnit accepts only "kg"|"lb". Identity (createdAt) is never changed.
+export function applyGoalPatch(goal: NutritionGoal, patch: Record<string, unknown>): NutritionGoal {
+  if ("sex" in patch && VALID_BIOLOGICAL_SEX.includes(patch.sex as BiologicalSex)) goal.sex = patch.sex as BiologicalSex;
+  if ("age" in patch && typeof patch.age === "number" && Number.isFinite(patch.age) && patch.age > 0) goal.age = patch.age;
+  if ("heightCm" in patch && typeof patch.heightCm === "number" && Number.isFinite(patch.heightCm) && patch.heightCm > 0) goal.heightCm = patch.heightCm;
+  if ("activity" in patch && VALID_ACTIVITY_LEVEL.includes(patch.activity as ActivityLevel)) goal.activity = patch.activity as ActivityLevel;
+  if ("targetWeightKg" in patch && typeof patch.targetWeightKg === "number" && Number.isFinite(patch.targetWeightKg) && patch.targetWeightKg > 0) goal.targetWeightKg = patch.targetWeightKg;
+  if ("rateKgPerWeek" in patch && typeof patch.rateKgPerWeek === "number" && Number.isFinite(patch.rateKgPerWeek) && patch.rateKgPerWeek > 0) goal.rateKgPerWeek = patch.rateKgPerWeek;
+  if ("weightUnit" in patch && (patch.weightUnit === "kg" || patch.weightUnit === "lb")) goal.weightUnit = patch.weightUnit;
+  goal.updatedAt = nowISO();
+  return goal;
 }
 
 // ── Activity / notes ─────────────────────────────────────────────────────────
@@ -887,5 +1179,48 @@ export function removePriority(db: DBShape, id: string): boolean {
   const idx = db.priorities.findIndex((p) => p.id === id);
   if (idx === -1) return false;
   db.priorities.splice(idx, 1);
+  return true;
+}
+
+// Hard-remove a food-log entry from db.foodLogs. Food-log entries have NO outbound
+// links to clean up, so this is a plain splice (mirrors removeEvent/removePriority).
+// Returns whether one was removed.
+export function removeFoodLog(db: DBShape, id: string): boolean {
+  if (!db.foodLogs) return false;
+  const idx = db.foodLogs.findIndex((x) => x.id === id);
+  if (idx === -1) return false;
+  db.foodLogs.splice(idx, 1);
+  return true;
+}
+
+// Hard-remove a pantry item from db.pantryItems. A removed item leaves any
+// mealPlanEntry.pantryItemIds soft ref dangling — this is TOLERATED (not scrubbed),
+// matching the data-model contract. Returns whether one was removed.
+export function removePantryItem(db: DBShape, id: string): boolean {
+  if (!db.pantryItems) return false;
+  const idx = db.pantryItems.findIndex((x) => x.id === id);
+  if (idx === -1) return false;
+  db.pantryItems.splice(idx, 1);
+  return true;
+}
+
+// Hard-remove a meal-plan entry from db.mealPlanEntries. Its optional eventId link
+// is the meal-plan side's source of truth, so removing the entry leaves no dangling
+// reference (the CalendarEvent, if any, is kept). Returns whether one was removed.
+export function removeMealPlanEntry(db: DBShape, id: string): boolean {
+  if (!db.mealPlanEntries) return false;
+  const idx = db.mealPlanEntries.findIndex((x) => x.id === id);
+  if (idx === -1) return false;
+  db.mealPlanEntries.splice(idx, 1);
+  return true;
+}
+
+// Hard-remove a weigh-in from db.weights. A weigh-in has NO outbound links to clean up,
+// so this is a plain splice (mirrors removeFoodLog). Returns whether one was removed.
+export function removeWeight(db: DBShape, id: string): boolean {
+  if (!db.weights) return false;
+  const idx = db.weights.findIndex((x) => x.id === id);
+  if (idx === -1) return false;
+  db.weights.splice(idx, 1);
   return true;
 }

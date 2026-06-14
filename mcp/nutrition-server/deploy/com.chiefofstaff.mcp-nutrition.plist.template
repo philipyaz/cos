@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ____________________________________________________________________________
+     TEMPLATE for the nutrition MCP bridge LaunchAgent (com.chiefofstaff.mcp-nutrition).
+
+     The "Nutrition & Chef" ADD-ON bridge: the nutrition stdio server
+     (node, mcp/nutrition-server/server.mjs) -> Streamable HTTP on :8007 via
+     supergateway, for Claude Cowork Desktop and Claude Code. Managed by launchd
+     (pm2 6.x cannot fork on this machine).
+
+     Like board/calendar — and UNLIKE vault — this server makes NO outbound LLM
+     calls and needs NO secret: it only talks to the board's HTTP API over
+     CRM_BASE_URL. So ProgramArguments runs supergateway DIRECTLY around the node
+     child (no launch wrapper), and the only env is PATH + the idle-exit opt-in.
+
+     This is the COMMITTED template. The INSTALLED copy lives at
+       ~/Library/LaunchAgents/com.chiefofstaff.mcp-nutrition.plist
+     and is NOT version-controlled. It carries these substitution placeholders,
+     filled by the installer (sed) from the loader (config/load-config.sh),
+     because launchd cannot expand $VARS itself:
+       __BREW_PREFIX__             Homebrew prefix (e.g. /opt/homebrew) — $BREW_PREFIX
+       __REPO__                    this cos checkout's ABSOLUTE path — $REPO_ROOT
+       __NUTRITION_BRIDGE_PORT__   the supergateway HTTP port (8007) — $NUTRITION_BRIDGE_PORT
+
+     Install it by substituting all placeholders, e.g.:
+
+       source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+       sed -e "s#__BREW_PREFIX__#$BREW_PREFIX#g" \
+           -e "s#__REPO__#$REPO_ROOT#g" \
+           -e "s#__NUTRITION_BRIDGE_PORT__#${NUTRITION_BRIDGE_PORT:-8007}#g" \
+         "$REPO_ROOT/mcp/nutrition-server/deploy/com.chiefofstaff.mcp-nutrition.plist.template" \
+         > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-nutrition.plist"
+
+     See the /nutrition-mcp-setup skill for the full runbook.
+     ____________________________________________________________________________ -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.chiefofstaff.mcp-nutrition</string>
+
+  <!-- supergateway wraps the nutrition node stdio server and serves it over Streamable
+       HTTP on the bridge port, path /mcp. The --stdio value is ONE array element (a single
+       string supergateway parses + spawns); use ABSOLUTE paths (launchd's PATH lacks
+       Homebrew and can't see an nvm/asdf shim). -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BREW_PREFIX__/bin/supergateway</string>
+    <string>--stdio</string>
+    <string>node __REPO__/mcp/nutrition-server/server.mjs</string>
+    <string>--outputTransport</string>
+    <string>streamableHttp</string>
+    <string>--streamableHttpPath</string>
+    <string>/mcp</string>
+    <string>--port</string>
+    <string>__NUTRITION_BRIDGE_PORT__</string>
+    <string>--cors</string>
+    <string>--logLevel</string>
+    <string>info</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- __BREW_PREFIX__/bin is required: supergateway's `#!/usr/bin/env node`
+         shebang and the `--stdio "node ..."` child both resolve node via PATH,
+         and launchd's default PATH does not include Homebrew. -->
+    <key>PATH</key>
+    <string>__BREW_PREFIX__/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+
+    <!-- The server reads/writes the board over CRM_BASE_URL; pin it so it doesn't depend
+         on the launchd cwd. Default matches the server's own fallback (localhost:3000). -->
+    <key>CRM_BASE_URL</key>
+    <string>http://localhost:3000</string>
+
+    <!-- Idle-exit OPT-IN. mcp-kit's idle-exit is OFF by default (so a long-lived direct
+         stdio client like Cowork never dies on idle); the supergateway bridge path leaks an
+         idle stateless child, so this bridge opts in to reap it after 5 min idle (a request
+         in flight disarms the timer; supergateway respawns on the next call). Set ONLY here
+         (the bridge), never in the direct-stdio Cowork config. -->
+    <key>COS_MCP_IDLE_EXIT_MS</key>
+    <string>300000</string>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__REPO__/mcp/logs/nutrition.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__REPO__/mcp/logs/nutrition.err.log</string>
+</dict>
+</plist>
+<!-- ____________________________________________________________________________
+     MANAGE COMMANDS (run after substituting the placeholders and writing the
+     installed copy to ~/Library/LaunchAgents/com.chiefofstaff.mcp-nutrition.plist).
+     Port below shows the default (8007) — use your resolved $NUTRITION_BRIDGE_PORT:
+
+       U=$(id -u)
+
+       # stop + unload (bootout) — needed before re-bootstrapping after a plist edit
+       launchctl bootout gui/$U/com.chiefofstaff.mcp-nutrition 2>/dev/null || true
+
+       # load (bootstrap) — register the agent with launchd; RunAtLoad starts it
+       launchctl bootstrap gui/$U ~/Library/LaunchAgents/com.chiefofstaff.mcp-nutrition.plist
+
+       # start / restart now (kickstart with -k = kill + restart; picks up edits)
+       launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-nutrition
+
+       # health check (the supergateway HTTP bridge on :8007)
+       curl -s http://127.0.0.1:8007/mcp
+
+     Note: ensure-bridges.sh bootstraps + kickstarts this agent on `npm dev/start`,
+     but launchd owns its lifecycle (RunAtLoad + KeepAlive). This is an OPTIONAL add-on:
+     a machine without this plist is skipped silently (no WARN about :8007).
+     ____________________________________________________________________________ -->
