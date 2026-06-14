@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "npm install --prefer-offline --silent",
-    "dev": "sh ../mcp/ensure-bridges.sh; next dev",
+    "predev": "node ../mcp/ensure-bridges.cjs",
+    "dev": "next dev",
     "build": "next build",
-    "prestart": "npm install --prefer-offline --silent",
-    "start": "sh ../mcp/ensure-bridges.sh; next start",
+    "prestart": "node ../mcp/ensure-bridges.cjs",
+    "start": "next start",
     "lint": "eslint .",
     "gen:favicon": "node scripts/gen-favicon.mjs"
   },
