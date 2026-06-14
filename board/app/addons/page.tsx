@@ -37,7 +37,7 @@ export default async function AddonsPage() {
   return (
     <>
       <TopBar crumbs={["Cos", "Add-ons"]} live />
-      <AddonsView initial={initial} version={db.version} />
+      <AddonsView initial={initial} />
     </>
   );
 }

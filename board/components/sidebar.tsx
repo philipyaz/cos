@@ -5,9 +5,9 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   fetchUnreadCount,
-  fetchEnabledAddons,
+  fetchEnabledAddonGroups,
   subscribeToBoard,
-  type AddonNavItem,
+  type AddonNavGroup,
 } from "@/lib/board-client";
 import {
   IconSearch,
@@ -26,6 +26,7 @@ import {
   IconMealPlan,
   IconBolt,
   IconBrand,
+  IconChevronRight,
 } from "@/components/icons";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
@@ -59,24 +60,24 @@ type Item = {
 // goes stale the instant the Inbox (or the agent) flips a message's read-state.
 export function Sidebar({
   unreadCount,
-  addonNav,
+  addonGroups,
 }: {
   unreadCount?: number;
-  // The enabled add-ons' flattened nav items, computed server-side in layout.tsx and
-  // threaded down as the SSR seed (correct first paint, no flash). Kept LIVE off the
-  // SSE stream below — a catalog toggle bumps db.version, so the group flips without a
+  // The enabled add-ons, grouped, computed server-side in layout.tsx and threaded down
+  // as the SSR seed (correct first paint, no flash). Kept LIVE off the SSE stream below
+  // — a catalog toggle bumps db.version, so a section appears/disappears without a
   // reload, exactly like the unread badge.
-  addonNav?: AddonNavItem[];
+  addonGroups?: AddonNavGroup[];
 }) {
   const path = usePathname() ?? "/";
 
   // Seed from SSR, then mirror the app-wide live-update pattern: on each board
-  // change (newer version), refetch the cheap unread count AND the enabled add-ons'
-  // nav. `lastVersion` starts at 0 so the SSE `hello` on connect triggers one
+  // change (newer version), refetch the cheap unread count AND the enabled add-on
+  // groups. `lastVersion` starts at 0 so the SSE `hello` on connect triggers one
   // reconciling fetch on mount — self-correcting even if a seed was already stale. A
   // failed fetch keeps the last value; the next change event retries.
   const [unread, setUnread] = useState(unreadCount ?? 0);
-  const [addons, setAddons] = useState<AddonNavItem[]>(addonNav ?? []);
+  const [addons, setAddons] = useState<AddonNavGroup[]>(addonGroups ?? []);
   const lastVersion = useRef(0);
   useEffect(() => {
     const unsub = subscribeToBoard((v) => {
@@ -85,14 +86,34 @@ export function Sidebar({
       fetchUnreadCount()
         .then((r) => setUnread(r.unread))
         .catch(() => {});
-      // fetchEnabledAddons never throws (it resolves to [] on failure), so a hiccup
-      // simply leaves the last-known group in place until the next change event.
-      fetchEnabledAddons()
+      // fetchEnabledAddonGroups never throws (it resolves to [] on failure), so a
+      // hiccup simply leaves the last-known sections in place until the next change.
+      fetchEnabledAddonGroups()
         .then(setAddons)
         .catch(() => {});
     });
     return unsub;
   }, []);
+
+  // Per-device collapse state for each add-on section, persisted in localStorage (it's
+  // viewport chrome, not board data — so it stays off the store and out of SSE). The
+  // Set holds the COLLAPSED add-on ids. We read it in a POST-HYDRATE effect (not the
+  // useState initializer) so SSR and the first client render agree (all-expanded) and
+  // React never warns about a hydration mismatch; a previously-collapsed section then
+  // settles closed one frame after mount.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setCollapsed(readCollapsedAddons());
+  }, []);
+  const toggleCollapse = (id: string): void => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      writeCollapsedAddon(id, next.has(id));
+      return next;
+    });
+  };
 
   // Two sections, ordered by how often you reach for them. Group A is the daily
   // driver (the things you live in); Group B is review/system surfaces you visit
@@ -121,15 +142,6 @@ export function Sidebar({
     { href: "/security", label: "Security", icon: <IconShield /> },
     { href: "/backups", label: "Backups", icon: <IconArchive /> },
   ];
-
-  // The third group — the ENABLED add-ons' flattened nav items, resolving each
-  // manifest icon key to its glyph. Empty when no add-on is enabled (the whole group,
-  // divider included, renders nothing in that case — see below).
-  const addonItems: Item[] = addons.map((a) => ({
-    href: a.href,
-    label: a.label,
-    icon: addonIcon(a.icon),
-  }));
 
   return (
     <aside className="hidden md:flex w-[240px] shrink-0 flex-col bg-ink-50 text-ink-700">
@@ -196,8 +208,9 @@ export function Sidebar({
           catalog (where add-ons are turned on/off) — so a fresh board with nothing enabled
           can still DISCOVER and enable its first add-on (the group would otherwise be a
           chicken-and-egg: hidden until something is on, but you turn things on from here).
-          The enabled add-ons' nav items render beneath it, only when at least one is on.
-          Same divider+caption idiom as "Review". */}
+          Each enabled add-on renders beneath it as its own COLLAPSIBLE section (header +
+          nested nav items), only when at least one is on. Same divider+caption idiom as
+          "Review". */}
       <div className="px-3 mt-4">
         <div className="border-t border-ink-100" />
         <Link
@@ -210,15 +223,110 @@ export function Sidebar({
           Add-ons
         </Link>
       </div>
-      {addonItems.length > 0 && (
+      {addons.length > 0 && (
         <nav className="px-3 space-y-0.5">
-          {addonItems.map((it) => (
-            <NavItem key={it.label} item={it} active={path.startsWith(it.href)} />
+          {addons.map((group) => (
+            <AddonGroup
+              key={group.id}
+              group={group}
+              collapsed={collapsed.has(group.id)}
+              onToggle={() => toggleCollapse(group.id)}
+              activePath={path}
+            />
           ))}
         </nav>
       )}
     </aside>
   );
+}
+
+// One enabled add-on rendered as a COLLAPSIBLE section: a disclosure header (chevron +
+// the add-on's icon + its title) that toggles its nested nav items open/closed. Mirrors
+// the app's disclosure idiom (button + aria-expanded + IconChevronRight rotate-90 +
+// conditional render, as in backups-view's LogDetails) and reuses the unchanged NavItem
+// for the nested links. The header highlights when the active route lives in this group,
+// so a collapsed section still shows you where you are.
+function AddonGroup({
+  group,
+  collapsed,
+  onToggle,
+  activePath,
+}: {
+  group: AddonNavGroup;
+  collapsed: boolean;
+  onToggle: () => void;
+  activePath: string;
+}) {
+  const hasActive = group.navItems.some((it) => activePath.startsWith(it.href));
+  return (
+    <div className="space-y-0.5">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        title={collapsed ? `Expand ${group.title}` : `Collapse ${group.title}`}
+        className={`group w-full flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition ${
+          hasActive ? "bg-ink-100 text-ink-900 font-medium" : "text-ink-700 hover:bg-ink-100/80"
+        }`}
+      >
+        <span
+          className={`w-3.5 h-3.5 shrink-0 transition-transform ${collapsed ? "" : "rotate-90"} ${
+            hasActive ? "text-ink-700" : "text-ink-400"
+          }`}
+        >
+          <IconChevronRight />
+        </span>
+        <span className={`w-4 h-4 shrink-0 ${hasActive ? "text-ink-900" : "text-ink-500"}`}>
+          {addonIcon(group.icon)}
+        </span>
+        <span className="flex-1 text-left">{group.title}</span>
+      </button>
+      {!collapsed && (
+        <nav className="ml-[15px] border-l border-ink-100 pl-2 space-y-0.5">
+          {group.navItems.map((it) => (
+            <NavItem
+              key={it.href}
+              item={{ href: it.href, label: it.label, icon: addonIcon(it.icon) }}
+              active={activePath.startsWith(it.href)}
+            />
+          ))}
+        </nav>
+      )}
+    </div>
+  );
+}
+
+// ── localStorage-backed collapse state for the add-on sections ────────────────────
+// Per-device viewport chrome (which add-on sections are collapsed), keyed by add-on id.
+// SSR-safe + defensive: any access throws in private mode / quota / disabled storage
+// are swallowed so the sidebar always renders. A present key ("1") means COLLAPSED;
+// absence means expanded (the default), so an expanded section costs no storage.
+const collapseKey = (id: string): string => `sidebar:addon-collapse-${id}`;
+
+function readCollapsedAddons(): Set<string> {
+  const set = new Set<string>();
+  if (typeof window === "undefined") return set;
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith("sidebar:addon-collapse-") && window.localStorage.getItem(k) === "1") {
+        set.add(k.slice("sidebar:addon-collapse-".length));
+      }
+    }
+  } catch {
+    // storage unavailable (private mode / disabled) — treat all sections as expanded
+  }
+  return set;
+}
+
+function writeCollapsedAddon(id: string, isCollapsed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (isCollapsed) window.localStorage.setItem(collapseKey(id), "1");
+    else window.localStorage.removeItem(collapseKey(id));
+  } catch {
+    // storage unavailable / quota — collapse still works for the session (in state)
+  }
 }
 
 function NavItem({ item, active }: { item: Item; active: boolean }) {

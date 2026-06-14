@@ -9,13 +9,23 @@
 // db.version), the add-on enabled flag lives in the CORE store (db.settings.addons), so
 // there IS a live SSE pipe here: a toggle bumps db.version → SSE → useLiveBoard refetches
 // (reconciling another tab's flip, and re-running the bridge probe). We SSR-seed from the
-// page (accurate enabled flags; bridge.reachable seeded false) and reconcile on mount via
-// the SSE `hello` (lastVersion starts at 0), which runs the authoritative ~300ms probe.
+// page (accurate enabled flags; bridge.reachable seeded false) and seed lastVersion=0 so
+// the SSE `hello` on connect ALWAYS reconciles on mount — running the authoritative ~300ms
+// probe immediately (the sidebar's proven pattern). Without this the `hello` carries the
+// same version as the SSR seed, the v > lastVersion guard never fires, and the card sat on
+// its seeded reachable:false until a toggle finally bumped the version (the "toggle off/on
+// to see it" bug).
+//
+// But the bridge coming UP is an EXTERNAL event — it never writes cases.json, so SSE never
+// fires for it. So we ALSO re-probe on our own, independent of db.version: when the surface
+// regains attention (tab/app focus) and, while an enabled add-on is still unreachable, on a
+// gentle self-terminating poll — so a bridge wired in a terminal flips the card to
+// "reachable" within seconds, with no toggle and no reload ("connects automatically").
 //
 // The toggle is OPTIMISTIC (mirrors GuardControl): flip the local state instantly, PATCH,
 // reseed from the live refetch on success, REVERT + surface the error on a throw.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchAddons, setAddonEnabled, type AddonView } from "@/lib/board-client";
 import { useLiveBoard } from "@/lib/use-live-board";
 import {
@@ -35,11 +45,13 @@ const ADDON_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   IconChef,
 };
 
-export function AddonsView({ initial, version }: { initial: AddonView[]; version?: number }) {
+export function AddonsView({ initial }: { initial: AddonView[] }) {
   // Live catalog rows, seeded from SSR. The board version we last reconciled to — a ref
   // so the SSE callback always compares against the freshest value (mirrors the views).
+  // Seeded to 0 (NOT the SSR version) so the SSE `hello` on connect always passes
+  // useLiveBoard's `v > lastVersion` guard and runs the authoritative probe on mount.
   const [addons, setAddons] = useState<AddonView[]>(initial);
-  const lastVersion = useRef<number>(version ?? 0);
+  const lastVersion = useRef<number>(0);
 
   // The in-flight toggle key (the add-on id being flipped), so a double click can't fire
   // two PATCHes and the right switch shows its busy pulse. null === idle.
@@ -65,6 +77,42 @@ export function AddonsView({ initial, version }: { initial: AddonView[]; version
 
   useLiveBoard(lastVersion, refetch);
 
+  // ── Reachability self-correction (independent of db.version) ──────────────────
+  // Re-probe whenever the user returns to the page — a tab switch (visibilitychange) OR an
+  // app switch where the tab stayed visible behind the terminal (window focus). Both are
+  // cheap and fire exactly the "I just finished wiring the bridge" moment, so the card
+  // flips to "reachable" the instant the user comes back. Mount-once, like useLiveBoard.
+  useEffect(() => {
+    const onVisible = (): void => {
+      if (document.visibilityState === "visible") void refetch();
+    };
+    const onFocus = (): void => void refetch();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Poll WHILE an enabled add-on's bridge is down — and only while the tab is visible (a
+  // backgrounded tab never polls). SELF-TERMINATING: the moment every enabled add-on is
+  // reachable, `anyEnabledBridgeDown` flips false, this effect re-runs and clears the
+  // interval — a bounded "waiting for the bridge to come up" loop, idle whenever everything
+  // is already up. This is what makes it land even if the user never blurs the tab.
+  const anyEnabledBridgeDown = addons.some((a) => a.enabled && !a.bridge.reachable);
+  useEffect(() => {
+    if (!anyEnabledBridgeDown) return;
+    const id = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void refetch();
+      }
+    }, 4000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyEnabledBridgeDown]);
+
   // Flip one add-on. OPTIMISTIC: flip the local row immediately, PATCH, then RESEED from a
   // live refetch on success (which also corrects the bridge probe). On a throw revert the
   // optimistic flip and surface the error inline (mirrors GuardControl.toggle).
@@ -78,8 +126,14 @@ export function AddonsView({ initial, version }: { initial: AddonView[]; version
       await setAddonEnabled(id, next);
       await refetch(); // reseed from authoritative state (enabled + bridge probe)
     } catch (e) {
-      setAddons(prev); // revert — the flip did not take effect
+      // Revert the optimistic flip immediately (a failed PATCH never persisted), then
+      // reconcile to authoritative server state. The trailing refetch also picks up any
+      // concurrent change another tab landed while our PATCH was in flight — pinning the
+      // UI to the `prev` snapshot alone could otherwise clobber that fresher state. If the
+      // refetch itself fails it keeps `prev`, so a double failure still shows the revert.
+      setAddons(prev);
       setError(e instanceof Error ? e.message : "The add-on could not be updated.");
+      void refetch();
     } finally {
       setBusyId(null);
     }

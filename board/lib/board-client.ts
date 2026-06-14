@@ -317,6 +317,15 @@ export interface AddonNavItem {
   label: string;
   icon: string; // key into components/icons.tsx (e.g. "IconChef")
 }
+// One enabled add-on's nav, GROUPED under the add-on itself — the feed the sidebar
+// renders as a collapsible section ("Nutrition & Chef" ▸ Food Log / Pantry / Meal Plan)
+// rather than a flat list. Mirrors the AddonManifest header fields + its navItems.
+export interface AddonNavGroup {
+  id: string;
+  title: string;
+  icon: string; // the add-on's own icon key (the section header glyph)
+  navItems: AddonNavItem[];
+}
 export interface AddonView {
   id: string;
   title: string;
@@ -351,13 +360,17 @@ export function setAddonEnabled(id: string, enabled: boolean): Promise<AddonTogg
   });
 }
 
-// The ENABLED add-ons' flattened nav items — the cheap feed for the sidebar's live
-// "Add-ons" group. Mirrors fetchUnreadCount's shape/error-handling: it never throws
-// (a failed fetch resolves to [] so the sidebar simply keeps its last-known group).
-export async function fetchEnabledAddons(): Promise<AddonNavItem[]> {
+// The ENABLED add-ons, GROUPED — the cheap feed for the sidebar's live "Add-ons"
+// section, one collapsible group per add-on (its title/icon as the header + its nav
+// items nested beneath). Mirrors fetchUnreadCount's shape/error-handling: it never
+// throws (a failed fetch resolves to [] so the sidebar simply keeps its last-known
+// groups). The flat AddonView.navItems carry through unchanged inside each group.
+export async function fetchEnabledAddonGroups(): Promise<AddonNavGroup[]> {
   try {
     const res = await fetchAddons();
-    return res.addons.filter((a) => a.enabled).flatMap((a) => a.navItems);
+    return res.addons
+      .filter((a) => a.enabled)
+      .map((a) => ({ id: a.id, title: a.title, icon: a.icon, navItems: a.navItems }));
   } catch {
     return [];
   }

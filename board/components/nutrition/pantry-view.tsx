@@ -10,15 +10,21 @@
 // category, a storage location, and an optional expiry day. Items are GROUPED BY
 // CATEGORY (in the fixed PantryCategory order); each category header carries a count.
 // An item nearing its expiresAt gets a "use soon" highlight (and an "expired" tone once
-// past), and a manually-flagged running-low item shows a low-stock chip. Stocking /
-// editing items is done by the agent via the nutrition MCP (this Phase-2 surface is the
-// human's at-a-glance read of the inventory); future phases layer compose UI on top.
+// past), and a manually-flagged running-low item shows a low-stock chip. Items can be
+// stocked / edited / removed two ways: by the agent via the nutrition MCP, OR by the
+// human right here — the toolbar (and empty-state) "Add item" button and a click on any
+// row open the PantryItemDrawer, which writes to /api/nutrition/pantry and refetches.
 
 import { useMemo, useRef, useState } from "react";
 import type { PantryItem, PantryCategory, PantryLocation } from "@/lib/types";
 import { VALID_PANTRY_CATEGORY } from "@/lib/types";
 import { useLiveBoard } from "@/lib/use-live-board";
-import { IconFridge } from "@/components/icons";
+import { deletePantryItem } from "@/lib/nutrition-client";
+import { IconFridge, IconPlus, IconTrash, IconWarning } from "@/components/icons";
+import { PantryItemDrawer } from "./pantry-item-drawer";
+
+// What the drawer is doing: stocking a new item, or editing an existing one.
+type Compose = { mode: "create" } | { mode: "edit"; item: PantryItem };
 
 // Category display order + label — items read in the fixed PantryCategory order, with an
 // "Uncategorized" bucket last for items with no category. Order mirrors VALID_PANTRY_CATEGORY.
@@ -60,6 +66,9 @@ export function PantryView({
   const [items, setItems] = useState<PantryItem[]>(initialItems);
   const lastVersion = useRef<number>(version ?? 0);
 
+  // The open drawer (stocking a new item / editing an existing one), or null when closed.
+  const [compose, setCompose] = useState<Compose | null>(null);
+
   // Fixed clock — parsed ONCE from the SSR `now` prop, used only to classify expiry
   // ("expired" / "use soon"). Never `new Date()` during render, so SSR and the first
   // client render agree (no hydration drift); the expiry days are plain ISO day strings.
@@ -91,19 +100,26 @@ export function PantryView({
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-ink-50">
-      {/* Toolbar — context on the left; items are stocked by the agent via the MCP. */}
+      {/* Toolbar — context on the left, Add item on the right. */}
       <div className="h-12 px-5 flex items-center gap-2 border-b border-ink-100 bg-white shrink-0">
         <span className="text-[13px] font-semibold text-ink-900">Pantry</span>
         <span className="text-[12px] text-ink-400 tabular-nums">
           {items.length} {items.length === 1 ? "item" : "items"}
         </span>
+        <button
+          onClick={() => setCompose({ mode: "create" })}
+          className="ml-auto inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition"
+        >
+          <IconPlus className="w-3.5 h-3.5" />
+          Add item
+        </button>
       </div>
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-4">
         <div className="max-w-[760px] mx-auto space-y-6">
           {!hasAny ? (
-            <EmptyState />
+            <EmptyState onCompose={() => setCompose({ mode: "create" })} />
           ) : (
             groups.map(({ key, label, items: catItems }) => (
               <section key={key}>
@@ -118,7 +134,14 @@ export function PantryView({
                 </div>
                 <div className="rounded-lg border border-ink-100 bg-white shadow-card divide-y divide-ink-50 overflow-hidden">
                   {catItems.map((it) => (
-                    <PantryRow key={it.id} item={it} today={today} soonCutoff={soonCutoff} />
+                    <PantryRow
+                      key={it.id}
+                      item={it}
+                      today={today}
+                      soonCutoff={soonCutoff}
+                      onOpen={() => setCompose({ mode: "edit", item: it })}
+                      onDeleted={refetch}
+                    />
                   ))}
                 </div>
               </section>
@@ -126,26 +149,76 @@ export function PantryView({
           )}
         </div>
       </div>
+
+      {compose && (
+        <PantryItemDrawer
+          item={compose.mode === "edit" ? compose.item : null}
+          onSaved={refetch}
+          onClose={() => setCompose(null)}
+        />
+      )}
     </div>
   );
 }
 
 // One pantry row: the item name, the optional quantity/unit, an optional storage-location
-// chip, a low-stock chip when flagged, and an expiry chip (plain / "use soon" / "expired"
-// by the SSR clock). Read-only — items are written by the agent via the MCP.
+// chip, a low-stock chip when flagged, an expiry chip (plain / "use soon" / "expired" by
+// the SSR clock), and a quick-delete that reveals on hover/focus. Clicking the row (or
+// Enter/Space) opens the editor drawer; the delete button stops propagation so it doesn't.
 function PantryRow({
   item,
   today,
   soonCutoff,
+  onOpen,
+  onDeleted,
 }: {
   item: PantryItem;
   today: string;
   soonCutoff: string;
+  onOpen: () => void;
+  onDeleted: () => void;
 }) {
   const qty = formatQuantity(item.quantity, item.unit);
   const expiry = item.expiresAt ? classifyExpiry(item.expiresAt, today, soonCutoff) : null;
+
+  // Row-level quick-delete state. `busy` guards against a double-submit; `error` surfaces
+  // a failed delete inline (rose, mirroring the drawer's banner) instead of silently
+  // no-op-ing. A hard delete has no undo, so we confirm first (like the drawer's Delete);
+  // onDeleted() refetches the list on success.
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation(); // never open the editor when deleting
+    if (busy) return;
+    if (!window.confirm(`Remove “${item.name}” from the pantry? This cannot be undone.`)) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await deletePantryItem(item.id);
+      onDeleted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove the item.");
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="flex items-start gap-2.5 px-3 py-2.5">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        // Only a keypress on the row ITSELF opens the editor — a keydown bubbling up from
+        // the nested delete button must not also open the drawer.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      aria-label={`Edit ${item.name}`}
+      className="group flex items-start gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-ink-50 focus:outline-none focus-visible:bg-ink-50 transition-colors">
       {/* Name + (optional) quantity/unit and note beneath. */}
       <span className="flex-1 min-w-0">
         <span className="inline-flex items-baseline gap-1.5">
@@ -192,23 +265,59 @@ function PantryRow({
           {expiry.label}
         </span>
       )}
+
+      {/* Quick delete — hidden until row hover / keyboard focus. On failure it's replaced
+          by an inline error chip (click to dismiss). Both stop propagation so the row's
+          click/keydown never opens the editor while deleting. */}
+      {error ? (
+        <span
+          role="alert"
+          onClick={(e) => {
+            e.stopPropagation();
+            setError(null);
+          }}
+          title={`${error} · click to dismiss`}
+          className="shrink-0 inline-flex items-center gap-1 max-w-[180px] text-[10.5px] px-1.5 py-0.5 rounded-full font-medium bg-rose-50 text-rose-700 cursor-pointer"
+        >
+          <IconWarning className="w-3 h-3 shrink-0" />
+          <span className="truncate">{error}</span>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={busy}
+          aria-label={`Delete ${item.name}`}
+          title="Delete item"
+          className="shrink-0 text-ink-300 hover:text-rose-600 transition opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50"
+        >
+          <IconTrash className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
   );
 }
 
 // The friendly empty state — shown when there are no pantry items at all.
-function EmptyState() {
+function EmptyState({ onCompose }: { onCompose: () => void }) {
   return (
     <div className="rounded-lg border border-dashed border-ink-200 bg-white py-12 px-6 text-center">
       <div className="flex justify-center mb-2 text-ink-300">
         <IconFridge className="w-6 h-6" />
       </div>
       <p className="text-[13px] text-ink-700 font-medium mb-1">Your pantry is empty</p>
-      <p className="text-[12.5px] text-ink-500 max-w-[460px] mx-auto">
-        Ask your chief of staff to add what&rsquo;s in your fridge — &ldquo;add a dozen
-        eggs and a bunch of spinach to the fridge&rdquo; — and items appear here, grouped
-        by category with expiry and low-stock flags.
+      <p className="text-[12.5px] text-ink-500 max-w-[460px] mx-auto mb-4">
+        Add what&rsquo;s in your fridge below, or ask your chief of staff — &ldquo;add a
+        dozen eggs and a bunch of spinach to the fridge&rdquo; — and items appear here,
+        grouped by category with expiry and low-stock flags.
       </p>
+      <button
+        onClick={onCompose}
+        className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition"
+      >
+        <IconPlus className="w-3.5 h-3.5" />
+        Add item
+      </button>
     </div>
   );
 }
