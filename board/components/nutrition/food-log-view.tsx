@@ -14,9 +14,12 @@
 // the human's at-a-glance read of the log); future phases layer compose UI on top.
 
 import { useMemo, useRef, useState } from "react";
-import type { FoodLogEntry, MealSlot, HealthRating } from "@/lib/types";
+import type { FoodLogEntry, MealSlot, HealthRating, NutritionGoal, WeightEntry } from "@/lib/types";
+import type { NutritionTargets, AdherenceStatus } from "@/lib/nutrition-targets";
 import { useLiveBoard } from "@/lib/use-live-board";
+import { listWeights, getGoal, getTargets } from "@/lib/nutrition-client";
 import { IconChef } from "@/components/icons";
+import { WeightLossPanel } from "./weight-loss-panel";
 
 // Slot display rank + label — within a day, entries read in meal order, not insert order.
 const SLOT_RANK: Record<MealSlot, number> = { breakfast: 0, lunch: 1, dinner: 2, snack: 3 };
@@ -36,6 +39,23 @@ const HEALTH_CHIP: Record<HealthRating, string> = {
 };
 const HEALTH_LABEL: Record<HealthRating, string> = { green: "Healthy", amber: "OK", red: "Indulgent" };
 
+// Per-day ADHERENCE chip (vs the weight-loss calorie target) — distinct from the per-entry
+// health flag above. Keyed by AdherenceStatus from the targets engine; "under" is a neutral
+// (well-under-target) day so it shares the slate tone rather than reading as a problem.
+// Full literal Tailwind strings per status (no runtime concat) so the scanner emits them.
+const ADHERENCE_CHIP: Record<AdherenceStatus, string> = {
+  under: "bg-ink-100 text-ink-600 ring-1 ring-ink-200",
+  on_track: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
+  over: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
+  well_over: "bg-rose-50 text-rose-700 ring-1 ring-rose-200",
+};
+const ADHERENCE_LABEL: Record<AdherenceStatus, string> = {
+  under: "Under",
+  on_track: "On track",
+  over: "Over",
+  well_over: "Well over",
+};
+
 // One day's rollup — total calories + summed macros (macros only counted where present).
 type DayRollup = { calories: number; protein: number; carbs: number; fat: number };
 
@@ -43,15 +63,31 @@ export function FoodLogView({
   now,
   entries: initialEntries,
   version,
+  goal: initialGoal,
+  weights: initialWeights,
+  targets: initialTargets,
 }: {
   now: string;
   entries: FoodLogEntry[];
   version?: number;
+  // The weight-loss vertical's SSR seed: the goal singleton, the weigh-in series, and the
+  // computed targets envelope. All three are optional so an older caller still type-checks;
+  // the panel renders its cold-start state when goal/targets are absent.
+  goal?: NutritionGoal | null;
+  weights?: WeightEntry[];
+  targets?: NutritionTargets | null;
 }) {
   // Live entries list, seeded from SSR. The board version we last reconciled to — a ref
   // so the SSE callback always compares against the freshest value (mirrors reminders).
   const [entries, setEntries] = useState<FoodLogEntry[]>(initialEntries);
   const lastVersion = useRef<number>(version ?? 0);
+
+  // The weight-loss vertical's live state, seeded from SSR. A food-log / weigh-in / goal
+  // write all bump db.version → SSE → we refetch ALL THREE (targets is derived from every
+  // one of them, so it must be re-read on any bump, not just a weight write).
+  const [goal, setGoal] = useState<NutritionGoal | null>(initialGoal ?? null);
+  const [weights, setWeights] = useState<WeightEntry[]>(initialWeights ?? []);
+  const [targets, setTargets] = useState<NutritionTargets | null>(initialTargets ?? null);
 
   // Fixed clock — parsed ONCE from the SSR `now` prop, used only to mark "Today" on the
   // matching day header. Never `new Date()` during render, so SSR and the first client
@@ -59,19 +95,31 @@ export function FoodLogView({
   const today = useMemo(() => toISODay(new Date(now)), [now]);
 
   // ── Live reconciliation ─────────────────────────────────────────────────────
-  // Refetch the full food-log list and replace state, advancing lastVersion. There is no
-  // dedicated /api/nutrition/log list client fn, but the addons GET carries the version;
-  // a food-log write bumps db.version → SSE → we re-read the entries from the log route.
+  // Refetch the full food-log list AND the weight-loss vertical (weights/goal/targets),
+  // then advance lastVersion. There is no dedicated /api/nutrition/log list client fn, but
+  // the addons GET carries the version; a food-log write bumps db.version → SSE → we re-read
+  // the entries from the log route. The targets envelope is derived server-side over the
+  // goal/weights/foodLogs, so we re-read it (plus weights + goal for the panel/chart) on the
+  // SAME bump — keeping the panel, the chart, and the per-day adherence chips all in sync.
   const refetch = async (): Promise<void> => {
     try {
       const res = await fetch("/api/nutrition/log");
-      if (!res.ok) return; // a disabled/erroring read leaves the last-known list in place
-      const data = (await res.json()) as { entries?: FoodLogEntry[]; version?: number };
-      if (Array.isArray(data.entries)) setEntries(data.entries);
-      if (typeof data.version === "number") lastVersion.current = data.version;
+      if (res.ok) {
+        const data = (await res.json()) as { entries?: FoodLogEntry[]; version?: number };
+        if (Array.isArray(data.entries)) setEntries(data.entries);
+        if (typeof data.version === "number") lastVersion.current = data.version;
+      }
     } catch {
       // Non-critical: a failed refetch just leaves the last-known entries in place.
     }
+    // The weight-loss reads are independent + best-effort: each failure leaves its slice
+    // at the last-known value. Run them in parallel; settle so one failure doesn't sink
+    // the others (the routes are ungated, so they read even on a disabled add-on).
+    const results = await Promise.allSettled([getTargets(), listWeights(), getGoal()]);
+    const [tRes, wRes, gRes] = results;
+    if (tRes.status === "fulfilled") setTargets(tRes.value.targets);
+    if (wRes.status === "fulfilled") setWeights(wRes.value.weights);
+    if (gRes.status === "fulfilled") setGoal(gRes.value.goal);
   };
 
   useLiveBoard(lastVersion, refetch);
@@ -80,6 +128,15 @@ export function FoodLogView({
   // compute the per-day calorie/macro rollup. Recomputed whenever the live list changes.
   const days = useMemo(() => groupByDay(entries), [entries]);
   const hasAny = entries.length > 0;
+
+  // Adherence status keyed by calendar day, derived from the live targets envelope — the
+  // source of the per-day "on track / over / well over" chip next to the kcal rollup. A day
+  // with no target (or no targets yet) has no chip. Recomputed when targets changes.
+  const adherenceByDay = useMemo(() => {
+    const m = new Map<string, AdherenceStatus>();
+    for (const a of targets?.adherence ?? []) m.set(a.date, a.status);
+    return m;
+  }, [targets]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-ink-50">
@@ -94,12 +151,27 @@ export function FoodLogView({
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-4">
         <div className="max-w-[760px] mx-auto space-y-6">
+          {/* Weight-loss panel — the v10 perspective, ABOVE the log. Rendered whenever the
+              targets envelope is available (the engine always resolves one server-side); it
+              shows its own cold-start state when no goal/weight is set, so it appears even on
+              an empty log. Its writes (goal / weigh-in) bump db.version → our refetch. */}
+          {targets && (
+            <WeightLossPanel
+              goal={goal}
+              weights={weights}
+              targets={targets}
+              today={today}
+              onMutated={refetch}
+            />
+          )}
+
           {!hasAny ? (
             <EmptyState />
           ) : (
             days.map(({ date, items, rollup }) => (
               <section key={date}>
-                {/* Day header — the date (today is flagged) + the calorie/macro rollup. */}
+                {/* Day header — the date (today is flagged) + the calorie/macro rollup, plus
+                    the per-day adherence chip vs the weight-loss calorie target (when one). */}
                 <div className="flex items-center gap-2 mb-1.5 px-1">
                   <h2 className="text-[11px] uppercase tracking-wide text-ink-400 font-medium">
                     {formatDay(date)}
@@ -109,7 +181,8 @@ export function FoodLogView({
                       Today
                     </span>
                   )}
-                  <span className="ml-auto">
+                  <span className="ml-auto inline-flex items-center gap-1.5">
+                    <AdherenceChip status={adherenceByDay.get(date)} />
                     <DayRollupChips rollup={rollup} />
                   </span>
                 </div>
@@ -141,6 +214,21 @@ function DayRollupChips({ rollup }: { rollup: DayRollup }) {
       {rollup.protein > 0 && <MacroChip label="P" grams={rollup.protein} />}
       {rollup.carbs > 0 && <MacroChip label="C" grams={rollup.carbs} />}
       {rollup.fat > 0 && <MacroChip label="F" grams={rollup.fat} />}
+    </span>
+  );
+}
+
+// The per-day adherence chip — how the day's total calories sat against the weight-loss
+// target (from the targets engine). Renders nothing when there is no status for the day
+// (no target configured, or the day isn't in the adherence series).
+function AdherenceChip({ status }: { status?: AdherenceStatus }) {
+  if (!status) return null;
+  return (
+    <span
+      className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${ADHERENCE_CHIP[status]}`}
+      title={`Versus your daily calorie target: ${ADHERENCE_LABEL[status]}`}
+    >
+      {ADHERENCE_LABEL[status]}
     </span>
   );
 }

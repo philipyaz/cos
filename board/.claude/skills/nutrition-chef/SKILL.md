@@ -6,11 +6,15 @@ description: >
   (estimating calories + optional macros + a green/amber/red health flag), maintains
   the PANTRY (add / read / update / remove on-hand items, flag low stock + expiring
   soon), and PLANS meals from what's on hand — reading the pantry first, preferring
-  expiring ingredients, and optionally putting a meal on the calendar. Use when the
-  user says "log what I ate", "I had X for lunch", "what's in my fridge", "add Y to
-  the pantry", "we're low on Z", "plan meals", "what can I cook", "meal plan for the
-  week", "I cooked the salmon", or otherwise asks to track food, manage the kitchen,
-  or plan / cook meals.
+  expiring ingredients, and optionally putting a meal on the calendar. It also runs
+  the WEIGHT-LOSS side — logging weigh-ins (upsert by day), setting/reading the goal
+  & profile, and reading the targets (daily calorie + macro targets, ETA, which days
+  are off-track) — always with not-medical-advice framing. Use when the user says
+  "log what I ate", "I had X for lunch", "what's in my fridge", "add Y to the pantry",
+  "we're low on Z", "plan meals", "what can I cook", "meal plan for the week", "I
+  cooked the salmon", "log my weight", "I weighed X this morning", "set my weight
+  goal", "what's my calorie target", "how am I doing on my diet", "am I on track", or
+  otherwise asks to track food, manage the kitchen, plan / cook meals, or lose weight.
 ---
 
 # Nutrition & Chef (the kitchen operator)
@@ -23,12 +27,15 @@ exactly this). The board UI is the **read** twin: the human glances at `/nutriti
 `/nutrition/pantry`, `/nutrition/plan`; the agent (you) does the writing.
 
 The estimation and recipe judgment live **here**, in this skill — the MCP just stores
-numbers. The 14 tools are thin: `log_food` / `list_food_log` / `get_food_log` /
+numbers. The 19 tools are thin: `log_food` / `list_food_log` / `get_food_log` /
 `update_food_log` / `delete_food_log`; `read_pantry` / `add_pantry_item` /
 `update_pantry_item` / `remove_pantry_item`; `plan_meal` / `list_meal_plan` /
-`get_meal_plan` / `update_meal_plan` / `remove_meal_plan`. They store calories, macros,
-inventory rows, and planned-meal rows; the *estimating* and the *cooking sense* are
-your job.
+`get_meal_plan` / `update_meal_plan` / `remove_meal_plan`; and the weight-loss five —
+`log_weight` / `list_weights` / `get_nutrition_goal` / `set_nutrition_goal` /
+`get_nutrition_targets`. They store calories, macros, inventory rows, planned-meal
+rows, and weigh-ins; the *estimating*, the *cooking sense*, and the *coaching* are
+your job. The targets engine does the diet math (BMR → calorie target → macros → ETA);
+you read it and explain it — **never as medical advice** (see the framing below).
 
 > **Gate — the add-on must be ENABLED.** Every WRITE 404s ("Not found.") when the
 > Nutrition & Chef add-on is disabled; READS always work. If a write comes back "Not
@@ -41,6 +48,16 @@ your job.
 > pending / propose queue** for nutrition — these tools write **directly**. So
 > "approval" here means a **conversational** check-in (STEP 0), not the board's
 > propose/approve flow. Don't claim a pending queue exists.
+
+> **NOT MEDICAL ADVICE — say it, every time it's relevant.** The weight-loss side
+> (JOB 4) produces calorie/macro targets, deficits, and ETAs. These are **informational
+> estimates, not medical advice.** `get_nutrition_targets` always returns a leading
+> `not-medical-advice` flag — **surface it**, and carry the same framing in your own
+> words whenever you discuss targets, deficits, or a weight goal. **Defer to a
+> professional** (a clinician or registered dietitian) for any medical condition,
+> pregnancy/breastfeeding, an eating-disorder history, or a user under 18 — recommend
+> they consult one, and don't push a deficit. The engine's safety guardrails (rate cap,
+> calorie floor, BMI bound) are conservative defaults, **not** a substitute for that.
 
 ---
 
@@ -59,12 +76,14 @@ file or key is missing). State the mode once at the start of the run.
   in approval mode too.
 
 > **A single low-stakes write is fine either way.** One `log_food`, one
-> `add_pantry_item`, one planned meal — just do it, in either mode. The
-> conversational check is for **bulk** and **destructive** writes; don't make the
-> user approve logging a single sandwich.
+> `add_pantry_item`, one planned meal, one `log_weight`, one `set_nutrition_goal` —
+> just do it, in either mode. The conversational check is for **bulk** and
+> **destructive** writes; don't make the user approve logging a single sandwich or
+> weigh-in.
 
 All reads — `list_food_log`, `get_food_log`, `read_pantry`, `list_meal_plan`,
-`get_meal_plan` — need no confirmation in any mode. Read freely.
+`get_meal_plan`, `list_weights`, `get_nutrition_goal`, `get_nutrition_targets` — need
+no confirmation in any mode. Read freely.
 
 ---
 
@@ -257,6 +276,87 @@ CalendarEvent — delete that separately via the calendar MCP if the user wants 
 
 ---
 
+## JOB 4 — Weight loss (the goal, the weigh-ins, the targets)
+
+This is the **coaching** side: the user sets a goal, logs their weight, and asks *"what's
+my calorie target?"* / *"how am I doing?"*. The diet math lives in the **targets engine** on
+the board — you don't compute BMR or deficits by hand; you **write the inputs** (goal +
+weigh-ins) and **read + explain the output** (`get_nutrition_targets`). The food log from JOB
+1 is the other input — adherence is scored from it automatically.
+
+> **Carry the not-medical-advice framing (see the callout up top) every time.** Targets are
+> informational estimates. **Defer medical conditions, pregnancy/breastfeeding, an
+> eating-disorder history, or an under-18 user to a clinician or registered dietitian** —
+> recommend they consult one and don't push a deficit. `get_nutrition_targets` returns a
+> leading `not-medical-advice` flag; surface it.
+
+**A. Log a weigh-in — `log_weight`, UPSERT BY DAY.** From *"I weighed 89.4 this morning"*:
+
+- **`date`** is `YYYY-MM-DD` (default **today** unless they say *"yesterday"* etc.). There is
+  **one entry per day** — `log_weight` **upserts**: a second weigh-in for the same date
+  **updates** that day's entry (it does not stack). So re-logging a corrected number for today
+  just fixes it.
+- Pass **exactly one** of **`weightKg`** or **`weightLb`** — never both. The board stores
+  **kilograms** canonically and converts `lb → kg` itself, so honor the user's unit: *"89.4
+  kg"* → `weightKg: 89.4`; *"197 lb"* → `weightLb: 197`. If the goal's `weightUnit` is `"lb"`,
+  prefer `weightLb` for entries the user phrases in pounds.
+- Optional **`note`** (*"post-workout"*, *"morning, fasted"*). A single weigh-in is
+  **low-stakes — log it directly**, then report it and (if a goal is set) the new trend +
+  remaining-to-go from `get_nutrition_targets`.
+- **`list_weights(from?, to?)`** renders the weigh-in series (newest last) with the smoothed
+  **trend** — use it for *"show my weight history"* / *"how's my weight trending"*.
+
+**B. Set / read the goal — `set_nutrition_goal` / `get_nutrition_goal`.** The goal is a
+**singleton** (one per board); `set_nutrition_goal` **upserts** it (replaces in place). To
+compute anything the engine needs the full profile:
+
+- **`sex`** (`male | female`), **`age`** (years), **`heightCm`**, **`activity`** (`sedentary |
+  light | moderate | very_active | extra_active`), **`targetWeightKg`** — all required.
+- **`rateKgPerWeek`** — desired loss rate; **default `0.5`** if omitted. The engine **caps** it
+  for safety (≤ 1%/wk of body weight and ≤ 1.0 kg/wk), so don't bother proposing an aggressive
+  number — it'll be clamped and flagged.
+- **`weightUnit`** (`"kg" | "lb"`) — a **display/entry preference only** (storage stays kg);
+  set it to match how the user talks about weight.
+- Gather what you're missing **conversationally** before calling — *"to set targets I need your
+  height, age, sex, and activity level"*. `get_nutrition_goal` reads it back; if it returns
+  `null`, there's no goal yet. To tweak one field of an existing goal you can also re-`set` the
+  whole thing (re-state the unchanged fields) — there's no partial-set tool on the MCP.
+
+**C. Read the targets — `get_nutrition_targets` (the "how am I doing" read).** This is the
+headline. It returns an **always-resolvable** envelope; render it in this order:
+
+1. **Weight:** current / smoothed trend / target, and **remaining kg** to go.
+2. **Energy:** BMR, maintenance **TDEE**, and whether the basis is **measured** (the engine's
+   feedback loop fired — enough logged days + weigh-in span) or **estimated** (the formula).
+3. **The plan:** the **daily calorie target**, the **P / F / C macros**, the **deficit**, and
+   the **ETA** (weeks + date) at the effective rate.
+4. **The guardrail flags** — **always lead with `not-medical-advice`**, then any safety warns
+   (`rate-capped`, `deficit-capped`, `target-below-bmi`) in plain words.
+5. **The off-track days** — from the per-day **adherence** list, **surface the `over` /
+   `well_over` days** (newest first); that's the actionable part. *Today's* remaining-calories
+   (`todayRemaining`) answers *"how much can I still eat today?"*.
+
+If the envelope says it `needs` `"goal"` or `"weight"`, it isn't configured yet — tell the user
+exactly what to provide (set the goal / log a weigh-in) and offer to do it. Never invent the
+missing numbers.
+
+> **Example.** *"set my goal — I'm a 38-year-old man, 180 cm, want to get to 80 kg"* then *"I'm
+> 90 kg today, what's my target?"* (auto mode): ask activity if unknown → say *moderate* →
+> `set_nutrition_goal(sex: "male", age: 38, heightCm: 180, activity: "moderate",
+> targetWeightKg: 80)` (rate defaults to 0.5). `log_weight(date: "2026-06-14", weightKg: 90)`.
+> `get_nutrition_targets` → report: *"Maintenance ≈ 2852 kcal/day (estimated); to lose 0.5
+> kg/week your target is ~2302 kcal/day — roughly P150 / F70 / C260 g — a 550 kcal deficit. 10
+> kg to go, ETA ~20 weeks. Heads up: this is informational, not medical advice — see a clinician
+> or dietitian for anything medical."* Then, as days of food + weigh-ins accumulate, point them
+> at the **off-track days** the next time they ask how they're doing.
+
+> **Off-track read.** *"how am I doing this week?"* → `get_nutrition_targets`, then lead with the
+> `well_over` / `over` days from `adherence` (e.g. *"Tue you logged 2900 vs a 2302 target —
+> well over; the other days were on track"*) and today's remaining calories. Keep the
+> not-medical-advice note attached.
+
+---
+
 ## Conventions (guardrails recap)
 
 - **`nutrition` MCP only, via the tools.** Never `bash`/`curl`. The board UI is the
@@ -280,8 +380,20 @@ CalendarEvent — delete that separately via the calendar MCP if the user wants 
   `pantryItemIds` (soft refs). Calendar is **opt-in** — `create_event` (calendar MCP)
   first, then store the `EVT-id` as `eventId`; `null` unlinks. `status: "cooked"` →
   **offer** a `log_food` entry **and** a pantry decrement.
+- **Weight loss:** `log_weight` is **upsert by day** (one entry per date — re-logging
+  fixes it) and takes **exactly one** of `weightKg` / `weightLb` (board stores kg). The
+  goal is a **singleton** — `set_nutrition_goal` upserts it; read with
+  `get_nutrition_goal`. `get_nutrition_targets` is the "how am I doing" read: report
+  weight/trend/target, calorie target + macros + deficit + ETA, then **lead the flags
+  with `not-medical-advice`** and **surface the `over` / `well_over` days**. A single
+  weigh-in / goal-set is low-stakes — just do it.
+- **NOT MEDICAL ADVICE.** Targets are informational estimates — **say so**, surface the
+  engine's `not-medical-advice` flag, and **defer medical conditions, pregnancy/
+  breastfeeding, eating-disorder history, or an under-18 user to a clinician or
+  registered dietitian** (recommend they consult one; don't push a deficit).
 - **Removes are HARD.** `delete_food_log` / `remove_pantry_item` / `remove_meal_plan`
   have no soft-archive — they're irreversible, unlike the board's soft `archive_case`.
   Confirm before removing in approval mode.
-- **Report** what you wrote: the minted ids (`FOOD-`/`PANTRY-`/`MEAL-`) and the useful
-  rollup (the day's calorie total, what's expiring, the week's agenda).
+- **Report** what you wrote: the minted ids (`FOOD-`/`PANTRY-`/`MEAL-`/`WEIGHT-`) and the
+  useful rollup (the day's calorie total, what's expiring, the week's agenda, the new
+  weight trend + remaining-to-go).

@@ -43,6 +43,31 @@ export const VALID_PANTRY_LOCATION: PantryLocation[] = ["fridge", "freezer", "pa
 export type MealPlanStatus = "planned" | "cooked" | "skipped";
 export const VALID_MEAL_PLAN_STATUS: MealPlanStatus[] = ["planned", "cooked", "skipped"];
 
+// ── Nutrition weight-loss enums (v10) ──────────────────────────────────────────
+// The weight-loss vertical adds two pure value domains used by NutritionGoal + the
+// targets engine. Each has a VALID_ array (mirroring the v9 enums) so the goal route
+// + the engine validate against ONE source of truth.
+// A person's daily activity level — the Mifflin-St Jeor TDEE multiplier (PAL). Used to
+// scale BMR up to total daily energy expenditure (see ACTIVITY_FACTOR + tdeeFromBMR).
+export type ActivityLevel = "sedentary" | "light" | "moderate" | "very_active" | "extra_active";
+export const VALID_ACTIVITY_LEVEL: ActivityLevel[] = ["sedentary", "light", "moderate", "very_active", "extra_active"];
+// The standard physical-activity-level multipliers applied to BMR for each level (the
+// canonical Mifflin-St Jeor / Harris-Benedict activity factors). Kept beside the enum so
+// the value domain and its physiological coefficients stay in one place.
+export const ACTIVITY_FACTOR: Record<ActivityLevel, number> = {
+  sedentary: 1.2,
+  light: 1.375,
+  moderate: 1.55,
+  very_active: 1.725,
+  extra_active: 1.9,
+};
+
+// Biological sex — the BMR formula's sex constant (Mifflin-St Jeor adds +5 for male,
+// −161 for female). Deliberately the two values the equation is defined for; this is a
+// physiological input to the energy estimate, NOT an identity field.
+export type BiologicalSex = "male" | "female";
+export const VALID_BIOLOGICAL_SEX: BiologicalSex[] = ["male", "female"];
+
 // On-disk schema version. Bumped when the persisted shape changes; readDB
 // migrates older files up to this on read (see store.ts migrate()). v4 added
 // db.events (CalendarEvent) — purely additive; old v3 files still read (events
@@ -66,7 +91,13 @@ export const VALID_MEAL_PLAN_STATUS: MealPlanStatus[] = ["planned", "cooked", "s
 // to [], settings.addons absent === no add-on enabled). New enums: MealSlot, HealthRating,
 // PantryCategory, PantryLocation, MealPlanStatus. migrate() carries the three arrays
 // forward when present; db.settings already rides through opaquely (addons rides it free).
-export const SCHEMA_VERSION = 9;
+// v10 adds the Nutrition weight-loss vertical: db.weights (WeightEntry[]) AND
+// db.nutritionGoal (a SINGLETON NutritionGoal object, NOT an array) — purely additive;
+// old v9 files read unchanged (weights defaults to [], nutritionGoal absent === no goal
+// set). New enums: ActivityLevel, BiologicalSex. migrate() carries db.weights forward when
+// it is an array and db.nutritionGoal forward when it is an object (mirroring the
+// events/priorities and the settings lines respectively).
+export const SCHEMA_VERSION = 10;
 
 // Who performed a mutation — drives activity attribution + note authorship.
 export type Actor = "human" | "agent" | "system";
@@ -349,6 +380,46 @@ export interface MealPlanEntry {
   pantryItemIds?: string[]; // SOFT refs to PantryItem (PANTRY-<n>) — dangling on delete is tolerated
   eventId?: string; // OPT-IN link to a CalendarEvent (EVT-<n>) — the meal-plan↔calendar link
   note?: string; // optional freeform note
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ── Nutrition weight-loss records (v10) ────────────────────────────────────────
+// The weight-loss vertical adds two pieces of state owned by the "nutrition" add-on:
+// a time-series of weigh-ins (db.weights) and ONE goal/profile (db.nutritionGoal). Both
+// ride in the core store and are gated by Settings.addons exactly like the v9 records (a
+// disabled add-on's data stays on disk + readable, only its WRITES are refused).
+
+// One weigh-in — "what I weighed on day D". The date is UNIQUE per day (the upsert key):
+// re-logging the same day UPDATES that entry rather than appending, so the series stays
+// one-point-per-day (the trend/feedback-loop math in nutrition-targets.ts assumes this).
+// Weight is ALWAYS stored in kilograms (the canonical unit); a pound entry is converted to
+// kg at the write boundary so every downstream calc reads one unit. The optional `note`
+// records context (e.g. "post-workout", "morning").
+export interface WeightEntry {
+  id: string; // "WEIGHT-<n>" minted like FOOD-<n>/CASE-<n> ids
+  date: string; // ISO calendar day "YYYY-MM-DD" — UNIQUE per day (the upsert key)
+  weightKg: number; // canonical storage unit is ALWAYS kilograms
+  note?: string; // optional freeform note
+  createdAt: string;
+  updatedAt: string;
+}
+
+// The user's weight-loss goal + body profile — a SINGLETON (db.nutritionGoal, NOT an
+// array): there is exactly one current goal at a time, so it lives as a bare object keyed
+// by nothing (set/replace, never minted with an id). It supplies the physiological inputs
+// the targets engine needs (sex/age/heightCm/activity feed BMR→TDEE) plus the user's
+// chosen target weight + loss rate. `rateKgPerWeek` is the DESIRED loss rate (default 0.5);
+// the engine CLAMPS it by safety guardrails (≤1%/wk, ≤1.0 kg/wk) before deriving a deficit.
+// `weightUnit` is a DISPLAY/entry preference only — storage stays kilograms regardless.
+export interface NutritionGoal {
+  sex: BiologicalSex; // BMR sex constant input
+  age: number; // years — BMR input
+  heightCm: number; // centimetres — BMR + BMI input
+  activity: ActivityLevel; // TDEE activity multiplier (see ACTIVITY_FACTOR)
+  targetWeightKg: number; // the goal weight (canonical kg)
+  rateKgPerWeek: number; // desired loss rate; default 0.5; clamped by the engine guardrails
+  weightUnit?: "kg" | "lb"; // DISPLAY/entry preference only (storage stays kg). default "kg"
   createdAt: string;
   updatedAt: string;
 }
@@ -670,6 +741,8 @@ export interface DBShape {
   foodLogs?: FoodLogEntry[]; // Nutrition & Chef food-log entries (v9); owned by the "nutrition" add-on
   pantryItems?: PantryItem[]; // Nutrition & Chef pantry items (v9); owned by the "nutrition" add-on
   mealPlanEntries?: MealPlanEntry[]; // Nutrition & Chef meal-plan entries (v9); owned by the "nutrition" add-on
+  weights?: WeightEntry[]; // Nutrition weigh-in time-series (v10); owned by the "nutrition" add-on
+  nutritionGoal?: NutritionGoal; // Nutrition goal/profile SINGLETON (v10); owned by the "nutrition" add-on (NOT an array)
   pending?: PendingMutation[]; // approval queue
   views?: SavedView[]; // saved views
   labels?: LabelDef[]; // the active label catalog (installed bundles + custom labels)

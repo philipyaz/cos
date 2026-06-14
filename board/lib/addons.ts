@@ -33,13 +33,16 @@ export interface AddonManifest {
   core: false; // an add-on is never core (the literal false marks it optional)
 }
 
-// The first add-on: Nutrition & Chef. It ships three verticals end-to-end — the food
-// log, the pantry, and the meal plan — each contributing a nav item and its MCP tools.
-// All three share the core store (their data arrays live in DBShape) and the same gate.
+// The first add-on: Nutrition & Chef. It ships four verticals end-to-end — the food log,
+// the pantry, the meal plan, and (v10) the weight-loss vertical — each contributing its
+// MCP tools. The data lives in the core store (DBShape): the food-log/pantry/meal-plan
+// arrays plus the v10 db.weights time-series AND db.nutritionGoal — a SINGLETON object
+// (the user's goal/profile), intentionally NOT listed in dataArrays since it is not an
+// array. All of it shares the same per-add-on gate (Settings.addons.nutrition.enabled).
 const NUTRITION_ADDON: AddonManifest = {
   id: "nutrition",
   title: "Nutrition & Chef",
-  description: "Log what you eat, track your pantry, and plan meals.",
+  description: "Log what you eat, track your pantry, plan meals, and reach a weight goal.",
   icon: "IconChef",
   navItems: [
     { href: "/nutrition/log", label: "Food Log", icon: "IconChef" },
@@ -47,7 +50,9 @@ const NUTRITION_ADDON: AddonManifest = {
     { href: "/nutrition/plan", label: "Meal Plan", icon: "IconMealPlan" },
   ],
   apiPrefixes: ["/api/nutrition"],
-  dataArrays: ["foodLogs", "pantryItems", "mealPlanEntries"],
+  // Owned db ARRAYS only. db.nutritionGoal (the v10 goal/profile singleton) is a bare
+  // object, not an array, so it is deliberately omitted here.
+  dataArrays: ["foodLogs", "pantryItems", "mealPlanEntries", "weights"],
   mcp: {
     server: "nutrition",
     bridgePortVar: "NUTRITION_BRIDGE_PORT",
@@ -68,6 +73,11 @@ const NUTRITION_ADDON: AddonManifest = {
       "get_meal_plan",
       "update_meal_plan",
       "remove_meal_plan",
+      "log_weight",
+      "list_weights",
+      "get_nutrition_goal",
+      "set_nutrition_goal",
+      "get_nutrition_targets",
     ],
   },
   core: false,

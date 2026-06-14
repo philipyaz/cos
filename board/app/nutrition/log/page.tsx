@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { readDB } from "@/lib/store";
 import { isAddonEnabled } from "@/lib/addons";
+import { computeNutritionTargets } from "@/lib/nutrition-targets";
 import { TopBar } from "@/components/topbar";
 import { FoodLogView } from "@/components/nutrition/food-log-view";
 
@@ -19,11 +20,41 @@ export default async function FoodLogPage() {
   // hand-typed /nutrition/log must also 404, so the disabled add-on is fully dormant.
   if (!isAddonEnabled(db, "nutrition")) notFound();
 
-  const now = new Date().toISOString(); // ONE request-time clock, serialized for the client
+  // ONE request-time clock: an ISO instant the client parses (to mark "Today"), and the
+  // local calendar day the engine projects against (the engine itself is clockless — we
+  // pass `today` in). Both come from the SAME new Date() so they can't disagree.
+  const clock = new Date();
+  const now = clock.toISOString();
+  const today = toLocalISODay(clock);
+
+  // The weight-loss vertical's SSR seed. The targets engine is pure + always resolvable, so
+  // we compute the envelope here over the goal/weights/foodLogs and hand it to the view (the
+  // panel then refetches /api/nutrition/targets live on each SSE bump). nutritionGoal is a
+  // SINGLETON object (not an array); default a missing goal to null.
+  const goal = db.nutritionGoal ?? null;
+  const weights = db.weights ?? [];
+  const targets = computeNutritionTargets({ goal, weights, foodLogs: db.foodLogs ?? [], today });
+
   return (
     <>
       <TopBar crumbs={["Cos", "Nutrition & Chef", "Food Log"]} live />
-      <FoodLogView now={now} entries={db.foodLogs ?? []} version={db.version} />
+      <FoodLogView
+        now={now}
+        entries={db.foodLogs ?? []}
+        version={db.version}
+        goal={goal}
+        weights={weights}
+        targets={targets}
+      />
     </>
   );
+}
+
+// "YYYY-MM-DD" for a Date in LOCAL time — the calendar day the targets engine projects
+// against. Mirrors the food-log view's toISODay so SSR `today` matches the client's "Today".
+function toLocalISODay(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }

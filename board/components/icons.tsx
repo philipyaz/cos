@@ -474,6 +474,34 @@ export function IconMealPlan(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconScale(props: SVGProps<SVGSVGElement>) {
+  // A balance scale — the weigh-in / weight-loss glyph. A central pillar on a base, a
+  // crossbeam, and a hanging pan on each side. Reads as a "scale" distinct from the
+  // toque / fridge / plate set; same 1.5-stroke / currentColor convention.
+  return (
+    <svg {...base} {...props}>
+      <path d="M8 2.2v10.4" />
+      <path d="M4 13.2h8" />
+      <path d="M2.5 5.5h11" />
+      <path d="M2.5 5.5 1.2 9a2 2 0 0 0 2.6 0L2.5 5.5Z" />
+      <path d="M13.5 5.5 12.2 9a2 2 0 0 0 2.6 0L13.5 5.5Z" />
+    </svg>
+  );
+}
+
+export function IconTrend(props: SVGProps<SVGSVGElement>) {
+  // An upward/zigzag line-chart glyph — the weight-trend / progress overlay. A polyline
+  // climbing across the frame, with a small arrowhead at the leading point. Distinct from
+  // IconActivity (the centred pulse) — this is a directional trend line.
+  return (
+    <svg {...base} {...props}>
+      <path d="M2 12V3M2 13h11" />
+      <path d="M4 10l2.5-3 2 2 3.5-4.5" />
+      <path d="M11 3.5h2v2" />
+    </svg>
+  );
+}
+
 // ── Brand mark ───────────────────────────────────────────────────────────────
 // The sidebar monogram — a "C" arc rendered as a stroked path (not a text glyph)
 // so it stays crisp at ~18px inside the gradient badge, and a small centre dot
