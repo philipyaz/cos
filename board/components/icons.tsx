@@ -507,6 +507,15 @@ export function IconTrend(props: SVGProps<SVGSVGElement>) {
 // so it stays crisp at ~18px inside the gradient badge, and a small centre dot
 // that nods to the agent/orchestrator pulse used elsewhere. Distinct from
 // IconShield (Security) on purpose: the brand should not look like a nav item.
+export function IconHeart(props: SVGProps<SVGSVGElement>) {
+  // A heart — the health dashboard.
+  return (
+    <svg {...base} {...props}>
+      <path d="M8 13.7C4 10.5 2 8.2 2 6a3 3 0 0 1 3-3c1.3 0 2.4.8 3 2 .6-1.2 1.7-2 3-2a3 3 0 0 1 3 3c0 2.2-2 4.5-6 7.7Z" />
+    </svg>
+  );
+}
+
 export function IconBrand(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} strokeWidth={1.75} {...props}>

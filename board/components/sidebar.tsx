@@ -19,6 +19,7 @@ import {
   IconShield,
   IconArchive,
   IconBook,
+  IconHeart,
   IconStar,
   IconTrash,
   IconChef,
@@ -134,6 +135,7 @@ export function Sidebar({
     // with the daily drivers (next to Priorities, itself a knowledge dashboard), not in the
     // Review group beside Trash/Backups, even though its page shares their status-card shape.
     { href: "/vault", label: "Vault", icon: <IconBook /> },
+    { href: "/health", label: "Health", icon: <IconHeart /> },
   ];
 
   const system: Item[] = [
