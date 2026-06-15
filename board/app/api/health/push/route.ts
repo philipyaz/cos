@@ -143,6 +143,22 @@ const AVG_METRICS = new Set([
 // Metrics that use LAST aggregation per day (take the final data point).
 const LAST_METRICS = new Set(["sleep_analysis"]);
 
+// Classify a sleep dataPoint as night or nap based on sleepStart hour.
+// Night: 20:00–05:59, Nap: 06:00–19:59.
+function classifySleep(sleepStart: unknown): "sleep_night" | "sleep_nap" {
+  if (typeof sleepStart !== "string") return "sleep_night"; // default to night
+  const iso = parseHAETimestamp(sleepStart);
+  const hour = new Date(iso).getHours();
+  return (hour >= 20 || hour < 6) ? "sleep_night" : "sleep_nap";
+}
+
+// Extract the hour (HH) from an HAE timestamp for use in nap IDs.
+function extractHour(sleepStart: unknown): string {
+  if (typeof sleepStart !== "string") return "00";
+  const iso = parseHAETimestamp(sleepStart);
+  return new Date(iso).getHours().toString().padStart(2, "0");
+}
+
 // Map an HAE metric to ONE entry PER metric PER DAY. Data points are grouped by
 // calendar day, aggregated (sum / avg / last), and raw points kept in metadata.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- HAE payloads are untyped
@@ -182,19 +198,35 @@ function convertHAEMetric(m: Record<string, any>): Record<string, unknown>[] {
     let metadata: Record<string, any> = { dataPoints: dayPoints };
 
     if (LAST_METRICS.has(normalName)) {
-      // Sleep: use totalSleep (hours) from the last dataPoint — no qty field.
-      const lastPt = dayPoints[dayPoints.length - 1];
-      value = typeof lastPt.totalSleep === "number" ? lastPt.totalSleep : undefined;
-      metadata = {
-        deep: lastPt.deep,
-        rem: lastPt.rem,
-        core: lastPt.core,
-        awake: lastPt.awake,
-        totalSleep: lastPt.totalSleep,
-        sleepStart: lastPt.sleepStart,
-        sleepEnd: lastPt.sleepEnd,
-        dataPoints: dayPoints,
-      };
+      // Sleep: split into night vs nap based on sleepStart hour.
+      // Each dataPoint becomes its own entry — skip the generic aggregation.
+      for (const pt of dayPoints) {
+        const sleepType = classifySleep(pt.sleepStart);
+        const sleepId = sleepType === "sleep_night"
+          ? `sleep_night_${day}`
+          : `sleep_nap_${day}_${extractHour(pt.sleepStart)}`;
+        const ptValue = typeof pt.totalSleep === "number" ? pt.totalSleep : undefined;
+        results.push({
+          id: sleepId,
+          ts: day,
+          type: sleepType,
+          data: {
+            value: ptValue,
+            source: "Health Auto Export",
+            metadata: {
+              deep: pt.deep,
+              rem: pt.rem,
+              core: pt.core,
+              awake: pt.awake,
+              totalSleep: pt.totalSleep,
+              sleepStart: pt.sleepStart,
+              sleepEnd: pt.sleepEnd,
+              dataPoints: [pt],
+            },
+          },
+        });
+      }
+      continue; // skip the generic push below
     } else {
       const qtys = dayPoints
         .map((pt: Record<string, any>) => (typeof pt.qty === "number" ? pt.qty : NaN))

@@ -55,7 +55,8 @@ const TYPE_GROUPS: Record<string, string[]> = {
   hrv:        ["hrv", "heart_rate_variability", "heart_rate_variability_sdnn", "hrv_sdnn"],
   resting_hr: ["resting_hr", "resting_heart_rate"],
   steps:      ["steps", "step_count"],
-  sleep:      ["sleep", "sleep_analysis"],
+  sleep:      ["sleep", "sleep_analysis", "sleep_night"],
+  sleep_nap:  ["sleep_nap"],
   vo2max:     ["vo2max", "vo2_max"],
   workout:    ["workout", "apple_exercise_time"],
 };
@@ -157,6 +158,36 @@ function SleepSection({ entries }: { entries: HealthEntry[] }) {
                 </tr>
               );
             })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function NapSection({ entries }: { entries: HealthEntry[] }) {
+  if (entries.length === 0) return null;
+
+  return (
+    <section>
+      <h2 className="text-[13px] font-semibold text-ink-900 mb-2">Naps</h2>
+      <div className="overflow-x-auto rounded-lg border border-ink-100">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-ink-100 bg-ink-50 text-ink-500">
+              <th className="text-left px-3 py-2 font-medium">Date</th>
+              <th className="text-right px-3 py-2 font-medium">Duration</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-ink-100">
+            {entries.map((e) => (
+              <tr key={e.id} className="hover:bg-ink-50/50 transition">
+                <td className="px-3 py-2 text-ink-600 whitespace-nowrap">{fmtDate(e.ts)}</td>
+                <td className="px-3 py-2 text-right text-ink-900 font-medium tabular-nums">
+                  {fmtHours(extractQty(e, "value"))}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -291,6 +322,7 @@ export default function HealthPage() {
             />
             <WorkoutsSection entries={entries.filter((e) => e.type === "workout" && typeof e.data.activity === "string")} />
             <SleepSection entries={byGroup(entries, "sleep")} />
+            <NapSection entries={byGroup(entries, "sleep_nap")} />
           </>
         )}
       </main>
