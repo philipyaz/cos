@@ -27,6 +27,10 @@
     "nutrition": {
       "type": "http",
       "url": "http://localhost:8007/mcp"
+    },
+    "health": {
+      "type": "http",
+      "url": "http://localhost:8011/mcp"
     }
   }
 }
