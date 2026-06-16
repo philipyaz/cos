@@ -524,3 +524,14 @@ export function IconBrand(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function IconRunner(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="10" cy="3" r="1.5" />
+      <path d="M5.5 7.5 8 6l2.5 1.5L12 10" />
+      <path d="M8 6v4l-2.5 4" />
+      <path d="M10 10l2.5 4" />
+    </svg>
+  );
+}

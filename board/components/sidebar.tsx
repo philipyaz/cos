@@ -28,6 +28,7 @@ import {
   IconBolt,
   IconBrand,
   IconChevronRight,
+  IconRunner,
 } from "@/components/icons";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
@@ -136,6 +137,7 @@ export function Sidebar({
     // Review group beside Trash/Backups, even though its page shares their status-card shape.
     { href: "/vault", label: "Vault", icon: <IconBook /> },
     { href: "/health", label: "Health", icon: <IconHeart /> },
+    { href: "/athlete", label: "Athlete", icon: <IconRunner /> },
   ];
 
   const system: Item[] = [
