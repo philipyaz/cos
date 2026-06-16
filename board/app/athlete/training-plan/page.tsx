@@ -57,6 +57,31 @@ export default function TrainingPlanPage() {
   const [plan, setPlan] = useState<TrainingPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pushing, setPushing] = useState(false);
+  const [pushResult, setPushResult] = useState<{ created: number; failed: number } | null>(null);
+
+  const pushToCalendar = async () => {
+    if (!plan) return;
+    setPushing(true);
+    setPushResult(null);
+    try {
+      const res = await fetch("/api/athlete/push-plan-to-calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPushResult({ created: data.created, failed: data.failed });
+      } else {
+        setError(data.error ?? "Erreur calendrier");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erreur reseau");
+    } finally {
+      setPushing(false);
+    }
+  };
 
   const generate = async () => {
     setLoading(true);
@@ -89,15 +114,37 @@ export default function TrainingPlanPage() {
           <h1 className="text-[15px] font-semibold text-ink-900">
             Plan d&apos;entrainement
           </h1>
-          <button
-            onClick={generate}
-            disabled={loading}
-            className="px-4 py-1.5 rounded-md bg-ink-900 text-white text-[13px] font-medium hover:bg-ink-800 disabled:opacity-50 transition flex items-center gap-2"
-          >
-            {loading && <Spinner />}
-            {loading ? "Generation en cours..." : "Generer le plan de la semaine"}
-          </button>
+          <div className="flex items-center gap-2">
+            {plan && (
+              <button
+                onClick={pushToCalendar}
+                disabled={pushing}
+                className="px-4 py-1.5 rounded-md border border-ink-200 bg-white text-ink-700 text-[13px] font-medium hover:bg-ink-50 disabled:opacity-50 transition flex items-center gap-2"
+              >
+                {pushing && <Spinner />}
+                {pushing ? "Ajout..." : "Ajouter au calendrier"}
+              </button>
+            )}
+            <button
+              onClick={generate}
+              disabled={loading}
+              className="px-4 py-1.5 rounded-md bg-ink-900 text-white text-[13px] font-medium hover:bg-ink-800 disabled:opacity-50 transition flex items-center gap-2"
+            >
+              {loading && <Spinner />}
+              {loading ? "Generation en cours..." : "Generer le plan de la semaine"}
+            </button>
+          </div>
         </div>
+
+        {/* Push result */}
+        {pushResult && (
+          <div className={`rounded-lg border px-4 py-3 ${pushResult.failed === 0 ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+            <p className={`text-[13px] ${pushResult.failed === 0 ? "text-emerald-700" : "text-amber-700"}`}>
+              {pushResult.created} evenement{pushResult.created > 1 ? "s" : ""} ajoute{pushResult.created > 1 ? "s" : ""} au calendrier
+              {pushResult.failed > 0 && ` (${pushResult.failed} echec${pushResult.failed > 1 ? "s" : ""})`}
+            </p>
+          </div>
+        )}
 
         {/* Error */}
         {error && (

@@ -30,6 +30,7 @@ import {
   IconChevronRight,
   IconRunner,
   IconTrend,
+  IconSpark,
 } from "@/components/icons";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
@@ -139,7 +140,9 @@ export function Sidebar({
     { href: "/vault", label: "Vault", icon: <IconBook /> },
     { href: "/health", label: "Health", icon: <IconHeart /> },
     { href: "/athlete", label: "Athlete", icon: <IconRunner /> },
+    { href: "/athlete/pre-workout-brief", label: "Brief pre-workout", icon: <IconBolt /> },
     { href: "/athlete/weekly-review", label: "Bilan semaine", icon: <IconTrend /> },
+    { href: "/athlete/correlations", label: "Correlations", icon: <IconSpark /> },
   ];
 
   const system: Item[] = [

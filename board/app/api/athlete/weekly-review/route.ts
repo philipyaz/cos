@@ -194,5 +194,50 @@ export async function GET() {
     );
   }
 
-  return NextResponse.json({ review: result.json });
+  // Compute daily form scores for the 7 days
+  const boardUrl = process.env.BOARD_URL || "http://localhost:3000";
+  const dates: string[] = [];
+  for (let i = 7; i >= 1; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    dates.push(formatDate(d));
+  }
+
+  const scores: number[] = [];
+  const scoreResults = await Promise.allSettled(
+    dates.map((d) =>
+      fetch(`${boardUrl}/api/athlete/form-score?date=${d}`)
+        .then((r) => (r.ok ? r.json() : null)),
+    ),
+  );
+  for (const r of scoreResults) {
+    if (r.status === "fulfilled" && r.value?.score != null) {
+      scores.push(r.value.score);
+    }
+  }
+
+  const avgFormScore = scores.length > 0
+    ? Math.round(scores.reduce((s, v) => s + v, 0) / scores.length)
+    : null;
+
+  let formTrend: string | null = null;
+  if (scores.length >= 4) {
+    const half = Math.floor(scores.length / 2);
+    const firstHalf = scores.slice(0, half);
+    const secondHalf = scores.slice(half);
+    const avgFirst = firstHalf.reduce((s, v) => s + v, 0) / firstHalf.length;
+    const avgSecond = secondHalf.reduce((s, v) => s + v, 0) / secondHalf.length;
+    const diff = avgSecond - avgFirst;
+    if (diff > 5) formTrend = "hausse";
+    else if (diff < -5) formTrend = "baisse";
+    else formTrend = "stable";
+  }
+
+  const review = {
+    ...(result.json as Record<string, unknown>),
+    avg_form_score: avgFormScore,
+    form_trend: formTrend,
+  };
+
+  return NextResponse.json({ review });
 }
