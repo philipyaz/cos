@@ -1,79 +1,22 @@
 import { NextResponse } from "next/server";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { listEntries } from "@/lib/health-store";
+import {
+  readAthlete, readApiKey, callClaude,
+  isoWeek, formatDate, last7DaysFrom,
+} from "@/lib/athlete-ai";
 
 export const dynamic = "force-dynamic";
 
-// ── Read athlete profile ────────────────────────────────────────────────────
-
-const DATA_DIR = process.env.COS_DATA_DIR || path.join(process.cwd(), "data");
-const ATHLETE_FILE = path.join(DATA_DIR, "athlete.json");
-
-async function readAthlete(): Promise<Record<string, unknown> | null> {
-  try {
-    return JSON.parse(await fs.readFile(ATHLETE_FILE, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-// ── Read Anthropic API key from config/secrets.env ──────────────────────────
-
-async function readApiKey(): Promise<string | null> {
-  try {
-    const raw = await fs.readFile(
-      path.join(process.cwd(), "..", "config", "secrets.env"),
-      "utf8",
-    );
-    for (const line of raw.split(/\r?\n/)) {
-      const t = line.trim();
-      if (!t || t.startsWith("#")) continue;
-      const m = t.match(/^ANTHROPIC_API_KEY=(.*)$/);
-      if (m) {
-        let v = m[1] ?? "";
-        if (
-          v.length >= 2 &&
-          ((v.startsWith('"') && v.endsWith('"')) ||
-            (v.startsWith("'") && v.endsWith("'")))
-        )
-          v = v.slice(1, -1);
-        v = v.trim();
-        if (v && !v.toLowerCase().includes("xxxx") && !v.toLowerCase().startsWith("your"))
-          return v;
-      }
-    }
-  } catch {}
-  // Fallback: env var (e.g. from .env.local or process env)
-  return process.env.ANTHROPIC_API_KEY?.trim() || null;
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
 const DAYS_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
-
-function isoWeek(d: Date): string {
-  const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay() || 7));
-  const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil(((tmp.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  return `${tmp.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
-}
 
 function nextMonday(): Date {
   const d = new Date();
-  const day = d.getDay(); // 0=Sun
+  const day = d.getDay();
   const diff = day === 0 ? 1 : 8 - day;
   d.setDate(d.getDate() + diff);
   d.setHours(0, 0, 0, 0);
   return d;
 }
-
-function formatDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-// ── Build the Claude prompt ─────────────────────────────────────────────────
 
 function buildSystemPrompt(
   profile: Record<string, unknown>,
@@ -143,10 +86,7 @@ Reponds UNIQUEMENT avec un objet JSON valide, sans texte avant/apres, sans markd
 }`;
 }
 
-// ── GET handler ─────────────────────────────────────────────────────────────
-
 export async function GET() {
-  // 1. Read API key
   const apiKey = await readApiKey();
   if (!apiKey) {
     return NextResponse.json(
@@ -155,7 +95,6 @@ export async function GET() {
     );
   }
 
-  // 2. Read athlete profile
   const profile = await readAthlete();
   if (!profile) {
     return NextResponse.json(
@@ -164,12 +103,7 @@ export async function GET() {
     );
   }
 
-  // 3. Fetch last 7 days of health data
-  const now = new Date();
-  const sevenDaysAgo = new Date(now);
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  const fromISO = sevenDaysAgo.toISOString();
-
+  const fromISO = last7DaysFrom();
   const [workouts, sleep, hrv] = await Promise.all([
     listEntries({ type: "workout", from: fromISO, limit: 50 }),
     listEntries({ type: "sleep", from: fromISO, limit: 14 }),
@@ -185,81 +119,32 @@ export async function GET() {
       avg_hr: e.data.avg_hr,
       calories: e.data.calories,
     })),
-    sleep: sleep.entries.map((e) => ({
-      date: e.ts.slice(0, 10),
-      duration_hours: e.data.value,
-      deep: e.data.metadata && typeof e.data.metadata === "object"
-        ? (e.data.metadata as Record<string, unknown>).deep
-        : undefined,
-      rem: e.data.metadata && typeof e.data.metadata === "object"
-        ? (e.data.metadata as Record<string, unknown>).rem
-        : undefined,
-    })),
+    sleep: sleep.entries.map((e) => {
+      const meta = e.data.metadata && typeof e.data.metadata === "object"
+        ? (e.data.metadata as Record<string, unknown>) : {};
+      return {
+        date: e.ts.slice(0, 10),
+        duration_hours: e.data.value,
+        deep: meta.deep,
+        rem: meta.rem,
+      };
+    }),
     hrv: hrv.entries.map((e) => ({
       date: e.ts.slice(0, 10),
       avg_ms: e.data.value ?? e.data.avg_ms,
     })),
   };
 
-  const today = formatDate(now);
+  const today = formatDate(new Date());
   const systemPrompt = buildSystemPrompt(profile, healthSummary, today);
+  const result = await callClaude(apiKey, systemPrompt, "Genere le plan d'entrainement pour la semaine prochaine.");
 
-  // 4. Call Anthropic API
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 4096,
-        messages: [
-          {
-            role: "user",
-            content: "Genere le plan d'entrainement pour la semaine prochaine.",
-          },
-        ],
-        system: systemPrompt,
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.text().catch(() => "Unknown error");
-      return NextResponse.json(
-        { error: `Anthropic API error (${res.status}): ${err}` },
-        { status: 502 },
-      );
-    }
-
-    const data = await res.json();
-    const text: string =
-      data.content?.[0]?.text ?? "";
-
-    // Parse the JSON from Claude's response
-    // Strip potential markdown fences
-    const cleaned = text
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```\s*$/, "")
-      .trim();
-
-    let plan: Record<string, unknown>;
-    try {
-      plan = JSON.parse(cleaned);
-    } catch {
-      return NextResponse.json(
-        { error: "Failed to parse training plan JSON from LLM response.", raw: text },
-        { status: 502 },
-      );
-    }
-
-    return NextResponse.json({ plan });
-  } catch (e) {
+  if ("error" in result) {
     return NextResponse.json(
-      { error: `Failed to call Anthropic API: ${e instanceof Error ? e.message : String(e)}` },
-      { status: 502 },
+      { error: result.error, ...(result.raw ? { raw: result.raw } : {}) },
+      { status: result.status },
     );
   }
+
+  return NextResponse.json({ plan: result.json });
 }

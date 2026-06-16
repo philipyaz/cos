@@ -29,6 +29,7 @@ import {
   IconBrand,
   IconChevronRight,
   IconRunner,
+  IconTrend,
 } from "@/components/icons";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
@@ -138,6 +139,7 @@ export function Sidebar({
     { href: "/vault", label: "Vault", icon: <IconBook /> },
     { href: "/health", label: "Health", icon: <IconHeart /> },
     { href: "/athlete", label: "Athlete", icon: <IconRunner /> },
+    { href: "/athlete/weekly-review", label: "Bilan semaine", icon: <IconTrend /> },
   ];
 
   const system: Item[] = [
