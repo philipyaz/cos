@@ -39,12 +39,11 @@ reconciler carries a **per-channel watermark** of the last thing it processed; a
 window simply means the next run has more to catch up on. Re-running is cheap and safe —
 a sweep that finds nothing past its watermark no-ops.
 
-!!! note "The recipes are documentation, not a daemon"
-    The [`recipes/`](https://github.com/philipyaz/cos/tree/main/board/.claude/skills/recipes)
-    directory is a *playbook* of copy-pasteable scheduled-task blocks — what each routine
-    pulls, how it routes, the suggested cadence (mail every 10–15 min, board-organize
-    every few hours). It ships no intervals and starts no processes; you set cadence by
-    hand in Cowork.
+!!! note "Scheduling is documentation, not a daemon"
+    The skills' [`README`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/README.md)
+    indexes which skills you can run as Cowork scheduled tasks — what each does, the trigger
+    to paste, and a suggested cadence (mail every 10–15 min, board-organize every few hours).
+    It ships no intervals and starts no processes; you set cadence by hand in Cowork.
 
 ```mermaid
 flowchart LR

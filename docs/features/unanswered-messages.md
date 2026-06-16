@@ -77,7 +77,7 @@ These are the human face's twin: the panel's **Mark answered** button and the ag
 `mark_message_answered` call resolve to the **same** `PATCH /api/messages/{id}` route — one mutation
 path, two faces, through the single atomic, version-guarded `mutate()` store path.
 
-## The skill + the recipe
+## The skill (and how to schedule it)
 
 The [`/unanswered-messages`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/unanswered-messages/SKILL.md)
 operator skill runs in **Claude Cowork** and is the engine behind the surface. It is an **independent
@@ -111,10 +111,10 @@ What it does, step by step:
   `config/unanswered-messages-state.json` (distinct from `whatsapp-triage-state.json`), so the two
   sweeps never collide. The watermark advances **last**, even for a dropped message.
 
-The companion recipe,
-[`recipes/unanswered.md`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/recipes/unanswered.md),
-is a copy-pasteable Cowork scheduled-task block — suggested cadence **~15 min**, ~14-day lookback. Like
-every recipe, there is no host-side cron: you set the cadence by hand in Cowork.
+**Scheduling.** There's no separate recipe file — the skill is self-contained, so you schedule it by
+pasting **`Run /unanswered-messages`** into a **Claude Cowork** scheduled task (a sensible default is
+~15 min, over a ~14-day lookback). Like every Cos sweep there is no host-side cron; you set the cadence
+by hand in Cowork. See the [scheduled-skills guide](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/README.md).
 
 ## How mark-answered works (and why it doesn't cascade)
 
