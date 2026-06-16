@@ -139,6 +139,7 @@ nav:
       - Priorities: features/priorities.md
       - Activity: features/activity.md
       - Nutrition & Chef: features/nutrition.md
+      - Health & Athlete: features/health.md
   - Subsystems:
       - Semantic search: reference/search.md
       - Encrypted backup: reference/backup.md

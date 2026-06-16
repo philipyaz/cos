@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { TopBar } from "@/components/topbar";
 import { FormScoreWidget } from "@/components/form-score-widget";
 
-// ── Types (mirror health-store.ts) ──────────────────────────────────────────
+// ── Types (mirror HealthEntry from @/lib/types) ─────────────────────────────
 
 interface HealthEntry {
   id: string;
@@ -18,12 +18,12 @@ interface HealthEntry {
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+  return d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
 }
 
 function fmtTime(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 }
 
 function fmtDuration(min: unknown): string {
@@ -47,19 +47,20 @@ function num(v: unknown): string {
 }
 
 // ── Type matching ────────────────────────────────────────────────────────────
-// HAE stores entries with raw HealthKit names (heart_rate_variability_sdnn,
-// resting_heart_rate, sleep_analysis, step_count, vo2_max) while our native
-// push uses short canonical types (hrv, resting_hr, sleep, steps, vo2max).
-// Match both so the page works regardless of which path ingested the data.
+// The push route canonicalizes every known HAE metric to the short types in
+// VALID_HEALTH_ENTRY_TYPE (hrv, resting_hr, steps, sleep_night, sleep_nap, vo2max,
+// workout) and stores those — only UNMAPPED metric names are kept verbatim. So the
+// canonical type is the primary key here; we keep the raw HAE aliases too in case a
+// legacy / unmapped export slipped a raw name through.
 
 const TYPE_GROUPS: Record<string, string[]> = {
   hrv:        ["hrv", "heart_rate_variability", "heart_rate_variability_sdnn", "hrv_sdnn"],
   resting_hr: ["resting_hr", "resting_heart_rate"],
   steps:      ["steps", "step_count"],
-  sleep:      ["sleep", "sleep_analysis", "sleep_night"],
+  sleep:      ["sleep_night", "sleep", "sleep_analysis"],
   sleep_nap:  ["sleep_nap"],
   vo2max:     ["vo2max", "vo2_max"],
-  workout:    ["workout", "apple_exercise_time"],
+  workout:    ["workout"],
 };
 
 function byGroup(entries: HealthEntry[], group: string): HealthEntry[] {
@@ -196,9 +197,10 @@ function NapSection({ entries }: { entries: HealthEntry[] }) {
   );
 }
 
-// Extract the "headline number" from an entry regardless of whether it was
-// stored in our canonical shape (avg_ms, bpm, count, value) or HAE's generic
-// shape (value). Returns the first finite number found, or undefined.
+// Extract the "headline number" from an entry. The canonical taxonomy carries the
+// per-day metric aggregate in data.value (hrv=ms, resting_hr=bpm, steps=count,
+// vo2max=mL/kg/min); the trailing keys are legacy fallbacks for any pre-canonical
+// shape. Returns the first finite number found, or undefined.
 function extractQty(e: HealthEntry, ...keys: string[]): number | undefined {
   for (const k of keys) {
     const v = e.data[k];

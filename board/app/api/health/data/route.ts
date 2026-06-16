@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { listEntries, deleteEntries } from "@/lib/health-store";
+import { listEntries, deleteEntries } from "@/lib/health";
+import { storeErrorToResponse } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +24,8 @@ export async function DELETE(req: NextRequest) {
   const token = (process.env.HEALTH_PUSH_TOKEN || "").trim();
   if (!token) {
     return NextResponse.json(
-      { error: "HEALTH_PUSH_TOKEN is not configured on the server." },
-      { status: 500 }
+      { error: "Health push is not configured on the server." },
+      { status: 503 }
     );
   }
   const provided = req.headers.get("x-health-token")?.trim();
@@ -48,6 +49,12 @@ export async function DELETE(req: NextRequest) {
     );
   }
 
-  const result = await deleteEntries({ ids, from, to });
-  return NextResponse.json(result);
+  try {
+    const result = await deleteEntries({ ids, from, to });
+    return NextResponse.json(result);
+  } catch (e) {
+    const mapped = storeErrorToResponse(e);
+    if (mapped) return mapped;
+    throw e;
+  }
 }

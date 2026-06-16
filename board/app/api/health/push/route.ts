@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { pushEntries } from "@/lib/health-store";
+import { pushEntries } from "@/lib/health";
+import { storeErrorToResponse } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +12,8 @@ export async function POST(req: NextRequest) {
   const token = (process.env.HEALTH_PUSH_TOKEN || "").trim();
   if (!token) {
     return NextResponse.json(
-      { error: "HEALTH_PUSH_TOKEN is not configured on the server." },
-      { status: 500 }
+      { error: "Health push is not configured on the server." },
+      { status: 503 }
     );
   }
   const provided = req.headers.get("x-health-token")?.trim();
@@ -22,8 +23,6 @@ export async function POST(req: NextRequest) {
 
   // ── Parse body ──
   const body = await req.json().catch(() => null);
-  // TODO: remove after debugging Health Auto Export payloads
-  console.log("[health/push] incoming body:", JSON.stringify(body, null, 2));
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Body must be a JSON object." }, { status: 400 });
   }
@@ -49,11 +48,6 @@ export async function POST(req: NextRequest) {
       (Array.isArray(body.metrics) && body.metrics) ||
       null;
     if (haeMetrics) {
-      for (const metric of haeMetrics) {
-        if (typeof metric.name === "string" && metric.name.toLowerCase().includes("sleep")) {
-          console.log("[sleep debug]", JSON.stringify(Array.isArray(metric.data) ? metric.data.slice(0, 3) : metric.data, null, 2));
-        }
-      }
       converted.push(...haeMetrics.flatMap(convertHAEMetric));
     }
 
@@ -97,8 +91,16 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Persist ──
-  const result = await pushEntries(raw);
-  return NextResponse.json(result, { status: 201 });
+  // The add-on gate lives inside pushEntries (assertAddonEnabled in mutate): a
+  // disabled "health" add-on throws NotFoundError → 404 via storeErrorToResponse.
+  try {
+    const result = await pushEntries(raw);
+    return NextResponse.json(result, { status: 201 });
+  } catch (e) {
+    const mapped = storeErrorToResponse(e);
+    if (mapped) return mapped;
+    throw e;
+  }
 }
 
 // ── Health Auto Export → native entry conversion ────────────────────────────
@@ -172,30 +174,28 @@ function convertHAEMetric(m: Record<string, any>): Record<string, unknown>[] {
   const ourType = HAE_METRIC_MAP[normalName] ?? normalName;
 
   // Group data points by calendar day (YYYY-MM-DD).
-  // HAE re-sends the FULL history on every push, so only keep today's data
-  // points — previous days were already ingested by earlier pushes.
-  const today = new Date().toISOString().slice(0, 10);
+  // HAE re-sends the FULL history on every push, so keep ALL days — pushEntries
+  // dedups by id (`<metric>_<day>`), and dropping non-today days would lose any
+  // day the watch didn't push on (a missed sync = permanent gap).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const byDay = new Map<string, Array<Record<string, any>>>();
   for (const pt of points) {
     const rawDate = typeof pt.date === "string" ? parseHAETimestamp(pt.date) : "";
     const day = rawDate.slice(0, 10); // "YYYY-MM-DD"
-    if (!day || day !== today) continue;
+    if (!day) continue;
     let arr = byDay.get(day);
     if (!arr) { arr = []; byDay.set(day, arr); }
     arr.push(pt);
   }
 
-  // One entry per day (today only)
+  // One entry per day
   const results: Record<string, unknown>[] = [];
   for (const [day, dayPoints] of byDay) {
     const id = `${normalName}_${day}`;
     const ts = day; // YYYY-MM-DD
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let value: number | undefined;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let metadata: Record<string, any> = { dataPoints: dayPoints };
+    const metadata: Record<string, unknown> = { dataPoints: dayPoints };
 
     if (LAST_METRICS.has(normalName)) {
       // Sleep: split into night vs nap based on sleepStart hour.
@@ -229,7 +229,7 @@ function convertHAEMetric(m: Record<string, any>): Record<string, unknown>[] {
       continue; // skip the generic push below
     } else {
       const qtys = dayPoints
-        .map((pt: Record<string, any>) => (typeof pt.qty === "number" ? pt.qty : NaN))
+        .map((pt: Record<string, unknown>) => (typeof pt.qty === "number" ? pt.qty : NaN))
         .filter((n: number) => Number.isFinite(n));
 
       if (SUM_METRICS.has(normalName)) {

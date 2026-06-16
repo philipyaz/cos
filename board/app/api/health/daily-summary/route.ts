@@ -1,12 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { listEntries } from "@/lib/health-store";
+import { listEntries } from "@/lib/health";
 import { readDB } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/health/daily-summary?date=YYYY-MM-DD
-// Aggregates health data (workouts, sleep, HRV, resting HR, steps) from
-// health.json and nutrition food logs from cases.json into a single response.
+// Aggregates health data (workouts, sleep, HRV, resting HR, steps) and nutrition
+// food logs — both folded into cases.json — into a single response.
 export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get("date")?.trim();
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
   const naps = napEntries.map(buildSleep);
 
   // ── Metrics ──
-  const hrvEntries = byType["heart_rate_variability"] ?? [];
+  const hrvEntries = byType["hrv"] ?? [];
   const restingHrEntries = byType["resting_hr"] ?? [];
   const stepsEntries = byType["steps"] ?? [];
 

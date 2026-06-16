@@ -42,6 +42,12 @@ const ADDON_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   IconChef,
   IconFridge,
   IconMealPlan,
+  IconHeart,
+  IconRunner,
+  IconCalendar,
+  IconTrend,
+  IconBolt,
+  IconSpark,
 };
 function addonIcon(key: string): ReactNode {
   const Glyph = ADDON_ICONS[key] ?? IconBolt;
@@ -138,11 +144,6 @@ export function Sidebar({
     // with the daily drivers (next to Priorities, itself a knowledge dashboard), not in the
     // Review group beside Trash/Backups, even though its page shares their status-card shape.
     { href: "/vault", label: "Vault", icon: <IconBook /> },
-    { href: "/health", label: "Health", icon: <IconHeart /> },
-    { href: "/athlete", label: "Athlete", icon: <IconRunner /> },
-    { href: "/athlete/pre-workout-brief", label: "Brief pre-workout", icon: <IconBolt /> },
-    { href: "/athlete/weekly-review", label: "Bilan semaine", icon: <IconTrend /> },
-    { href: "/athlete/correlations", label: "Correlations", icon: <IconSpark /> },
   ];
 
   const system: Item[] = [

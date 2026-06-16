@@ -1,93 +1,77 @@
 import { NextResponse } from "next/server";
-import { listEntries } from "@/lib/health-store";
+import { listEntries, getProfile } from "@/lib/health";
 import { readDB } from "@/lib/store";
-import {
-  readAthlete, readApiKey, callClaude,
-  isoWeek, formatDate,
-} from "@/lib/athlete-ai";
+import { computeFormScore } from "@/lib/athlete-score";
+import { readApiKey, callClaude, isoWeek, formatDate } from "@/lib/athlete-ai";
 
 export const dynamic = "force-dynamic";
 
-function buildSystemPrompt(
-  profile: Record<string, unknown>,
-  health: Record<string, unknown>,
-  nutrition: Record<string, unknown>,
-  today: string,
-): string {
-  const goalDate = profile.goalDate as string | undefined;
-  let daysLeft = "";
-  if (goalDate) {
-    const diff = Math.ceil(
-      (new Date(goalDate).getTime() - new Date(today).getTime()) / 86400000,
-    );
-    daysLeft = diff > 0 ? `${diff} jours restants` : "Date objectif depassee";
-  }
+const STABLE_SYSTEM = `You are an expert sports coach and nutritionist.
+You produce a complete, personalized weekly review as structured data.
 
-  const now = new Date();
-  const week = isoWeek(now);
+Rules:
+- Compute metrics from the raw data provided.
+- overall_score (0-100): a global score considering training, sleep, recovery, and nutrition.
+- training.vs_plan: compare actual load to the profile goals (days/week, sports).
+- sleep.quality_trend: "improving" / "stable" / "declining" based on the week's evolution.
+- recovery.fatigue_level: "low" / "moderate" / "high" based on HRV and resting HR.
+- recommendations: 3 to 5 concrete, actionable tips for the coming week.
+- If data is missing (0 entries), note it and base your analysis on what is available.`;
 
-  return `Tu es un coach sportif et nutritionniste expert.
-Tu generes un bilan hebdomadaire complet et personnalise au format JSON.
-
-# Profil athlete
-${JSON.stringify(profile, null, 2)}
-
-# Date actuelle : ${today}
-# Semaine analysee : ${week}
-${goalDate ? `# Date objectif : ${goalDate} (${daysLeft})` : "# Pas de date objectif definie"}
-
-# Donnees d'entrainement des 7 derniers jours (Apple Watch)
-${JSON.stringify(health, null, 2)}
-
-# Donnees nutritionnelles des 7 derniers jours (food logs)
-${JSON.stringify(nutrition, null, 2)}
-
-# Regles
-- Calcule les metriques a partir des donnees brutes fournies.
-- overall_score (0-100) : note globale considerant entrainement, sommeil, recuperation, nutrition.
-- training.vs_plan : compare la charge reelle aux objectifs du profil (jours/semaine, sports).
-- sleep.quality_trend : "en hausse" / "stable" / "en baisse" selon l'evolution sur la semaine.
-- recovery.fatigue_level : "faible" / "moderee" / "elevee" selon HRV et FC repos.
-- recommendations : 3 a 5 conseils concrets et actionables pour la semaine prochaine.
-- Si des donnees manquent (0 entries), note-le et base ton analyse sur ce qui est disponible.
-
-# Format de reponse
-Reponds UNIQUEMENT avec un objet JSON valide, sans texte avant/apres, sans markdown :
-{
-  "week": "${week}",
-  "generated_at": "<ISO timestamp>",
-  "overall_score": <0-100>,
-  "summary": "<texte court 2-3 phrases>",
-  "training": {
-    "sessions_done": <number>,
-    "total_volume_min": <number>,
-    "total_distance_km": <number>,
-    "sports_breakdown": { "<sport>": <minutes>, ... },
-    "vs_plan": "<commentaire>",
-    "highlights": ["..."]
+const REVIEW_SCHEMA = {
+  type: "object",
+  properties: {
+    week: { type: "string" },
+    generated_at: { type: "string", description: "ISO timestamp" },
+    overall_score: { type: "number" },
+    summary: { type: "string", description: "short 2-3 sentence summary" },
+    training: {
+      type: "object",
+      properties: {
+        sessions_done: { type: "number" },
+        total_volume_min: { type: "number" },
+        total_distance_km: { type: "number" },
+        sports_breakdown: { type: "object", additionalProperties: { type: "number" } },
+        vs_plan: { type: "string" },
+        highlights: { type: "array", items: { type: "string" } },
+      },
+      required: ["sessions_done", "total_volume_min", "vs_plan"],
+    },
+    sleep: {
+      type: "object",
+      properties: {
+        avg_duration_h: { type: "number" },
+        avg_deep_h: { type: "number" },
+        avg_rem_h: { type: "number" },
+        quality_trend: { type: "string", enum: ["improving", "stable", "declining"] },
+        notes: { type: "string" },
+      },
+      required: ["quality_trend", "notes"],
+    },
+    recovery: {
+      type: "object",
+      properties: {
+        avg_hrv: { type: "number" },
+        avg_resting_hr: { type: "number" },
+        fatigue_level: { type: "string", enum: ["low", "moderate", "high"] },
+        notes: { type: "string" },
+      },
+      required: ["fatigue_level", "notes"],
+    },
+    nutrition: {
+      type: "object",
+      properties: {
+        days_logged: { type: "number" },
+        avg_calories: { type: "number" },
+        notes: { type: "string" },
+      },
+      required: ["notes"],
+    },
+    recommendations: { type: "array", items: { type: "string" } },
+    next_week_focus: { type: "string" },
   },
-  "sleep": {
-    "avg_duration_h": <number>,
-    "avg_deep_h": <number>,
-    "avg_rem_h": <number>,
-    "quality_trend": "en hausse|stable|en baisse",
-    "notes": "..."
-  },
-  "recovery": {
-    "avg_hrv": <number>,
-    "avg_resting_hr": <number>,
-    "fatigue_level": "faible|moderee|elevee",
-    "notes": "..."
-  },
-  "nutrition": {
-    "days_logged": <number>,
-    "avg_calories": <number>,
-    "notes": "..."
-  },
-  "recommendations": ["...", "...", "..."],
-  "next_week_focus": "..."
-}`;
-}
+  required: ["week", "generated_at", "overall_score", "summary", "training", "sleep", "recovery", "recommendations", "next_week_focus"],
+};
 
 export async function GET() {
   const apiKey = await readApiKey();
@@ -98,7 +82,7 @@ export async function GET() {
     );
   }
 
-  const profile = await readAthlete();
+  const profile = await getProfile();
   if (!profile) {
     return NextResponse.json(
       { error: "No athlete profile found. Save your profile first at /athlete." },
@@ -106,30 +90,21 @@ export async function GET() {
     );
   }
 
-  // Health data — last 7 days.
-  // Use date-only boundaries (YYYY-MM-DD) so the string-compare pre-filter in
-  // listEntries works for BOTH date-only ts ("2026-06-09") and full ISO ts
-  // ("2026-06-09T..."). Same approach as daily-summary.
+  // Health data — last 7 days. Date-only boundaries so the filter handles both date-only and
+  // full-ISO ts. Canonical types: sleep_night, hrv (NOT "heart_rate_variability"), steps,
+  // resting_hr, workout.
   const fromDate = formatDate((() => { const d = new Date(); d.setDate(d.getDate() - 7); return d; })());
   const toDate = formatDate((() => { const d = new Date(); d.setDate(d.getDate() + 1); return d; })());
 
-  // Type names must match what's actually stored in health.json:
-  //   sleep_night (not "sleep"), heart_rate_variability (not "hrv"),
-  //   steps, resting_hr, workout.
   const [workouts, sleepData, hrvData, stepsData, restingHrData] = await Promise.all([
     listEntries({ type: "workout", from: fromDate, to: toDate, limit: 0 }),
     listEntries({ type: "sleep_night", from: fromDate, to: toDate, limit: 0 }),
-    listEntries({ type: "heart_rate_variability", from: fromDate, to: toDate, limit: 0 }),
+    listEntries({ type: "hrv", from: fromDate, to: toDate, limit: 0 }),
     listEntries({ type: "steps", from: fromDate, to: toDate, limit: 0 }),
     listEntries({ type: "resting_hr", from: fromDate, to: toDate, limit: 0 }),
   ]);
 
-  // Post-filter: keep only entries whose ts starts with a date in the range
   const inRange = (e: { ts: string }) => e.ts >= fromDate && e.ts < toDate + "T";
-
-  console.log(
-    `[weekly-review] range ${fromDate}..${toDate} | workout: ${workouts.entries.filter(inRange).length}, sleep_night: ${sleepData.entries.filter(inRange).length}, hrv: ${hrvData.entries.filter(inRange).length}, steps: ${stepsData.entries.filter(inRange).length}, resting_hr: ${restingHrData.entries.filter(inRange).length}`,
-  );
 
   const health = {
     workouts: workouts.entries.filter(inRange).map((e) => ({
@@ -150,22 +125,14 @@ export async function GET() {
         rem_hours: meta.rem,
       };
     }),
-    hrv: hrvData.entries.filter(inRange).map((e) => ({
-      date: e.ts.slice(0, 10),
-      avg_ms: e.data.value ?? e.data.avg_ms,
-    })),
-    steps: stepsData.entries.filter(inRange).map((e) => ({
-      date: e.ts.slice(0, 10),
-      count: e.data.value ?? e.data.count,
-    })),
-    resting_hr: restingHrData.entries.filter(inRange).map((e) => ({
-      date: e.ts.slice(0, 10),
-      bpm: e.data.value ?? e.data.bpm,
-    })),
+    hrv: hrvData.entries.filter(inRange).map((e) => ({ date: e.ts.slice(0, 10), avg_ms: e.data.value })),
+    steps: stepsData.entries.filter(inRange).map((e) => ({ date: e.ts.slice(0, 10), count: e.data.value })),
+    resting_hr: restingHrData.entries.filter(inRange).map((e) => ({ date: e.ts.slice(0, 10), bpm: e.data.value })),
   };
 
-  // Food logs — last 7 days from cases.json
-  const sevenDaysAgoDate = formatDate((() => { const d = new Date(); d.setDate(d.getDate() - 7); return d; })());
+  // Food logs — last 7 days (the SOFT nutrition dependency: graceful ?? [] + date filter, NOT
+  // gated on isAddonEnabled — a disabled nutrition add-on's logs simply read empty).
+  const sevenDaysAgoDate = fromDate;
   let nutrition: Record<string, unknown> = { foodLogs: [] };
   try {
     const db = await readDB();
@@ -184,8 +151,38 @@ export async function GET() {
   } catch {}
 
   const today = formatDate(new Date());
-  const systemPrompt = buildSystemPrompt(profile, health, nutrition, today);
-  const result = await callClaude(apiKey, systemPrompt, "Genere le bilan complet de la semaine ecoulee.");
+  const week = isoWeek(new Date());
+  const goalDate = profile.goalDate || undefined;
+  let daysLeft = "";
+  if (goalDate) {
+    const diff = Math.ceil((new Date(goalDate).getTime() - new Date(today).getTime()) / 86400000);
+    daysLeft = diff > 0 ? `${diff} days remaining` : "Goal date passed";
+  }
+
+  const volatileSystem = `# Athlete profile
+${JSON.stringify(profile, null, 2)}
+
+# Current date: ${today}
+# Week analyzed: ${week}
+${goalDate ? `# Goal date: ${goalDate} (${daysLeft})` : "# No goal date set"}
+
+# Training data, last 7 days (Apple Watch)
+${JSON.stringify(health, null, 2)}
+
+# Nutrition data, last 7 days (food logs)
+${JSON.stringify(nutrition, null, 2)}
+
+# Use ISO week ${week} for the "week" field.`;
+
+  const result = await callClaude({
+    apiKey,
+    stableSystem: STABLE_SYSTEM,
+    volatileSystem,
+    userMessage: "Generate the complete review for the past week.",
+    toolName: "submit_weekly_review",
+    toolDescription: "Submit the complete weekly review.",
+    schema: REVIEW_SCHEMA,
+  });
 
   if ("error" in result) {
     return NextResponse.json(
@@ -194,8 +191,8 @@ export async function GET() {
     );
   }
 
-  // Compute daily form scores for the 7 days
-  const boardUrl = process.env.BOARD_URL || "http://localhost:3000";
+  // Daily form scores for the past 7 days — computed IN-PROCESS (no loopback fetch to
+  // /api/athlete/form-score).
   const dates: string[] = [];
   for (let i = 7; i >= 1; i--) {
     const d = new Date();
@@ -204,16 +201,9 @@ export async function GET() {
   }
 
   const scores: number[] = [];
-  const scoreResults = await Promise.allSettled(
-    dates.map((d) =>
-      fetch(`${boardUrl}/api/athlete/form-score?date=${d}`)
-        .then((r) => (r.ok ? r.json() : null)),
-    ),
-  );
+  const scoreResults = await Promise.allSettled(dates.map((d) => computeFormScore(d)));
   for (const r of scoreResults) {
-    if (r.status === "fulfilled" && r.value?.score != null) {
-      scores.push(r.value.score);
-    }
+    if (r.status === "fulfilled" && r.value?.score != null) scores.push(r.value.score);
   }
 
   const avgFormScore = scores.length > 0
@@ -223,14 +213,10 @@ export async function GET() {
   let formTrend: string | null = null;
   if (scores.length >= 4) {
     const half = Math.floor(scores.length / 2);
-    const firstHalf = scores.slice(0, half);
-    const secondHalf = scores.slice(half);
-    const avgFirst = firstHalf.reduce((s, v) => s + v, 0) / firstHalf.length;
-    const avgSecond = secondHalf.reduce((s, v) => s + v, 0) / secondHalf.length;
+    const avgFirst = scores.slice(0, half).reduce((s, v) => s + v, 0) / half;
+    const avgSecond = scores.slice(half).reduce((s, v) => s + v, 0) / (scores.length - half);
     const diff = avgSecond - avgFirst;
-    if (diff > 5) formTrend = "hausse";
-    else if (diff < -5) formTrend = "baisse";
-    else formTrend = "stable";
+    formTrend = diff > 5 ? "improving" : diff < -5 ? "declining" : "stable";
   }
 
   const review = {

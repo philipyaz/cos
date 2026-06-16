@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
-import { listEntries } from "@/lib/health-store";
-import {
-  readAthlete, readApiKey, callClaude,
-  isoWeek, formatDate,
-} from "@/lib/athlete-ai";
+import { listEntries, getProfile } from "@/lib/health";
+import { readApiKey, callClaude, isoWeek, formatDate } from "@/lib/athlete-ai";
 
 export const dynamic = "force-dynamic";
 
-const DAYS_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 function nextMonday(): Date {
   const d = new Date();
@@ -18,73 +15,48 @@ function nextMonday(): Date {
   return d;
 }
 
-function buildSystemPrompt(
-  profile: Record<string, unknown>,
-  healthSummary: Record<string, unknown>,
-  today: string,
-): string {
-  const goalDate = profile.goalDate as string | undefined;
-  let daysLeft = "";
-  if (goalDate) {
-    const diff = Math.ceil(
-      (new Date(goalDate).getTime() - new Date(today).getTime()) / 86400000,
-    );
-    daysLeft = diff > 0 ? `${diff} jours restants` : "Date objectif depassee";
-  }
+// The STABLE coaching instructions — invariant across requests, so they carry the cache_control
+// breakpoint. The schema below is the forced-tool input_schema (the AI fills it directly).
+const STABLE_SYSTEM = `You are an expert sports coach specialized in weekly training-plan design.
+You generate a personalized weekly training plan as structured data.
 
-  const monday = nextMonday();
-  const weekDates = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    return { date: formatDate(d), day: DAYS_FR[i] };
-  });
+Rules:
+- Respect the athlete's constraints: available sports, equipment, days available per week, and max session duration.
+- If available days < 7, the remaining days are "rest" or "active_recovery".
+- Adapt intensity to the recovery state (HRV, sleep, recent load).
+- Evaluate recovery_status: "good" if HRV is stable/high and sleep is good, "moderate" if average, "poor" if HRV is low or sleep is bad.
+- The "zones" field describes the effort zones (Z1-Z5) or RPE.
+- Favor gradual progression and injury prevention.
+- For a triathlon goal, alternate the three disciplines.
+- For weight loss, favor longer moderate sessions plus short HIIT.`;
 
-  return `Tu es un coach sportif expert en planification d'entrainement.
-Tu generes un plan d'entrainement hebdomadaire personnalise au format JSON.
-
-# Profil athlete
-${JSON.stringify(profile, null, 2)}
-
-# Date actuelle : ${today}
-${goalDate ? `# Date objectif : ${goalDate} (${daysLeft})` : "# Pas de date objectif definie"}
-
-# Historique des 7 derniers jours (donnees Apple Watch)
-${JSON.stringify(healthSummary, null, 2)}
-
-# Semaine a planifier
-${JSON.stringify(weekDates, null, 2)}
-
-# Regles
-- Respecte les contraintes : sports disponibles, equipement, jours dispo (${profile.daysPerWeek ?? "non precise"}), duree max seance (${profile.maxSessionMinutes ?? "non precisee"} min).
-- Si les jours dispo < 7, les jours restants sont repos ou recuperation active.
-- Adapte l'intensite selon l'etat de recuperation (HRV, sommeil, charge recente).
-- Evalue recovery_status : "good" si HRV stable/eleve + bon sommeil, "moderate" si moyen, "poor" si HRV bas ou mauvais sommeil.
-- Le champ "zones" decrit les zones d'effort (Z1-Z5) ou RPE.
-- Privilegie la progression douce et la prevention des blessures.
-- Pour un objectif triathlon, alterne les 3 disciplines.
-- Pour perte de poids, favorise les seances longues moderees + HIIT court.
-
-# Format de reponse
-Reponds UNIQUEMENT avec un objet JSON valide, sans texte avant/apres, sans markdown :
-{
-  "week": "${isoWeek(monday)}",
-  "generated_at": "<ISO timestamp>",
-  "recovery_status": "good|moderate|poor",
-  "days": [
-    {
-      "date": "YYYY-MM-DD",
-      "day": "Lundi|Mardi|...",
-      "type": "entrainement|repos|recuperation active",
-      "sport": "<nom du sport ou Repos>",
-      "duration_min": <number>,
-      "intensity": "legere|moderee|intense",
-      "description": "<description detaillee de la seance>",
-      "zones": "<zones d'effort ou RPE>"
-    }
-  ],
-  "weekly_notes": "<resume et conseils pour la semaine>"
-}`;
-}
+const PLAN_SCHEMA = {
+  type: "object",
+  properties: {
+    week: { type: "string", description: "ISO week, e.g. 2026-W25" },
+    generated_at: { type: "string", description: "ISO timestamp" },
+    recovery_status: { type: "string", enum: ["good", "moderate", "poor"] },
+    days: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "YYYY-MM-DD" },
+          day: { type: "string", description: "Monday|Tuesday|..." },
+          type: { type: "string", enum: ["training", "rest", "active_recovery"] },
+          sport: { type: "string", description: "sport name or 'Rest'" },
+          duration_min: { type: "number" },
+          intensity: { type: "string", enum: ["easy", "moderate", "hard"] },
+          description: { type: "string", description: "detailed session description" },
+          zones: { type: "string", description: "effort zones or RPE" },
+        },
+        required: ["date", "day", "type", "sport", "duration_min", "intensity", "description", "zones"],
+      },
+    },
+    weekly_notes: { type: "string", description: "summary and advice for the week" },
+  },
+  required: ["week", "generated_at", "recovery_status", "days", "weekly_notes"],
+};
 
 export async function GET() {
   const apiKey = await readApiKey();
@@ -95,7 +67,7 @@ export async function GET() {
     );
   }
 
-  const profile = await readAthlete();
+  const profile = await getProfile();
   if (!profile) {
     return NextResponse.json(
       { error: "No athlete profile found. Save your profile first at /athlete." },
@@ -103,18 +75,16 @@ export async function GET() {
     );
   }
 
-  // Use date-only boundaries so the filter works for both date-only ts
-  // ("2026-06-09") and full ISO ts ("2026-06-09T...").
+  // Date-only boundaries so the filter works for both date-only ts ("2026-06-09") and full ISO.
   const fromDate = formatDate((() => { const d = new Date(); d.setDate(d.getDate() - 7); return d; })());
   const toDate = formatDate((() => { const d = new Date(); d.setDate(d.getDate() + 1); return d; })());
   const inRange = (e: { ts: string }) => e.ts >= fromDate && e.ts < toDate + "T";
 
-  // Type names must match what's stored in health.json:
-  //   sleep_night (not "sleep"), heart_rate_variability (not "hrv").
+  // Canonical types: sleep_night, hrv (NOT "heart_rate_variability"), workout.
   const [workouts, sleep, hrv] = await Promise.all([
     listEntries({ type: "workout", from: fromDate, to: toDate, limit: 0 }),
     listEntries({ type: "sleep_night", from: fromDate, to: toDate, limit: 0 }),
-    listEntries({ type: "heart_rate_variability", from: fromDate, to: toDate, limit: 0 }),
+    listEntries({ type: "hrv", from: fromDate, to: toDate, limit: 0 }),
   ]);
 
   const healthSummary = {
@@ -132,19 +102,55 @@ export async function GET() {
       return {
         date: e.ts.slice(0, 10),
         duration_hours: e.data.value,
-        deep: meta.deep,
-        rem: meta.rem,
+        deep_hours: meta.deep,
+        rem_hours: meta.rem,
       };
     }),
     hrv: hrv.entries.filter(inRange).map((e) => ({
       date: e.ts.slice(0, 10),
-      avg_ms: e.data.value ?? e.data.avg_ms,
+      avg_ms: e.data.value,
     })),
   };
 
   const today = formatDate(new Date());
-  const systemPrompt = buildSystemPrompt(profile, healthSummary, today);
-  const result = await callClaude(apiKey, systemPrompt, "Genere le plan d'entrainement pour la semaine prochaine.");
+  const monday = nextMonday();
+  const weekDates = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return { date: formatDate(d), day: DAYS[i] };
+  });
+
+  const goalDate = profile.goalDate || undefined;
+  let daysLeft = "";
+  if (goalDate) {
+    const diff = Math.ceil((new Date(goalDate).getTime() - new Date(today).getTime()) / 86400000);
+    daysLeft = diff > 0 ? `${diff} days remaining` : "Goal date passed";
+  }
+
+  const volatileSystem = `# Athlete profile
+${JSON.stringify(profile, null, 2)}
+
+# Current date: ${today}
+${goalDate ? `# Goal date: ${goalDate} (${daysLeft})` : "# No goal date set"}
+
+# Last 7 days history (Apple Watch data)
+${JSON.stringify(healthSummary, null, 2)}
+
+# Week to plan
+${JSON.stringify(weekDates, null, 2)}
+
+# Use ISO week ${isoWeek(monday)} for the "week" field.
+# Available days per week: ${profile.daysPerWeek ?? "not specified"}; max session: ${profile.maxSessionMinutes ?? "not specified"} min.`;
+
+  const result = await callClaude({
+    apiKey,
+    stableSystem: STABLE_SYSTEM,
+    volatileSystem,
+    userMessage: "Generate the training plan for next week.",
+    toolName: "submit_training_plan",
+    toolDescription: "Submit the personalized weekly training plan.",
+    schema: PLAN_SCHEMA,
+  });
 
   if ("error" in result) {
     return NextResponse.json(

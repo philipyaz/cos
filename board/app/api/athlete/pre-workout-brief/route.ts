@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { listEntries } from "@/lib/health-store";
-import {
-  readAthlete, readApiKey, callClaude, formatDate,
-} from "@/lib/athlete-ai";
+import { listEntries, getProfile } from "@/lib/health";
+import { computeFormScore } from "@/lib/athlete-score";
+import { readApiKey, callClaude, formatDate } from "@/lib/athlete-ai";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +15,38 @@ function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+const STABLE_SYSTEM = `You are an expert sports coach. You analyze the athlete's current readiness
+to produce a pre-workout brief as structured data.
+
+Rules:
+- readiness: "ready" if score >= 70 and good sleep, "caution" if score 40-70 or average sleep, "rest" if score < 40 or very poor sleep.
+- recommended_session: propose a sport/duration/intensity adapted to the current state. Base it on the profile's sports.
+- warnings: list the points of caution (fatigue, lack of sleep, high recent load).
+- green_lights: list the positive indicators.
+- one_liner: one short motivating or cautionary sentence depending on the state.`;
+
+const BRIEF_SCHEMA = {
+  type: "object",
+  properties: {
+    readiness: { type: "string", enum: ["ready", "caution", "rest"] },
+    form_score: { type: "number" },
+    recommended_session: {
+      type: "object",
+      properties: {
+        sport: { type: "string" },
+        duration_min: { type: "number" },
+        intensity: { type: "string", enum: ["easy", "moderate", "hard"] },
+        description: { type: "string" },
+      },
+      required: ["sport", "duration_min", "intensity", "description"],
+    },
+    warnings: { type: "array", items: { type: "string" } },
+    green_lights: { type: "array", items: { type: "string" } },
+    one_liner: { type: "string" },
+  },
+  required: ["readiness", "form_score", "recommended_session", "warnings", "green_lights", "one_liner"],
+};
+
 export async function GET() {
   const apiKey = await readApiKey();
   if (!apiKey) {
@@ -25,7 +56,7 @@ export async function GET() {
     );
   }
 
-  const profile = await readAthlete();
+  const profile = await getProfile();
   if (!profile) {
     return NextResponse.json(
       { error: "No athlete profile found. Save your profile first at /athlete." },
@@ -39,15 +70,9 @@ export async function GET() {
   d2.setUTCDate(d2.getUTCDate() - 2);
   const from48h = formatDate(d2);
 
-  // Fetch form-score for today (internal API call via same host)
-  let formScore: Record<string, unknown> = {};
-  try {
-    const boardUrl = process.env.BOARD_URL || "http://localhost:3000";
-    const fsRes = await fetch(`${boardUrl}/api/athlete/form-score?date=${today}`);
-    if (fsRes.ok) formScore = await fsRes.json();
-  } catch {}
+  // Form score for today — computed IN-PROCESS (no loopback fetch to /api/athlete/form-score).
+  const formScore = await computeFormScore(today);
 
-  // Last 48h workouts + last night sleep
   const inRange = (from: string, toD: string) => (e: { ts: string }) =>
     e.ts >= from && e.ts < toD + "T";
 
@@ -77,47 +102,29 @@ export async function GET() {
     };
   })() : null;
 
-  const systemPrompt = `Tu es un coach sportif expert. Tu analyses l'etat de forme actuel de l'athlete
-pour generer un brief pre-entrainement au format JSON.
-
-# Profil athlete
+  const volatileSystem = `# Athlete profile
 ${JSON.stringify(profile, null, 2)}
 
-# Score de forme du jour
+# Today's form score
 ${JSON.stringify(formScore, null, 2)}
 
-# Workouts des 48 dernieres heures
+# Workouts, last 48 hours
 ${JSON.stringify(workouts, null, 2)}
 
-# Sommeil derniere nuit
+# Last night's sleep
 ${JSON.stringify(lastSleep, null, 2)}
 
-# Date actuelle : ${today}
+# Current date: ${today}`;
 
-# Regles
-- readiness : "pret" si score >= 70 et bon sommeil, "prudent" si score 40-70 ou sommeil moyen, "repos recommande" si score < 40 ou tres mauvais sommeil.
-- recommended_session : propose un sport/duree/intensite adaptes a l'etat actuel. Base-toi sur les sports du profil.
-- warnings : liste les points de vigilance (fatigue, manque de sommeil, charge recente elevee).
-- green_lights : liste les indicateurs positifs.
-- one_liner : une phrase courte motivante ou de prudence selon l'etat.
-
-# Format de reponse
-Reponds UNIQUEMENT avec un objet JSON valide, sans texte avant/apres, sans markdown :
-{
-  "readiness": "pret|prudent|repos recommande",
-  "form_score": <number 0-100>,
-  "recommended_session": {
-    "sport": "<nom du sport>",
-    "duration_min": <number>,
-    "intensity": "legere|moderee|intense",
-    "description": "<description de la seance recommandee>"
-  },
-  "warnings": ["..."],
-  "green_lights": ["..."],
-  "one_liner": "<phrase courte>"
-}`;
-
-  const result = await callClaude(apiKey, systemPrompt, "Analyse ma forme actuelle et genere le brief pre-entrainement.");
+  const result = await callClaude({
+    apiKey,
+    stableSystem: STABLE_SYSTEM,
+    volatileSystem,
+    userMessage: "Analyze my current readiness and generate the pre-workout brief.",
+    toolName: "submit_pre_workout_brief",
+    toolDescription: "Submit the pre-workout readiness brief.",
+    schema: BRIEF_SCHEMA,
+  });
 
   if ("error" in result) {
     return NextResponse.json(

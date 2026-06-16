@@ -1,17 +1,15 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-const DATA_DIR = process.env.COS_DATA_DIR || path.join(process.cwd(), "data");
-const ATHLETE_FILE = path.join(DATA_DIR, "athlete.json");
+// AI coaching helpers for the athlete surface. callClaude is a HARDENED single-shot call to the
+// Anthropic Messages API that uses FORCED TOOL USE to get already-valid JSON back (no markdown
+// fence stripping, no bare JSON.parse on free text), with a cache_control breakpoint on the
+// STABLE system-prompt prefix so the volatile per-request health/nutrition data never invalidates
+// the cache. The athlete profile is now read via getProfile() from @/lib/health (the store
+// singleton) — this module no longer touches data/athlete.json directly.
 
-export async function readAthlete(): Promise<Record<string, unknown> | null> {
-  try {
-    return JSON.parse(await fs.readFile(ATHLETE_FILE, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
+// Read the Anthropic API key from config/secrets.env (the repo convention), falling back to the
+// process env. Quotes are stripped; placeholder/empty values are rejected.
 export async function readApiKey(): Promise<string | null> {
   try {
     const raw = await fs.readFile(
@@ -39,11 +37,34 @@ export async function readApiKey(): Promise<string | null> {
   return process.env.ANTHROPIC_API_KEY?.trim() || null;
 }
 
-export async function callClaude(
-  apiKey: string,
-  system: string,
-  userMessage: string,
-): Promise<{ json: Record<string, unknown> } | { error: string; status: number; raw?: string }> {
+export type ClaudeJsonSchema = Record<string, unknown>;
+
+export interface CallClaudeArgs {
+  apiKey: string;
+  // The STABLE coaching instructions — the part of the system prompt that does NOT vary per
+  // request. A cache_control breakpoint is placed at the end of this block.
+  stableSystem: string;
+  // The VOLATILE per-request context (profile, health data, nutrition data, dates) appended
+  // AFTER the cached prefix so it never invalidates the cache.
+  volatileSystem: string;
+  // The user turn.
+  userMessage: string;
+  // The forced tool: its name, a one-line description, and the JSON schema the model must fill.
+  toolName: string;
+  toolDescription: string;
+  schema: ClaudeJsonSchema;
+}
+
+type CallClaudeResult =
+  | { json: Record<string, unknown> }
+  | { error: string; status: number; raw?: string };
+
+// claude-sonnet-4-6 — adaptive thinking only; supports forced tool use + prompt caching. The
+// model is conformant per the lead's decision (do not downgrade/upgrade it).
+const MODEL = "claude-sonnet-4-6";
+
+export async function callClaude(args: CallClaudeArgs): Promise<CallClaudeResult> {
+  const { apiKey, stableSystem, volatileSystem, userMessage, toolName, toolDescription, schema } = args;
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -53,9 +74,20 @@ export async function callClaude(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
+        model: MODEL,
         max_tokens: 4096,
-        system,
+        // System is an array of text blocks: the STABLE coaching prefix carries a
+        // cache_control breakpoint (render order tools → system → messages, so the tool +
+        // this prefix cache together); the VOLATILE data block follows it uncached.
+        system: [
+          { type: "text", text: stableSystem, cache_control: { type: "ephemeral" } },
+          { type: "text", text: volatileSystem },
+        ],
+        // FORCED TOOL USE: the tool's input_schema IS the expected JSON; tool_choice forces it,
+        // so the response carries a tool_use block whose `input` is already valid JSON — no
+        // fence-stripping, no JSON.parse on free text.
+        tools: [{ name: toolName, description: toolDescription, input_schema: schema }],
+        tool_choice: { type: "tool", name: toolName },
         messages: [{ role: "user", content: userMessage }],
       }),
     });
@@ -66,17 +98,28 @@ export async function callClaude(
     }
 
     const data = await res.json();
-    const text: string = data.content?.[0]?.text ?? "";
-    const cleaned = text
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```\s*$/, "")
-      .trim();
 
-    try {
-      return { json: JSON.parse(cleaned) };
-    } catch {
-      return { error: "Failed to parse JSON from LLM response.", status: 502, raw: text };
+    // A max_tokens truncation can cut the forced tool call mid-JSON → a clear, specific error
+    // rather than a generic 502 the caller can't act on.
+    if (data.stop_reason === "max_tokens") {
+      return {
+        error: "The AI response was cut off (max_tokens reached). Try again or reduce the input.",
+        status: 502,
+      };
     }
+
+    const toolUse = Array.isArray(data.content)
+      ? data.content.find((b: { type?: string }) => b.type === "tool_use")
+      : undefined;
+
+    if (!toolUse || typeof toolUse.input !== "object" || toolUse.input === null) {
+      return {
+        error: `The AI did not return the expected structured result (stop_reason: ${data.stop_reason ?? "unknown"}).`,
+        status: 502,
+      };
+    }
+
+    return { json: toolUse.input as Record<string, unknown> };
   } catch (e) {
     return {
       error: `Failed to call Anthropic API: ${e instanceof Error ? e.message : String(e)}`,
@@ -84,6 +127,8 @@ export async function callClaude(
     };
   }
 }
+
+// ── date utilities (shared by the coaching routes) ─────────────────────────────
 
 export function isoWeek(d: Date): string {
   const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -95,18 +140,4 @@ export function isoWeek(d: Date): string {
 
 export function formatDate(d: Date): string {
   return d.toISOString().slice(0, 10);
-}
-
-export function last7DaysFrom(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 7);
-  return d.toISOString();
-}
-
-export function healthEntryToSummary(e: { ts: string; data: Record<string, unknown> }) {
-  const meta =
-    e.data.metadata && typeof e.data.metadata === "object"
-      ? (e.data.metadata as Record<string, unknown>)
-      : {};
-  return { ts: e.ts, date: e.ts.slice(0, 10), data: e.data, meta };
 }

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { listEntries } from "@/lib/health-store";
+import { listEntries } from "@/lib/health";
+import { pearson, linearRegression } from "@/lib/athlete-correlations";
 
 export const dynamic = "force-dynamic";
 
@@ -11,48 +12,14 @@ function fmtDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function pearson(xs: number[], ys: number[]): number | null {
-  const n = xs.length;
-  if (n < 3) return null;
-  const meanX = xs.reduce((s, v) => s + v, 0) / n;
-  const meanY = ys.reduce((s, v) => s + v, 0) / n;
-  let num = 0, denX = 0, denY = 0;
-  for (let i = 0; i < n; i++) {
-    const dx = xs[i] - meanX;
-    const dy = ys[i] - meanY;
-    num += dx * dy;
-    denX += dx * dx;
-    denY += dy * dy;
-  }
-  const den = Math.sqrt(denX * denY);
-  if (den === 0) return null;
-  return num / den;
-}
-
-function linearRegression(xs: number[], ys: number[]): { slope: number; intercept: number } | null {
-  const n = xs.length;
-  if (n < 2) return null;
-  const meanX = xs.reduce((s, v) => s + v, 0) / n;
-  const meanY = ys.reduce((s, v) => s + v, 0) / n;
-  let num = 0, den = 0;
-  for (let i = 0; i < n; i++) {
-    const dx = xs[i] - meanX;
-    num += dx * (ys[i] - meanY);
-    den += dx * dx;
-  }
-  if (den === 0) return null;
-  const slope = num / den;
-  return { slope, intercept: meanY - slope * meanX };
-}
-
+// GET /api/athlete/correlations?days=N — correlate per-day sleep against workout performance
+// (calories per minute) over the last N days, reading the CANONICAL health taxonomy via
+// listEntries (workout data.duration_min/calories, sleep_night data.value + data.metadata.deep).
 export async function GET(req: NextRequest) {
   const daysParam = req.nextUrl.searchParams.get("days")?.trim();
   const days = daysParam ? parseInt(daysParam, 10) : 30;
   if (isNaN(days) || days < 7 || days > 365) {
-    return NextResponse.json(
-      { error: "days must be between 7 and 365." },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "days must be between 7 and 365." }, { status: 400 });
   }
 
   const today = new Date();
@@ -68,7 +35,7 @@ export async function GET(req: NextRequest) {
 
   const inRange = (e: { ts: string }) => e.ts >= fromDate && e.ts < toDate + "T";
 
-  // Group workouts by date
+  // Group workouts by date (aggregate calories + minutes per day)
   const workoutsByDate: Record<string, { totalCal: number; totalMin: number }> = {};
   for (const e of workoutsRes.entries.filter(inRange)) {
     const date = e.ts.slice(0, 10);
@@ -84,7 +51,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Group sleep by date
+  // Group sleep by date (value = total hours; metadata.deep = deep hours)
   const sleepByDate: Record<string, { total_h: number; deep_h: number | null }> = {};
   for (const e of sleepRes.entries.filter(inRange)) {
     const date = e.ts.slice(0, 10);
@@ -127,7 +94,7 @@ export async function GET(req: NextRequest) {
   const r = pearson(sleepVals, perfVals);
   const regression = linearRegression(sleepVals, perfVals);
 
-  // Deep sleep correlation too
+  // Deep-sleep correlation (only days that recorded deep sleep)
   const deepPoints = dataPoints.filter((p) => p.deep_h != null);
   const deepVals = deepPoints.map((p) => p.deep_h!);
   const deepPerfVals = deepPoints.map((p) => p.performance);

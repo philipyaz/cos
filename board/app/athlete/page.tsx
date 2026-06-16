@@ -3,99 +3,125 @@
 import { useEffect, useState } from "react";
 import { TopBar } from "@/components/topbar";
 import { FormScoreWidget } from "@/components/form-score-widget";
+import {
+  VALID_ATHLETE_GOAL,
+  VALID_ATHLETE_LEVEL,
+  VALID_ATHLETE_SPORT,
+  VALID_ATHLETE_EQUIPMENT,
+} from "@/lib/types";
 
 // ── Constants ────────────────────────────────────────────────────────────────
+// Option VALUES are the English enum values (single-sourced from @/lib/types — the
+// SAME arrays the /api/athlete route validates against). Human labels are derived
+// here for display; the stored vocabulary stays the canonical English enum value.
 
-const GOALS = [
-  { value: "perte_de_poids", label: "Perte de poids" },
-  { value: "triathlon_sprint", label: "Triathlon Sprint" },
-  { value: "triathlon_olympique", label: "Triathlon Olympique" },
-  { value: "cyclisme", label: "Cyclisme" },
-  { value: "natation", label: "Natation" },
-  { value: "course_a_pied", label: "Course a pied" },
-  { value: "forme_generale", label: "Forme generale" },
+const GOAL_LABELS: Record<string, string> = {
+  weight_loss: "Weight loss",
+  sprint_triathlon: "Sprint triathlon",
+  olympic_triathlon: "Olympic triathlon",
+  cycling: "Cycling",
+  swimming: "Swimming",
+  running: "Running",
+  general_fitness: "General fitness",
+};
+const GOALS = VALID_ATHLETE_GOAL.map((value) => ({ value, label: GOAL_LABELS[value] ?? value }));
+
+const LEVEL_LABELS: Record<string, string> = {
+  beginner: "Beginner",
+  intermediate: "Intermediate",
+  advanced: "Advanced",
+};
+const LEVELS = VALID_ATHLETE_LEVEL.map((value) => ({ value, label: LEVEL_LABELS[value] ?? value }));
+
+// Human labels for every sport value in VALID_ATHLETE_SPORT.
+const SPORT_LABELS: Record<string, string> = {
+  cycling_outdoor: "Cycling (outdoor)",
+  cycling_indoor: "Cycling (indoor)",
+  running: "Running",
+  walking: "Walking",
+  swimming_pool: "Swimming (pool)",
+  swimming_open_water: "Swimming (open water)",
+  rowing: "Rowing",
+  skiing_alpine: "Alpine skiing",
+  skiing_cross_country: "Cross-country skiing",
+  snowboard: "Snowboard",
+  hiking: "Hiking",
+  climbing: "Climbing",
+  surfing: "Surfing",
+  kayaking: "Kayaking",
+  strength_training: "Strength training",
+  hiit: "HIIT",
+  yoga: "Yoga",
+  pilates: "Pilates",
+  dance: "Dance",
+  martial_arts: "Martial arts",
+  boxing: "Boxing",
+  crossfit: "CrossFit",
+  stretching: "Stretching",
+  tennis: "Tennis",
+  padel: "Padel",
+  soccer: "Soccer",
+  basketball: "Basketball",
+  cycling_indoor_zwift: "Cycling indoor (Zwift)",
+};
+
+// Which group each sport falls into (advisory grouping for the form). A sport not listed
+// here lands in "Other" so a future VALID_ATHLETE_SPORT addition still renders.
+const SPORT_GROUP_OF: Record<string, "Cardio" | "Strength / flexibility" | "Other"> = {
+  cycling_outdoor: "Cardio", cycling_indoor: "Cardio", running: "Cardio", walking: "Cardio",
+  swimming_pool: "Cardio", swimming_open_water: "Cardio", rowing: "Cardio",
+  skiing_alpine: "Cardio", skiing_cross_country: "Cardio", snowboard: "Cardio",
+  hiking: "Cardio", climbing: "Cardio", surfing: "Cardio", kayaking: "Cardio",
+  strength_training: "Strength / flexibility", hiit: "Strength / flexibility",
+  yoga: "Strength / flexibility", pilates: "Strength / flexibility", dance: "Strength / flexibility",
+  martial_arts: "Strength / flexibility", boxing: "Strength / flexibility",
+  crossfit: "Strength / flexibility", stretching: "Strength / flexibility",
+  tennis: "Other", padel: "Other", soccer: "Other", basketball: "Other",
+  cycling_indoor_zwift: "Other",
+};
+
+const SPORT_GROUP_ORDER: ("Cardio" | "Strength / flexibility" | "Other")[] = [
+  "Cardio", "Strength / flexibility", "Other",
 ];
 
-const LEVELS = [
-  { value: "debutant", label: "Debutant" },
-  { value: "intermediaire", label: "Intermediaire" },
-  { value: "avance", label: "Avance" },
-];
+const SPORT_GROUPS: { label: string; sports: { value: string; label: string }[] }[] =
+  SPORT_GROUP_ORDER.map((label) => ({
+    label,
+    sports: VALID_ATHLETE_SPORT.filter((v) => (SPORT_GROUP_OF[v] ?? "Other") === label).map(
+      (value) => ({ value, label: SPORT_LABELS[value] ?? value }),
+    ),
+  }));
 
-const SPORT_GROUPS: { label: string; sports: { value: string; label: string }[] }[] = [
-  {
-    label: "Cardio",
-    sports: [
-      { value: "velo_exterieur", label: "Velo exterieur" },
-      { value: "velo_interieur", label: "Velo interieur" },
-      { value: "course_a_pied", label: "Course a pied" },
-      { value: "marche", label: "Marche" },
-      { value: "natation_piscine", label: "Natation piscine" },
-      { value: "natation_eau_libre", label: "Natation eau libre" },
-      { value: "aviron", label: "Aviron" },
-      { value: "ski_alpin", label: "Ski alpin" },
-      { value: "ski_de_fond", label: "Ski de fond" },
-      { value: "snowboard", label: "Snowboard" },
-      { value: "randonnee", label: "Randonnee" },
-      { value: "escalade", label: "Escalade" },
-      { value: "surf", label: "Surf" },
-      { value: "kayak", label: "Kayak" },
-    ],
-  },
-  {
-    label: "Force / Flex",
-    sports: [
-      { value: "musculation", label: "Musculation" },
-      { value: "hiit", label: "HIIT" },
-      { value: "yoga", label: "Yoga" },
-      { value: "pilates", label: "Pilates" },
-      { value: "danse", label: "Danse" },
-      { value: "arts_martiaux", label: "Arts martiaux" },
-      { value: "boxe", label: "Boxe" },
-      { value: "crossfit", label: "CrossFit" },
-      { value: "stretching", label: "Stretching" },
-    ],
-  },
-  {
-    label: "Autres",
-    sports: [
-      { value: "tennis", label: "Tennis" },
-      { value: "padel", label: "Padel" },
-      { value: "football", label: "Football" },
-      { value: "basketball", label: "Basketball" },
-      { value: "cyclisme_indoor_zwift", label: "Cyclisme indoor (Zwift)" },
-    ],
-  },
-];
-
-const ALL_SPORT_VALUES = SPORT_GROUPS.flatMap((g) => g.sports.map((s) => s.value));
-
-const EQUIPMENT = [
-  { value: "velo_route", label: "Velo route" },
-  { value: "velo_home_trainer", label: "Velo home trainer" },
-  { value: "barre_traction", label: "Barre de traction" },
-  { value: "halteres", label: "Halteres" },
-  { value: "kettlebell", label: "Kettlebell" },
-  { value: "elastiques", label: "Elastiques" },
-  { value: "tapis_de_course", label: "Tapis de course" },
-  { value: "rameur", label: "Rameur" },
-  { value: "velo_elliptique", label: "Velo elliptique" },
-  { value: "corde_a_sauter", label: "Corde a sauter" },
-  { value: "poids_du_corps", label: "Poids du corps uniquement" },
-  { value: "acces_piscine", label: "Acces piscine" },
-  { value: "acces_salle", label: "Acces salle de sport" },
-];
-
-const EQUIPMENT_VALUES = EQUIPMENT.map((e) => e.value);
+const EQUIPMENT_LABELS: Record<string, string> = {
+  road_bike: "Road bike",
+  home_trainer: "Home trainer",
+  pull_up_bar: "Pull-up bar",
+  dumbbells: "Dumbbells",
+  kettlebell: "Kettlebell",
+  resistance_bands: "Resistance bands",
+  treadmill: "Treadmill",
+  rowing_machine: "Rowing machine",
+  elliptical: "Elliptical",
+  jump_rope: "Jump rope",
+  bodyweight: "Bodyweight only",
+  pool_access: "Pool access",
+  gym_access: "Gym access",
+};
+const EQUIPMENT = VALID_ATHLETE_EQUIPMENT.map((value) => ({
+  value,
+  label: EQUIPMENT_LABELS[value] ?? value,
+}));
 
 // ── Types ────────────────────────────────────────────────────────────────────
+// Mirrors AthleteProfile from @/lib/types (the route's GET returns {profile} with these
+// fields). Weights are kilograms (currentWeightKg / targetWeightKg).
 
 interface AthleteProfile {
   goal: string;
   goalDate: string;
   level: string;
-  currentWeight: number | null;
-  targetWeight: number | null;
+  currentWeightKg: number | null;
+  targetWeightKg: number | null;
   daysPerWeek: number | null;
   maxSessionMinutes: number | null;
   sports: string[];
@@ -105,11 +131,11 @@ interface AthleteProfile {
 }
 
 const EMPTY: AthleteProfile = {
-  goal: "forme_generale",
+  goal: "general_fitness",
   goalDate: "",
-  level: "debutant",
-  currentWeight: null,
-  targetWeight: null,
+  level: "beginner",
+  currentWeightKg: null,
+  targetWeightKg: null,
   daysPerWeek: null,
   maxSessionMinutes: null,
   sports: [],
@@ -140,20 +166,19 @@ export default function AthletePage() {
       })
       .catch(() => {});
 
-    const loadWeight = fetch("/api/health/data?type=body_mass&limit=1")
-      .then((r) => r.json())
+    // Source the current weight from the nutrition weigh-ins (the latest entry) — the old
+    // page queried a "body_mass" health type that is never produced. The weight route
+    // returns {weights} sorted ASCENDING by date, so the latest is the LAST element. When
+    // the nutrition add-on is off / has no weigh-ins, this leaves the field blank.
+    const loadWeight = fetch("/api/nutrition/weight")
+      .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        const entries: { ts: string; data: Record<string, unknown> }[] =
-          d.entries ?? [];
-        if (entries.length > 0) {
-          const e = entries[0];
-          const kg =
-            typeof e.data.value === "number"
-              ? e.data.value
-              : typeof e.data.kg === "number"
-                ? e.data.kg
-                : null;
-          if (kg != null) setLastWeight({ kg, date: e.ts });
+        const weights: { date: string; weightKg: number }[] = d?.weights ?? [];
+        if (weights.length > 0) {
+          const latest = weights[weights.length - 1];
+          if (typeof latest.weightKg === "number") {
+            setLastWeight({ kg: latest.weightKg, date: latest.date });
+          }
         }
       })
       .catch(() => {});
@@ -161,10 +186,10 @@ export default function AthletePage() {
     Promise.all([loadProfile, loadWeight]).finally(() => setLoading(false));
   }, []);
 
-  // Pre-fill currentWeight from health data if profile has no weight yet
+  // Pre-fill currentWeightKg from the latest weigh-in if the profile has no weight yet.
   useEffect(() => {
-    if (lastWeight && form.currentWeight == null) {
-      setForm((f) => ({ ...f, currentWeight: lastWeight.kg }));
+    if (lastWeight && form.currentWeightKg == null) {
+      setForm((f) => ({ ...f, currentWeightKg: lastWeight.kg }));
     }
     // Only run when lastWeight arrives, not on every form change
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -216,12 +241,12 @@ export default function AthletePage() {
       <main className="flex-1 overflow-y-auto p-5 space-y-6">
         <div className="flex items-baseline gap-2">
           <h1 className="text-[15px] font-semibold text-ink-900">
-            Profil Athlete
+            Athlete Profile
           </h1>
           {form.updatedAt && (
             <span className="text-[11px] text-ink-400">
-              Mis a jour le{" "}
-              {new Date(form.updatedAt).toLocaleDateString("fr-FR", {
+              Updated{" "}
+              {new Date(form.updatedAt).toLocaleDateString("en-US", {
                 day: "numeric",
                 month: "short",
                 year: "numeric",
@@ -236,7 +261,7 @@ export default function AthletePage() {
           <div className="p-5 space-y-5">
             {/* Row 1: Goal + Goal date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Objectif principal">
+              <Field label="Primary goal">
                 <select
                   value={form.goal}
                   onChange={(e) =>
@@ -251,7 +276,7 @@ export default function AthletePage() {
                   ))}
                 </select>
               </Field>
-              <Field label="Date objectif">
+              <Field label="Goal date">
                 <input
                   type="date"
                   value={form.goalDate}
@@ -265,7 +290,7 @@ export default function AthletePage() {
 
             {/* Row 2: Level + Days per week + Max session */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Field label="Niveau">
+              <Field label="Level">
                 <select
                   value={form.level}
                   onChange={(e) =>
@@ -280,7 +305,7 @@ export default function AthletePage() {
                   ))}
                 </select>
               </Field>
-              <Field label="Jours / semaine">
+              <Field label="Days / week">
                 <input
                   type="number"
                   min={1}
@@ -298,7 +323,7 @@ export default function AthletePage() {
                   className="input-field"
                 />
               </Field>
-              <Field label="Duree max seance (min)">
+              <Field label="Max session (min)">
                 <input
                   type="number"
                   min={10}
@@ -319,16 +344,16 @@ export default function AthletePage() {
 
             {/* Row 3: Weight current + target */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Poids actuel (kg)">
+              <Field label="Current weight (kg)">
                 <input
                   type="number"
                   step={0.1}
                   min={0}
-                  value={form.currentWeight ?? ""}
+                  value={form.currentWeightKg ?? ""}
                   onChange={(e) =>
                     setForm((f) => ({
                       ...f,
-                      currentWeight: e.target.value
+                      currentWeightKg: e.target.value
                         ? Number(e.target.value)
                         : null,
                     }))
@@ -338,8 +363,8 @@ export default function AthletePage() {
                 />
                 {lastWeight && (
                   <p className="mt-1 text-[11px] text-ink-400">
-                    Derniere mesure : {lastWeight.kg} kg le{" "}
-                    {new Date(lastWeight.date).toLocaleDateString("fr-FR", {
+                    Latest weigh-in: {lastWeight.kg} kg on{" "}
+                    {new Date(lastWeight.date).toLocaleDateString("en-US", {
                       day: "2-digit",
                       month: "2-digit",
                       year: "numeric",
@@ -347,16 +372,16 @@ export default function AthletePage() {
                   </p>
                 )}
               </Field>
-              <Field label="Poids cible (kg, optionnel)">
+              <Field label="Target weight (kg, optional)">
                 <input
                   type="number"
                   step={0.1}
                   min={0}
-                  value={form.targetWeight ?? ""}
+                  value={form.targetWeightKg ?? ""}
                   onChange={(e) =>
                     setForm((f) => ({
                       ...f,
-                      targetWeight: e.target.value
+                      targetWeightKg: e.target.value
                         ? Number(e.target.value)
                         : null,
                     }))
@@ -368,7 +393,7 @@ export default function AthletePage() {
             </div>
 
             {/* Sports — grouped by category */}
-            <Field label="Sports disponibles">
+            <Field label="Available sports">
               <div className="space-y-3 pt-1">
                 {SPORT_GROUPS.map((group) => (
                   <div key={group.label}>
@@ -397,7 +422,7 @@ export default function AthletePage() {
             </Field>
 
             {/* Equipment */}
-            <Field label="Equipement disponible">
+            <Field label="Available equipment">
               <div className="flex flex-wrap gap-x-4 gap-y-1.5 pt-1">
                 {EQUIPMENT.map((eq) => (
                   <label
@@ -417,7 +442,7 @@ export default function AthletePage() {
             </Field>
 
             {/* Notes */}
-            <Field label="Notes libres">
+            <Field label="Free notes">
               <textarea
                 value={form.notes}
                 onChange={(e) =>
@@ -425,7 +450,7 @@ export default function AthletePage() {
                 }
                 rows={3}
                 className="input-field resize-y"
-                placeholder="Blessures, contraintes, preferences..."
+                placeholder="Injuries, constraints, preferences..."
               />
             </Field>
           </div>
@@ -434,7 +459,7 @@ export default function AthletePage() {
           <div className="border-t border-ink-100 px-5 py-3 flex items-center justify-end gap-3">
             {saved && (
               <span className="text-[12px] text-emerald-600 font-medium">
-                Enregistre
+                Saved
               </span>
             )}
             <button
@@ -442,7 +467,7 @@ export default function AthletePage() {
               disabled={saving}
               className="px-4 py-1.5 rounded-md bg-ink-900 text-white text-[13px] font-medium hover:bg-ink-800 disabled:opacity-50 transition"
             >
-              {saving ? "Enregistrement..." : "Enregistrer"}
+              {saving ? "Saving..." : "Save"}
             </button>
           </div>
         </div>

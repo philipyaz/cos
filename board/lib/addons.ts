@@ -30,6 +30,15 @@ export interface AddonManifest {
     setupSkill: string; // the slash-skill that wires the bridge on a new machine
     tools: string[]; // the MCP tool names this server exposes
   };
+  // OPTIONAL inter-add-on dependencies. A SOFT edge (`required: false`) means this add-on
+  // READS another add-on's core-store data and works BETTER with it, but degrades
+  // gracefully without it — the catalog surfaces it as "works better with <X>", and the
+  // runtime read posture is unchanged (reads stay open; a missing dependency just defaults
+  // to empty). It does NOT auto-enable or hard-gate. A HARD edge (`required: true`) is
+  // reserved for a future case where the dependent is genuinely useless alone. The reads
+  // are NEVER gated on the dependency's isAddonEnabled (that would hide frozen-but-readable
+  // data, violating the "reads stay open" contract).
+  dependsOn?: { id: string; required: boolean }[];
 }
 
 // The first add-on: Nutrition & Chef. It ships four verticals end-to-end — the food log,
@@ -81,8 +90,52 @@ const NUTRITION_ADDON: AddonManifest = {
   },
 };
 
+// The second add-on: Health & Athlete. ONE vertical spanning two surfaces — Apple Watch
+// health ingestion + dashboard (/health) and the athlete training profile + AI coach
+// (/athlete) — behind one flag, one bridge, one setup skill. Its data lives in the core
+// store: db.healthEntries (the Apple Watch time-series, the owned ARRAY) plus
+// db.athleteProfile — a SINGLETON object (the training profile), intentionally NOT listed
+// in dataArrays since it is not an array (exactly like nutrition's db.nutritionGoal). All
+// of it shares the single per-add-on gate (Settings.addons.health.enabled). It SOFT-depends
+// on Nutrition: the daily-summary + weekly-review read db.foodLogs to fold nutrition into
+// the coaching context, but degrade gracefully when Nutrition is off (see dependsOn).
+const HEALTH_ADDON: AddonManifest = {
+  id: "health",
+  title: "Health & Athlete",
+  description: "Ingest Apple Watch health data, keep an athlete profile, and get AI training coaching.",
+  icon: "IconHeart",
+  navItems: [
+    { href: "/health", label: "Health", icon: "IconHeart" },
+    { href: "/athlete", label: "Athlete", icon: "IconRunner" },
+    { href: "/athlete/training-plan", label: "Training Plan", icon: "IconCalendar" },
+    { href: "/athlete/weekly-review", label: "Weekly Review", icon: "IconTrend" },
+    { href: "/athlete/pre-workout-brief", label: "Pre-Workout Brief", icon: "IconBolt" },
+    { href: "/athlete/correlations", label: "Correlations", icon: "IconSpark" },
+  ],
+  apiPrefixes: ["/api/health", "/api/athlete"],
+  // Owned db ARRAYS only. db.athleteProfile (the v11 training-profile singleton) is a bare
+  // object, not an array, so it is deliberately omitted here (mirrors db.nutritionGoal).
+  dataArrays: ["healthEntries"],
+  dependsOn: [{ id: "nutrition", required: false }],
+  mcp: {
+    server: "health",
+    bridgePortVar: "HEALTH_BRIDGE_PORT",
+    defaultPort: 8011,
+    setupSkill: "health-mcp-setup",
+    tools: [
+      "push_health_data",
+      "list_health_data",
+      "get_health_summary",
+      "get_daily_summary",
+      "delete_health_data",
+      "get_health_trends",
+      "ingest_health_to_vault",
+    ],
+  },
+};
+
 // The static add-on registry — one entry per add-on. Order is the catalog/display order.
-export const ADDON_REGISTRY: AddonManifest[] = [NUTRITION_ADDON];
+export const ADDON_REGISTRY: AddonManifest[] = [NUTRITION_ADDON, HEALTH_ADDON];
 
 // Every known add-on (the full registry).
 export function listAddons(): AddonManifest[] {

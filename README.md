@@ -145,38 +145,6 @@ npm run dev                                                       # board on $BO
 
 Then open `$BOARD_URL` (`http://localhost:$BOARD_PORT`, default `http://localhost:3000`). The board's `dev` script first runs `mcp/ensure-bridges.sh`, which only **nudges** the optional MCP bridges + search sidecar — a cold or absent bridge just WARNs and the app still starts, so the bridges are optional for a board-only run. For the full system (vault, Guard, MCP servers for Claude Code / Cowork, off-site backup), run the **`cos-setup`** skill above instead.
 
-### Windows — running the MCP bridges with pm2
-
-On Windows the MCP bridges and sidecars are managed by [pm2](https://pm2.keymetrics.io/) instead of launchd. Start everything in one command:
-
-```bash
-pm2 start ecosystem.config.cjs
-```
-
-This launches all MCP bridges and sidecars in one shot:
-
-| Process | Port | Description |
-|---------|------|-------------|
-| `mcp-board` | 8001 | Board MCP bridge |
-| `mcp-openwhispr` | 8002 | OpenWhispr voice MCP bridge |
-| `mcp-calendar` | 8003 | Calendar MCP bridge |
-| `mcp-guard` | 8004 | Guard MCP bridge |
-| `mcp-vault` | 8005 | Vault MCP bridge |
-| `mcp-nutrition` | 8007 | Nutrition MCP bridge |
-| `mcp-health` | 8011 | Health MCP bridge |
-| `search-sidecar` | 8008 | Semantic search (uvicorn) |
-| `guard-sidecar` | 8009 | Prompt-injection guard (uvicorn) |
-
-Useful commands:
-
-```bash
-pm2 list                      # status of all processes
-pm2 logs mcp-guard            # tail logs for a specific bridge
-pm2 restart all               # restart everything
-pm2 stop all                  # stop everything
-pm2 save                      # persist the process list for auto-restore
-```
-
 ## Recipes — what to schedule in Cowork
 
 Setup is the boring half; the fun is what you make of it. Cowork runs [**scheduled tasks**](https://support.claude.com/en/articles/13854387-schedule-recurring-tasks-in-claude-cowork) — type `/schedule`, pick a cadence (hourly, daily, weekly, weekdays), and Cos runs the routine on its own against your local board and vault. A starter set worth wiring up on day one — paste each as the task's prompt, then write your own:

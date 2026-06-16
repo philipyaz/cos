@@ -19,25 +19,36 @@ interface Brief {
   one_liner: string;
 }
 
+// Keyed on the English readiness vocabulary the /api/athlete/pre-workout-brief route
+// emits ("ready" | "caution" | "rest"). The fallback (READINESS_STYLE.caution) keeps the
+// banner sane if the route ever returns an unmapped value.
 const READINESS_STYLE: Record<string, { bg: string; border: string; text: string; badge: string }> = {
-  pret: {
+  ready: {
     bg: "bg-emerald-50",
     border: "border-emerald-200",
     text: "text-emerald-800",
     badge: "bg-emerald-100 text-emerald-700 border-emerald-300",
   },
-  prudent: {
+  caution: {
     bg: "bg-amber-50",
     border: "border-amber-200",
     text: "text-amber-800",
     badge: "bg-amber-100 text-amber-700 border-amber-300",
   },
-  "repos recommande": {
+  rest: {
     bg: "bg-red-50",
     border: "border-red-200",
     text: "text-red-800",
     badge: "bg-red-100 text-red-700 border-red-300",
   },
+};
+
+// Human label for a readiness value (the route returns the canonical English key; this
+// renders it as a display chip).
+const READINESS_LABEL: Record<string, string> = {
+  ready: "Ready",
+  caution: "Caution",
+  rest: "Rest recommended",
 };
 
 function scoreColor(s: number): string {
@@ -52,10 +63,17 @@ function scoreRing(s: number): string {
   return "border-red-300 bg-red-50";
 }
 
+// Keyed on the English intensity vocabulary ("easy" | "moderate" | "hard").
 const INTENSITY_BADGE: Record<string, string> = {
-  legere: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  moderee: "bg-amber-50 text-amber-700 border-amber-200",
-  intense: "bg-red-50 text-red-700 border-red-200",
+  easy: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  moderate: "bg-amber-50 text-amber-700 border-amber-200",
+  hard: "bg-red-50 text-red-700 border-red-200",
+};
+
+const INTENSITY_LABEL: Record<string, string> = {
+  easy: "Easy",
+  moderate: "Moderate",
+  hard: "Hard",
 };
 
 export default function PreWorkoutBriefPage() {
@@ -71,26 +89,26 @@ export default function PreWorkoutBriefPage() {
       const res = await fetch("/api/athlete/pre-workout-brief");
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error ?? "Erreur inconnue");
+        setError(data.error ?? "Unknown error");
         return;
       }
       setBrief(data.brief);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erreur reseau");
+      setError(e instanceof Error ? e.message : "Network error");
     } finally {
       setLoading(false);
     }
   };
 
-  const style = brief ? (READINESS_STYLE[brief.readiness] ?? READINESS_STYLE.prudent) : null;
+  const style = brief ? (READINESS_STYLE[brief.readiness] ?? READINESS_STYLE.caution) : null;
 
   return (
     <>
-      <TopBar crumbs={["Cos", "Athlete", "Brief pre-entrainement"]} />
+      <TopBar crumbs={["Cos", "Athlete", "Pre-workout brief"]} />
       <main className="flex-1 overflow-y-auto p-5 space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-[15px] font-semibold text-ink-900">
-            Brief pre-entrainement
+            Pre-workout brief
           </h1>
           <button
             onClick={generate}
@@ -98,7 +116,7 @@ export default function PreWorkoutBriefPage() {
             className="px-4 py-1.5 rounded-md bg-ink-900 text-white text-[13px] font-medium hover:bg-ink-800 disabled:opacity-50 transition flex items-center gap-2"
           >
             {loading && <Spinner />}
-            {loading ? "Analyse en cours..." : "Analyser ma forme maintenant"}
+            {loading ? "Analyzing..." : "Analyze my form now"}
           </button>
         </div>
 
@@ -111,8 +129,8 @@ export default function PreWorkoutBriefPage() {
         {!brief && !loading && !error && (
           <div className="rounded-lg border border-ink-100 bg-white p-8 text-center shadow-card">
             <p className="text-[13px] text-ink-500">
-              Cliquez sur &quot;Analyser ma forme maintenant&quot; pour obtenir
-              un brief personnalise avant votre seance.
+              Click &quot;Analyze my form now&quot; to get a personalized brief
+              before your session.
             </p>
           </div>
         )}
@@ -141,7 +159,7 @@ export default function PreWorkoutBriefPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <span className={`text-[12px] font-semibold px-2.5 py-0.5 rounded-full border ${style.badge}`}>
-                      {brief.readiness}
+                      {READINESS_LABEL[brief.readiness] ?? brief.readiness}
                     </span>
                   </div>
                   <p className={`text-[14px] font-medium ${style.text} leading-relaxed`}>
@@ -154,14 +172,14 @@ export default function PreWorkoutBriefPage() {
             {/* Recommended session */}
             <div className="rounded-lg border border-ink-100 bg-white px-5 py-4 shadow-card">
               <p className="text-[11px] font-medium uppercase tracking-wider text-ink-400 mb-3">
-                Seance recommandee
+                Recommended session
               </p>
               <div className="flex items-center gap-3 mb-2">
                 <span className="text-[14px] font-semibold text-ink-900">
                   {brief.recommended_session.sport}
                 </span>
                 <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${INTENSITY_BADGE[brief.recommended_session.intensity] ?? "bg-ink-50 text-ink-600 border-ink-200"}`}>
-                  {brief.recommended_session.intensity}
+                  {INTENSITY_LABEL[brief.recommended_session.intensity] ?? brief.recommended_session.intensity}
                 </span>
                 <span className="text-[12px] text-ink-500 tabular-nums">
                   {brief.recommended_session.duration_min} min
@@ -177,7 +195,7 @@ export default function PreWorkoutBriefPage() {
               {brief.warnings.length > 0 && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4">
                   <p className="text-[11px] font-medium uppercase tracking-wider text-amber-500 mb-2">
-                    Points de vigilance
+                    Watch-outs
                   </p>
                   <ul className="space-y-1">
                     {brief.warnings.map((w, i) => (
@@ -191,7 +209,7 @@ export default function PreWorkoutBriefPage() {
               {brief.green_lights.length > 0 && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-5 py-4">
                   <p className="text-[11px] font-medium uppercase tracking-wider text-emerald-500 mb-2">
-                    Feux verts
+                    Green lights
                   </p>
                   <ul className="space-y-1">
                     {brief.green_lights.map((g, i) => (

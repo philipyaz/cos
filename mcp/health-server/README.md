@@ -1,10 +1,14 @@
 # Health MCP Server
 
-MCP server for Apple Watch HealthKit data ingestion into the Cos board and vault.
+MCP server for the Cos **Health & Athlete** add-on — Apple Watch HealthKit data
+ingestion into the Cos board and vault.
 
-Receives **sleep, HRV, steps, workouts, VO2 max, and resting heart rate** data
-via the board's HTTP API, stores it in a dedicated `data/health.json` file, and
-exposes query/trend/vault-ingest tools to Claude.
+A **thin fetch wrapper** over the board's `/api/health/*` HTTP routes
+(`packages/mcp-kit` primitives, like the nutrition server): it holds no business
+logic. Receives **workouts, sleep, HRV, steps, VO2 max, and resting heart rate**
+data via the board's HTTP API. The board folds it onto the core store
+(`db.healthEntries` in `cases.json`, 90-day retention) and exposes
+query/trend/vault-ingest tools to Claude.
 
 ## Architecture
 
@@ -12,21 +16,25 @@ exposes query/trend/vault-ingest tools to Claude.
 iPhone (Shortcut / Health Auto Export)
     │ POST /api/health/push + x-health-token header
     ▼
-Board API (:3000)  ──►  data/health.json  (90-day retention)
+Board API (:3000)  ──►  cases.json (db.healthEntries, 90-day retention)
     ▲
 Health MCP (:8011)  ──►  tools for Claude (list, summary, trends, vault ingest)
 ```
 
-## Data types
+## Canonical data types
+
+In lockstep with `board/lib/types.ts` `VALID_HEALTH_ENTRY_TYPE`. Per-day metric
+aggregates live in `data.value`; the push route maps Health Auto Export metric
+names onto these and stores unmapped names verbatim.
 
 | Type | Key fields |
 |------|-----------|
-| `sleep` | `duration_min`, `deep_min`, `rem_min`, `awake_min`, `bed_time`, `wake_time` |
-| `hrv` | `avg_ms`, `samples` |
-| `steps` | `count`, `distance_km` |
-| `workout` | `activity`, `duration_min`, `calories`, `avg_hr`, `distance_km` |
+| `workout` | `activity`, `duration_min`, `calories?`, `avg_hr?`, `distance_km?` |
+| `sleep_night` / `sleep_nap` | `value` (hours), `metadata.{deep,rem,core,awake,sleepStart,sleepEnd}` |
+| `hrv` | `value` (ms) |
+| `resting_hr` | `value` (bpm) |
+| `steps` | `value` (count) |
 | `vo2max` | `value` (mL/kg/min) |
-| `resting_hr` | `bpm` |
 
 ## MCP tools
 
@@ -37,16 +45,22 @@ Health MCP (:8011)  ──►  tools for Claude (list, summary, trends, vault in
 | `get_health_summary` | Aggregated summary for a date or range |
 | `delete_health_data` | Delete by IDs or date range (token-gated) |
 | `get_health_trends` | Daily trends over last N days |
-| `ingest_health_to_vault` | Compose a health report for vault ingestion |
+| `ingest_health_to_vault` | Fetch the board's composed health report (`GET /api/health/report`) for vault ingestion |
 
 ## Setup
 
+Run the `/health-mcp-setup` skill for the full runbook. In brief:
+
 ### 1. Generate a push token
 
-Pick any random string (e.g. `openssl rand -hex 20`) and add it to `config/cos.env`:
+Pick any random string (e.g. `openssl rand -hex 20`). The **token** is a secret, so
+it goes in `config/secrets.env`; the **port** is public config in `config/cos.env`:
 
 ```bash
+# config/secrets.env
 HEALTH_PUSH_TOKEN="your-random-token-here"
+
+# config/cos.env
 HEALTH_BRIDGE_PORT="8011"
 ```
 
@@ -57,16 +71,21 @@ cd mcp/health-server
 npm install
 ```
 
-### 3. Wire the bridge
+### 3. Wire the bridge (macOS launchd + supergateway)
 
-**Windows (pm2):** Add the health process to `ecosystem.config.cjs`, then:
+Substitute the placeholders in the committed plist template and install it
+(same pattern as nutrition-server — `ensure-bridges.sh` then bootstraps it on
+`npm run dev`):
 
 ```bash
-pm2 start ecosystem.config.cjs
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+sed -e "s#__BREW_PREFIX__#$BREW_PREFIX#g" \
+    -e "s#__REPO__#$REPO_ROOT#g" \
+    -e "s#__HEALTH_BRIDGE_PORT__#${HEALTH_BRIDGE_PORT:-8011}#g" \
+    -e "s#__HEALTH_PUSH_TOKEN__#${HEALTH_PUSH_TOKEN}#g" \
+  mcp/health-server/deploy/com.chiefofstaff.mcp-health.plist.template \
+  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-health.plist"
 ```
-
-**macOS (launchd):** Use the plist template in `deploy/` (same pattern as
-nutrition-server).
 
 ### 4. Register in `.mcp.json`
 
@@ -98,51 +117,59 @@ data to the board.
      Resting Heart Rate
 
 2. **Build JSON** (action: "Text" or "Dictionary")
-   For each sample type, build an entry object:
+   For each sample type, build a canonical entry — metrics carry the per-day
+   aggregate in `data.value`, and `ts` is the day (`YYYY-MM-DD`):
 
    ```json
    {
      "entries": [
        {
          "id": "iphone-sleep-2026-06-15",
-         "ts": "2026-06-15T07:00:00Z",
-         "type": "sleep",
+         "ts": "2026-06-15",
+         "type": "sleep_night",
          "data": {
-           "duration_min": 450,
-           "deep_min": 85,
-           "rem_min": 110,
-           "awake_min": 18,
-           "bed_time": "2026-06-14T23:15:00Z",
-           "wake_time": "2026-06-15T07:00:00Z"
+           "value": 7.5,
+           "metadata": {
+             "deep": 1.4,
+             "rem": 1.8,
+             "core": 4.0,
+             "awake": 0.3,
+             "sleepStart": "2026-06-14T23:15:00Z",
+             "sleepEnd": "2026-06-15T07:00:00Z"
+           }
          }
        },
        {
          "id": "iphone-hrv-2026-06-15",
-         "ts": "2026-06-15T07:30:00Z",
+         "ts": "2026-06-15",
          "type": "hrv",
-         "data": { "avg_ms": 42, "samples": 8 }
+         "data": { "value": 42 }
        },
        {
          "id": "iphone-steps-2026-06-15",
-         "ts": "2026-06-15T23:59:00Z",
+         "ts": "2026-06-15",
          "type": "steps",
-         "data": { "count": 8432, "distance_km": 6.1 }
+         "data": { "value": 8432 }
        },
        {
          "id": "iphone-rhr-2026-06-15",
-         "ts": "2026-06-15T07:30:00Z",
+         "ts": "2026-06-15",
          "type": "resting_hr",
-         "data": { "bpm": 58 }
+         "data": { "value": 58 }
        },
        {
          "id": "iphone-vo2max-2026-06-15",
-         "ts": "2026-06-15T07:30:00Z",
+         "ts": "2026-06-15",
          "type": "vo2max",
          "data": { "value": 42.5 }
        }
      ]
    }
    ```
+
+   > Tip: the easiest path is **Health Auto Export** — POST its native
+   > `{ data: { metrics } }` / `{ data: { workouts } }` payloads straight to
+   > `/api/health/push`; the board maps them onto the canonical taxonomy above.
 
 3. **Get Contents of URL** (action)
    - URL: `http://<your-pc-ip>:3000/api/health/push`
@@ -192,8 +219,10 @@ To persist health data in the vault, ask Claude:
 > "Ingest my health data from the last 7 days into the vault"
 
 Claude will:
-1. Call `ingest_health_to_vault` (days: 7) to compose a health report
-2. Pass the report to the vault MCP's `ingest` tool (domain: life)
+1. Call `ingest_health_to_vault` (days: 7) — a thin forwarder that fetches the
+   board's `GET /api/health/report?days=7`. The board composes the Markdown report
+   from the canonical `summarize()` output; the MCP holds no composition logic.
+2. Pass the returned `vault_ingest_content` to the vault MCP's `ingest` tool (domain: life)
 3. The vault synthesizes it into `life/wiki/concepts/Health Dashboard.md`
 
 ## Retention

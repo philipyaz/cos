@@ -20,6 +20,7 @@ import type {
   NutritionGoal,
   ActivityLevel,
   BiologicalSex,
+  AthleteProfile,
   MessageRecord,
   CaseNote,
   Task,
@@ -101,6 +102,8 @@ const nowISO = (): string => new Date().toISOString();
 // db.nutritionGoal forward when it is an object (the singleton — mirrors db.settings).
 // v11 (MessageRecord.needsAnswer/answeredAt/context — the unanswered-messages flags) is
 // likewise a no-op here: the optionals ride through the messages[] array verbatim.
+// v12 carries db.healthEntries forward when it is an array and db.athleteProfile forward
+// when it is an object (the Health & Athlete add-on — mirrors db.weights/db.nutritionGoal).
 export function migrate(raw: unknown): DBShape {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
@@ -126,6 +129,9 @@ export function migrate(raw: unknown): DBShape {
   if (Array.isArray(obj.weights)) db.weights = obj.weights as DBShape["weights"];
   // The goal is a SINGLETON object (not an array) — carry it forward like db.settings.
   if (obj.nutritionGoal && typeof obj.nutritionGoal === "object") db.nutritionGoal = obj.nutritionGoal as DBShape["nutritionGoal"];
+  if (Array.isArray(obj.healthEntries)) db.healthEntries = obj.healthEntries as DBShape["healthEntries"];
+  // The athlete profile is a SINGLETON object (not an array) — carry it forward like nutritionGoal.
+  if (obj.athleteProfile && typeof obj.athleteProfile === "object") db.athleteProfile = obj.athleteProfile as DBShape["athleteProfile"];
   if (Array.isArray(obj.pending)) db.pending = obj.pending as DBShape["pending"];
   if (Array.isArray(obj.views)) db.views = obj.views as DBShape["views"];
   if (Array.isArray(obj.labels)) db.labels = obj.labels as DBShape["labels"];
@@ -182,6 +188,9 @@ function validateDB(db: DBShape): void {
   for (const x of db.weights ?? []) {
     if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid weight entry: missing id");
   }
+  for (const x of db.healthEntries ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid health entry: missing id");
+  }
 }
 
 async function ensureFile(): Promise<void> {
@@ -189,7 +198,7 @@ async function ensureFile(): Promise<void> {
     await fs.access(DATA_FILE);
   } catch {
     await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [], foodLogs: [], pantryItems: [], mealPlanEntries: [], weights: [] };
+    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [], foodLogs: [], pantryItems: [], mealPlanEntries: [], weights: [], healthEntries: [] };
     await fs.writeFile(DATA_FILE, JSON.stringify(empty, null, 2), "utf8");
   }
 }
@@ -206,6 +215,7 @@ function parseAndMigrate(text: string): DBShape {
   if (!db.pantryItems) db.pantryItems = [];
   if (!db.mealPlanEntries) db.mealPlanEntries = [];
   if (!db.weights) db.weights = []; // nutritionGoal stays optional/absent (a singleton, set on first PUT)
+  if (!db.healthEntries) db.healthEntries = []; // athleteProfile stays optional/absent (a singleton, set on first POST)
   if (!db.pending) db.pending = [];
   if (!db.views) db.views = [];
   if (!db.labels) db.labels = [];
@@ -906,6 +916,31 @@ export function applyGoalPatch(goal: NutritionGoal, patch: Record<string, unknow
   if ("weightUnit" in patch && (patch.weightUnit === "kg" || patch.weightUnit === "lb")) goal.weightUnit = patch.weightUnit;
   goal.updatedAt = nowISO();
   return goal;
+}
+
+// ── Athlete profile singleton (v12; "health" add-on) ───────────────────────────
+// Read the athlete training-profile SINGLETON (db.athleteProfile), or undefined when none
+// is set yet. Mirrors getNutritionGoal — the profile is a bare object, not an array.
+export function getAthleteProfile(db: DBShape): AthleteProfile | undefined {
+  return db.athleteProfile;
+}
+
+// Create-or-replace the athlete profile SINGLETON (the POST path). The caller passes
+// already-validated/coerced fields (the route enforces the enums + numeric ranges + the
+// notes cap). createdAt is PRESERVED across a replace (first-set time is sticky, like
+// nutritionGoal); updatedAt is always bumped. Returns the stored profile.
+export function setAthleteProfile(
+  db: DBShape,
+  input: Omit<AthleteProfile, "createdAt" | "updatedAt">,
+): AthleteProfile {
+  const now = nowISO();
+  const profile: AthleteProfile = {
+    ...input,
+    createdAt: db.athleteProfile?.createdAt ?? now, // sticky first-set time across replaces
+    updatedAt: now,
+  };
+  db.athleteProfile = profile;
+  return profile;
 }
 
 // ── Activity / notes ─────────────────────────────────────────────────────────

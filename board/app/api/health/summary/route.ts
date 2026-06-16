@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { summarize } from "@/lib/health-store";
+import { summarize } from "@/lib/health";
 
 export const dynamic = "force-dynamic";
 

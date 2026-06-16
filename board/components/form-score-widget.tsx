@@ -31,9 +31,9 @@ const COLOR_MAP: Record<string, { ring: string; text: string; badge: string }> =
 
 const BREAKDOWN_LABELS: { key: keyof FormScore["breakdown"]; label: string; weight: string }[] = [
   { key: "hrv", label: "HRV", weight: "30%" },
-  { key: "sleep", label: "Sommeil", weight: "30%" },
-  { key: "resting_hr", label: "FC repos", weight: "20%" },
-  { key: "load", label: "Charge", weight: "20%" },
+  { key: "sleep", label: "Sleep", weight: "30%" },
+  { key: "resting_hr", label: "Resting HR", weight: "20%" },
+  { key: "load", label: "Load", weight: "20%" },
 ];
 
 function barColor(v: number): string {
@@ -84,7 +84,7 @@ export function FormScoreWidget() {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1.5">
             <p className="text-[11px] font-medium uppercase tracking-wider text-ink-400">
-              Score de forme
+              Form score
             </p>
             <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${palette.badge}`}>
               {data.level}

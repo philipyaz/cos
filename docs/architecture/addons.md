@@ -14,9 +14,12 @@ bundled behind a single per-board toggle. Turning it on reveals its nav and star
 writes; turning it off hides the nav and refuses new writes — while the data it already holds stays
 **readable** the whole time.
 
-So far there is **one** add-on — **[Nutrition & Chef](../features/nutrition.md)** (the food log, the
-pantry, and the meal plan) — but the framework is built to take more. This page is the framework;
-the nutrition page is the worked example.
+So far there are **two** add-ons — **[Nutrition & Chef](../features/nutrition.md)** (the food log,
+the pantry, and the meal plan) and **[Health & Athlete](../features/health.md)** (Apple Watch
+ingestion + an AI training coach) — but the framework is built to take more. This page is the
+framework; the two feature pages are the worked examples. (Health & Athlete also exercises the
+[optional inter-add-on dependency](#optional-inter-add-on-dependencies-dependson) — it reads
+nutrition's food log when it is present.)
 
 ## What an add-on is — the four layers
 
@@ -60,9 +63,13 @@ export interface AddonManifest {
     setupSkill: string;   // the slash-skill that wires the bridge on a new machine
     tools: string[];      // the MCP tool names this server exposes
   };
-  core: false;            // the literal false marks it OPTIONAL — an add-on is never core
+  dependsOn?: { id: string; required: boolean }[];  // OPTIONAL soft/hard edges to other add-ons
 }
 ```
+
+An add-on carries no `core` marker — being **in `ADDON_REGISTRY` is** what makes it optional;
+the core surfaces (cases/events/…) are simply never registered as add-ons. There is no dynamic
+install: the registry is the exhaustive, hand-authored set.
 
 The `ADDON_REGISTRY` is just `AddonManifest[]`, and four small helpers project off it — the entire
 gate is these four functions, nothing more:
@@ -166,10 +173,76 @@ This is the same "rides the same store" move the [calendar](../features/calendar
 new optional arrays + the `settings.addons` map), so an old board reads unchanged and a board with no
 add-on data is indistinguishable from a pre-add-on board.
 
+## The two worked examples
+
+The framework is generic; the registry currently holds two literal entries, each a different shape of
+the same four-layer slice:
+
+| | **[Nutrition & Chef](../features/nutrition.md)** | **[Health & Athlete](../features/health.md)** |
+|---|---|---|
+| `id` | `nutrition` | `health` |
+| Owned **arrays** (`dataArrays`) | `foodLogs`, `pantryItems`, `mealPlanEntries`, `weights` | `healthEntries` |
+| Singleton (not in `dataArrays`) | `db.nutritionGoal` | `db.athleteProfile` |
+| Schema versions | v9 (the three diary arrays) + v10 (weight-loss) | v11 (`healthEntries` + `athleteProfile`) |
+| API prefixes | `/api/nutrition` | `/api/health`, `/api/athlete` |
+| MCP server / bridge port | `nutrition` / `:8007` | `health` / `:8011` |
+| The "intelligence" | calorie estimation — in the **operator skill** | AI coaching — in the **route** (forced-tool Claude calls) |
+| `dependsOn` | — | **soft** edge → `nutrition` |
+
+The two diverge on two instructive points, both inside the framework's rules rather than around them:
+
+- **Where the gated write authenticates.** Nutrition's writes attribute a `human` / `agent` **actor**
+  on the activity log, the board default. Health's central ingest — `POST /api/health/push` — is a
+  machine-to-machine push off the watch, so it authenticates with a **shared-secret `x-health-token`
+  header** instead of an actor. The **add-on gate is identical** either way (`assertAddonEnabled`
+  inside `mutate()`); only the *identity* shape differs. (See [Health & Athlete](../features/health.md)
+  for the HAE ingest + token model.)
+- **An inter-add-on dependency.** Health's AI coach folds in nutrition's food log when it is present —
+  the first use of the optional `dependsOn` field below.
+
+## Optional inter-add-on dependencies (`dependsOn`)
+
+An add-on can declare that it **reads another add-on's data**, via the optional manifest field:
+
+```ts
+dependsOn?: { id: string; required: boolean }[];
+```
+
+Today every edge is **soft** (`required: false`). A soft edge means: this add-on **reads** another
+add-on's core-store data and works **better** with it, but **degrades gracefully** without it. Health
+& Athlete declares `dependsOn: [{ id: "nutrition", required: false }]` — the daily summary and the
+weekly review read `db.foodLogs` to fold nutrition into the coaching context (calories in vs. workout
+calories out), and simply have nothing to fold when nutrition is absent.
+
+The contract is deliberately narrow, and the one rule that matters is that the dependency **changes
+nothing about the read posture**:
+
+- **Reads stay OPEN.** The dependent reads the other add-on's array **directly** off the store
+  (`db.foodLogs ?? []`) and **never** gates that read on the other add-on's `isAddonEnabled`. Gating a
+  cross-read would hide **frozen-but-readable** data — exactly the thing the
+  [reads-stay-open](#the-gate-writes-close-reads-stay-open) contract forbids. The `?? []` default only
+  ever fires when the other add-on was **never installed** (the field is absent); a *disabled*
+  dependency still has fully readable data.
+- **No auto-enable, no hard gate.** A soft dependency does **not** turn the other add-on on, and does
+  **not** make the dependent `404` when the other is off. The catalog surfaces it as a "works better
+  with `<X>`" hint and nothing more.
+- **`required: true` is reserved.** A **hard** edge is the future case where the dependent is
+  genuinely useless alone. Nothing uses it yet — the field exists so the registry can express it
+  without a schema change.
+
+So `dependsOn` is a **documentation + catalog** signal with a strict runtime guarantee: it never
+narrows what is readable. The field lives on `AddonManifest` in
+[`board/lib/addons.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/addons.ts) (see the
+comment on the `dependsOn` member for the full posture).
+
 ## Where to go next
 
-- **[Nutrition & Chef](../features/nutrition.md)** — the worked example: the three verticals, the data
-  model, the routes, the 14 MCP tools, and the operator skill.
+- **[Nutrition & Chef](../features/nutrition.md)** — the first worked example: the food log, pantry,
+  meal plan, and weight-loss verticals, the data model, the routes, the 19 MCP tools, and the operator
+  skill.
+- **[Health & Athlete](../features/health.md)** — the second worked example: Apple Watch HAE ingestion
+  + the `x-health-token` push, the canonical health taxonomy, the AI coach, and the soft nutrition
+  dependency.
 - **[MCP servers](mcp-servers.md)** — the bridge topology and the child-lifecycle contract the add-on
   bridge inherits.
 - **[Platform API](platform-api.md)** — the board's single-seam HTTP contract the add-on routes sit

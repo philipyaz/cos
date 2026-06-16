@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { trends } from "@/lib/health-store";
+import { trends } from "@/lib/health";
 
 export const dynamic = "force-dynamic";
 

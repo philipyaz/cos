@@ -1,21 +1,27 @@
 #!/usr/bin/env node
-// MCP server (registry name "health") for the Cos Health add-on — Apple Watch
-// HealthKit data ingestion and querying. Every tool wraps the board's
-// /api/health/* HTTP routes over `fetch` on CRM_BASE_URL; the server never
-// shells out to curl. Runs over stdio; front it with supergateway for the
-// HTTP bridge (port 8011).
+// MCP server (registry name "health") for the Cos Health & Athlete add-on — Apple
+// Watch HealthKit data ingestion and querying. A THIN fetch wrapper over the board's
+// /api/health/* HTTP routes on CRM_BASE_URL (packages/mcp-kit primitives); the server
+// holds NO business logic and never shells out to curl. Runs over stdio; front it with
+// supergateway for the HTTP bridge (port 8011).
 //
-// Data types: sleep, hrv, steps, workout, vo2max, resting_hr.
+// Canonical data types (in lockstep with board/lib/types.ts VALID_HEALTH_ENTRY_TYPE):
+//   workout, sleep_night, sleep_nap, hrv, resting_hr, steps, vo2max.
+// (Plus any unmapped Health Auto Export metric names, stored verbatim by the push route.)
 //
-// The push endpoint (POST /api/health/push) is token-gated via x-health-token
-// header — the token lives in config/cos.env as HEALTH_PUSH_TOKEN. The MCP
-// tools that READ data are ungated; the push_health_data tool attaches the
-// token automatically.
+// The push endpoint (POST /api/health/push) is token-gated via the x-health-token
+// header — the token lives in config/secrets.env as HEALTH_PUSH_TOKEN. The MCP tools
+// that READ data are ungated; the WRITE tools (push/delete) attach the token automatically.
 //
-// Retention: health.json auto-purges entries older than 90 days on every push.
+// makeBoardApi from mcp-kit is NOT used here: it attributes writes with actor:"agent"
+// (header + body) for the board's activity log, whereas the health writes authenticate
+// with the x-health-token shared secret instead — a different auth shape — so this thin
+// healthApi keeps the token-header behaviour.
+//
+// Retention: the board auto-purges entries older than 90 days on every push.
 //
 // Config: CRM_BASE_URL (default http://localhost:3000)
-//         HEALTH_PUSH_TOKEN (required for push_health_data)
+//         HEALTH_PUSH_TOKEN (required for the write tools)
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -28,8 +34,10 @@ import { err, text, str, start, baseUrl } from "../../packages/mcp-kit/index.mjs
 const CRM_BASE_URL = baseUrl("CRM_BASE_URL", "http://localhost:3000");
 const HEALTH_PUSH_TOKEN = (process.env.HEALTH_PUSH_TOKEN || "").trim();
 
-// ── Valid data types (in lockstep with board/app/api/health/push/route.ts) ──
-const HEALTH_TYPES = ["sleep", "hrv", "steps", "workout", "vo2max", "resting_hr"];
+// ── Canonical health-entry types (in lockstep with board/lib/types.ts
+//    VALID_HEALTH_ENTRY_TYPE; the push route maps Health Auto Export metric
+//    names onto these and stores unmapped names verbatim). ──
+const HEALTH_TYPES = ["workout", "sleep_night", "sleep_nap", "hrv", "resting_hr", "steps", "vo2max"];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -41,7 +49,7 @@ async function healthApi(method, path, payload) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(payload);
   }
-  // Attach auth token on writes
+  // Attach the shared-secret auth token on writes (push/delete).
   if (method !== "GET" && HEALTH_PUSH_TOKEN) {
     headers["x-health-token"] = HEALTH_PUSH_TOKEN;
   }
@@ -59,7 +67,7 @@ async function healthApi(method, path, payload) {
     return { errorResult: err(`Could not reach the board at ${CRM_BASE_URL}: ${e.message}`) };
   }
   if (res.status === 401) return { errorResult: err(data.error ?? "Unauthorized — check HEALTH_PUSH_TOKEN.") };
-  if (res.status === 404) return { errorResult: err(data.error ?? "Not found.") };
+  if (res.status === 404) return { errorResult: err(data.error ?? "Not found — the health add-on may be disabled.") };
   if (!res.ok) return { errorResult: err(`Board returned ${res.status}: ${data.error ?? "unknown error"}`) };
   return { data };
 }
@@ -69,31 +77,31 @@ async function healthApi(method, path, payload) {
 const PUSH_HEALTH_DATA_TOOL = {
   name: "push_health_data",
   description:
-    "Push a batch of Apple Watch HealthKit entries (sleep, hrv, steps, workout, vo2max, resting_hr). " +
-    "Each entry needs a type, timestamp (ts), and a type-specific data object. " +
-    "Entries are deduplicated by id. Entries older than 90 days are auto-purged.",
+    "Push a batch of Apple Watch HealthKit entries in the canonical taxonomy " +
+    "(workout, sleep_night, sleep_nap, hrv, resting_hr, steps, vo2max). " +
+    "Each entry needs a globally-unique id, an ISO-8601 timestamp (ts), a canonical type, " +
+    "and a type-specific data object. Entries are deduplicated by id. Entries older than " +
+    "90 days are auto-purged. (The board also accepts raw Health Auto Export payloads " +
+    "directly on POST /api/health/push; this tool is for already-canonical entries.)",
   inputSchema: {
     type: "object",
     properties: {
       entries: {
         type: "array",
-        description: "Array of HealthKit entries to push.",
+        description: "Array of canonical HealthKit entries to push.",
         items: {
           type: "object",
           properties: {
             id: { type: "string", description: "Unique entry ID (e.g. hlth_abc123). Must be globally unique for dedup." },
-            ts: { type: "string", description: "ISO-8601 timestamp of the measurement." },
-            type: { type: "string", enum: HEALTH_TYPES, description: "HealthKit data type." },
+            ts: { type: "string", description: "Timestamp: YYYY-MM-DD for daily metrics/sleep, full ISO-8601 for a workout start." },
+            type: { type: "string", enum: HEALTH_TYPES, description: "Canonical health-entry type." },
             data: {
               type: "object",
               description:
-                "Type-specific payload. " +
-                "sleep: {duration_min, deep_min, rem_min, awake_min, bed_time, wake_time}. " +
-                "hrv: {avg_ms, samples?}. " +
-                "steps: {count, distance_km?}. " +
-                "workout: {activity, duration_min, calories?, avg_hr?, distance_km?}. " +
-                "vo2max: {value, unit?}. " +
-                "resting_hr: {bpm}.",
+                "Type-specific payload. Metrics carry a per-day aggregate in data.value: " +
+                "hrv {value: ms}, resting_hr {value: bpm}, steps {value: count}, vo2max {value: mL/kg/min}. " +
+                "sleep_night / sleep_nap {value: hours, metadata:{deep,rem,core,awake,sleepStart,sleepEnd}}. " +
+                "workout {activity, duration_min, calories?, avg_hr?, distance_km?}.",
             },
           },
           required: ["id", "ts", "type", "data"],
@@ -124,7 +132,9 @@ const GET_HEALTH_SUMMARY_TOOL = {
   name: "get_health_summary",
   description:
     "Get an aggregated health summary for a specific date or date range. " +
-    "Returns per-type aggregates (avg sleep duration, avg HRV, total steps, workouts, latest VO2max, avg resting HR).",
+    "Returns per-type aggregates: sleep {count, avg_hours, avg_deep_hours, avg_rem_hours}, " +
+    "hrv {count, avg_ms}, resting_hr {count, avg_bpm}, steps {days, total, avg_per_day}, " +
+    "vo2max {count, latest}, workout {count, total_duration_min, total_calories, activities}.",
   inputSchema: {
     type: "object",
     properties: {
@@ -210,7 +220,7 @@ async function handlePushHealthData(args) {
     return err("'entries' must be a non-empty array.");
   }
   if (!HEALTH_PUSH_TOKEN) {
-    return err("HEALTH_PUSH_TOKEN is not configured — set it in config/cos.env.");
+    return err("HEALTH_PUSH_TOKEN is not configured — set it in config/secrets.env.");
   }
   for (const e of entries) {
     if (!e.id || !e.ts || !e.type || !e.data) {
@@ -253,7 +263,7 @@ async function handleGetHealthSummary(args) {
 
 async function handleDeleteHealthData(args) {
   if (!HEALTH_PUSH_TOKEN) {
-    return err("HEALTH_PUSH_TOKEN is not configured — set it in config/cos.env.");
+    return err("HEALTH_PUSH_TOKEN is not configured — set it in config/secrets.env.");
   }
   const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
   const hasRange = args.from || args.to;
@@ -294,100 +304,15 @@ async function handleGetHealthTrends(args) {
 async function handleIngestHealthToVault(args) {
   const days = args.days ?? 7;
 
-  // Fetch summary for the date range
-  const to = new Date();
-  const from = new Date(to);
-  from.setDate(from.getDate() - days);
-  const fromStr = from.toISOString().slice(0, 10);
-  const toStr = to.toISOString().slice(0, 10);
-
-  const { data, errorResult } = await healthApi(
-    "GET",
-    `/api/health/summary?from=${fromStr}&to=${toStr}`
-  );
+  // The board composes the Markdown report from the canonical summarize() output
+  // (GET /api/health/report?days=N); this tool is a THIN forwarder — no composition here.
+  const { data, errorResult } = await healthApi("GET", `/api/health/report?days=${days}`);
   if (errorResult) return errorResult;
-
-  // Also fetch the raw entries for detail
-  const { data: listData, errorResult: listErr } = await healthApi(
-    "GET",
-    `/api/health/data?from=${fromStr}&to=${toStr}&limit=500`
-  );
-  if (listErr) return listErr;
-
-  const summary = data;
-  const entries = listData.entries ?? [];
-
-  // Compose a human-readable health report for vault ingestion
-  const lines = [
-    `# Health Report: ${fromStr} to ${toStr}`,
-    ``,
-    `Source: Apple Watch HealthKit (auto-exported)`,
-    `Period: ${days} days`,
-    `Total entries: ${entries.length}`,
-    ``,
-  ];
-
-  if (summary.sleep) {
-    const s = summary.sleep;
-    lines.push(`## Sleep`);
-    lines.push(`- Average duration: ${s.avg_duration_min?.toFixed(0) ?? "N/A"} min`);
-    lines.push(`- Average deep sleep: ${s.avg_deep_min?.toFixed(0) ?? "N/A"} min`);
-    lines.push(`- Average REM: ${s.avg_rem_min?.toFixed(0) ?? "N/A"} min`);
-    lines.push(`- Nights tracked: ${s.count ?? 0}`);
-    lines.push(``);
-  }
-
-  if (summary.hrv) {
-    const h = summary.hrv;
-    lines.push(`## HRV (Heart Rate Variability)`);
-    lines.push(`- Average: ${h.avg_ms?.toFixed(1) ?? "N/A"} ms`);
-    lines.push(`- Measurements: ${h.count ?? 0}`);
-    lines.push(``);
-  }
-
-  if (summary.resting_hr) {
-    const r = summary.resting_hr;
-    lines.push(`## Resting Heart Rate`);
-    lines.push(`- Average: ${r.avg_bpm?.toFixed(0) ?? "N/A"} bpm`);
-    lines.push(`- Measurements: ${r.count ?? 0}`);
-    lines.push(``);
-  }
-
-  if (summary.steps) {
-    const st = summary.steps;
-    lines.push(`## Steps`);
-    lines.push(`- Daily average: ${st.avg_count?.toFixed(0) ?? "N/A"}`);
-    lines.push(`- Total: ${st.total_count ?? "N/A"}`);
-    lines.push(`- Days tracked: ${st.count ?? 0}`);
-    lines.push(``);
-  }
-
-  if (summary.vo2max) {
-    const v = summary.vo2max;
-    lines.push(`## VO2 Max`);
-    lines.push(`- Latest: ${v.latest_value ?? "N/A"} mL/kg/min`);
-    lines.push(`- Measurements: ${v.count ?? 0}`);
-    lines.push(``);
-  }
-
-  if (summary.workout) {
-    const w = summary.workout;
-    lines.push(`## Workouts`);
-    lines.push(`- Count: ${w.count ?? 0}`);
-    lines.push(`- Total duration: ${w.total_duration_min?.toFixed(0) ?? "N/A"} min`);
-    lines.push(`- Total calories: ${w.total_calories?.toFixed(0) ?? "N/A"} kcal`);
-    if (w.activities && Object.keys(w.activities).length > 0) {
-      lines.push(`- Activities: ${Object.entries(w.activities).map(([a, n]) => `${a} (${n})`).join(", ")}`);
-    }
-    lines.push(``);
-  }
-
-  const content = lines.join("\n");
 
   return text(
     JSON.stringify({
-      vault_ingest_content: content,
-      domain: "life",
+      vault_ingest_content: data.markdown,
+      domain: data.domain ?? "life",
       instruction:
         "Pass 'vault_ingest_content' as the 'content' argument and 'life' as the 'domain' " +
         "argument to the vault MCP's ingest tool to persist this health report in the knowledge base.",

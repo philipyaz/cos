@@ -24,11 +24,11 @@ interface CorrelationData {
 }
 
 function corrLabel(r: number | null): { text: string; cls: string } {
-  if (r == null) return { text: "Insuffisant", cls: "text-ink-400" };
+  if (r == null) return { text: "Insufficient", cls: "text-ink-400" };
   const abs = Math.abs(r);
-  if (abs >= 0.7) return { text: "Forte", cls: r > 0 ? "text-emerald-600" : "text-red-600" };
-  if (abs >= 0.4) return { text: "Moderee", cls: "text-amber-600" };
-  return { text: "Faible", cls: "text-ink-500" };
+  if (abs >= 0.7) return { text: "Strong", cls: r > 0 ? "text-emerald-600" : "text-red-600" };
+  if (abs >= 0.4) return { text: "Moderate", cls: "text-amber-600" };
+  return { text: "Weak", cls: "text-ink-500" };
 }
 
 // ── SVG Scatter Plot ─────────────────────────────────────────────────────────
@@ -48,6 +48,7 @@ function ScatterPlot({
   regression: { slope: number; intercept: number } | null;
   r: number | null;
 }) {
+  const [hover, setHover] = useState<number | null>(null);
   if (points.length === 0) return null;
 
   const xs = points.map((p) => p.sleep_h);
@@ -75,8 +76,6 @@ function ScatterPlot({
     regLine = `M${sx(xMin)},${sy(y1)} L${sx(xMax)},${sy(y2)}`;
   }
 
-  const [hover, setHover] = useState<number | null>(null);
-
   return (
     <svg viewBox={`0 0 ${PLOT_W} ${PLOT_H}`} className="w-full max-w-[600px]">
       {/* Grid lines */}
@@ -99,7 +98,7 @@ function ScatterPlot({
         </g>
       ))}
       <text x={PAD.left + W / 2} y={PLOT_H - 4} textAnchor="middle" fontSize="11" fill="#525252">
-        Sommeil (heures)
+        Sleep (hours)
       </text>
 
       {/* Y axis ticks + labels */}
@@ -144,7 +143,7 @@ function ScatterPlot({
               </text>
               <text x={sx(p.sleep_h)} y={sy(p.performance) - 15}
                 textAnchor="middle" fontSize="9" fill="#d4d4d4">
-                {p.sleep_h.toFixed(1)}h sommeil | {p.performance.toFixed(1)} kcal/min
+                {p.sleep_h.toFixed(1)}h sleep | {p.performance.toFixed(1)} kcal/min
               </text>
             </g>
           )}
@@ -176,10 +175,10 @@ export default function CorrelationsPage() {
     try {
       const res = await fetch(`/api/athlete/correlations?days=${d}`);
       const json = await res.json();
-      if (!res.ok) { setError(json.error ?? "Erreur"); return; }
+      if (!res.ok) { setError(json.error ?? "Error"); return; }
       setData(json);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erreur reseau");
+      setError(e instanceof Error ? e.message : "Network error");
     } finally {
       setLoading(false);
     }
@@ -191,7 +190,7 @@ export default function CorrelationsPage() {
       <main className="flex-1 overflow-y-auto p-5 space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-[15px] font-semibold text-ink-900">
-            Correlation Sommeil / Performance
+            Sleep / Performance correlation
           </h1>
           <div className="flex items-center gap-2">
             <select
@@ -199,10 +198,10 @@ export default function CorrelationsPage() {
               onChange={(e) => setDays(Number(e.target.value))}
               className="rounded-md border border-ink-200 bg-white px-2 py-1.5 text-[13px] text-ink-700"
             >
-              <option value={14}>14 jours</option>
-              <option value={30}>30 jours</option>
-              <option value={60}>60 jours</option>
-              <option value={90}>90 jours</option>
+              <option value={14}>14 days</option>
+              <option value={30}>30 days</option>
+              <option value={60}>60 days</option>
+              <option value={90}>90 days</option>
             </select>
             <button
               onClick={() => load(days)}
@@ -210,7 +209,7 @@ export default function CorrelationsPage() {
               className="px-4 py-1.5 rounded-md bg-ink-900 text-white text-[13px] font-medium hover:bg-ink-800 disabled:opacity-50 transition flex items-center gap-2"
             >
               {loading && <Spinner />}
-              {loading ? "Chargement..." : "Analyser"}
+              {loading ? "Loading..." : "Analyze"}
             </button>
           </div>
         </div>
@@ -224,8 +223,8 @@ export default function CorrelationsPage() {
         {!data && !loading && !error && (
           <div className="rounded-lg border border-ink-100 bg-white p-8 text-center shadow-card">
             <p className="text-[13px] text-ink-500">
-              Analysez la correlation entre votre sommeil et vos performances
-              sportives sur la periode choisie.
+              Analyze the correlation between your sleep and your training
+              performance over the selected period.
             </p>
           </div>
         )}
@@ -240,8 +239,8 @@ export default function CorrelationsPage() {
           <>
             {/* Stats cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard label="Jours analyses" value={String(data.data_points)} />
-              <StatCard label="Correlation sommeil" value={
+              <StatCard label="Days analyzed" value={String(data.data_points)} />
+              <StatCard label="Sleep correlation" value={
                 data.correlation.sleep_vs_performance != null
                   ? `r = ${data.correlation.sleep_vs_performance.toFixed(3)}`
                   : "N/A"
@@ -251,7 +250,7 @@ export default function CorrelationsPage() {
                   return <span className={`text-[11px] font-medium ${c.cls}`}>{c.text}</span>;
                 })()}
               </StatCard>
-              <StatCard label="Correlation profond" value={
+              <StatCard label="Deep sleep correlation" value={
                 data.correlation.deep_sleep_vs_performance != null
                   ? `r = ${data.correlation.deep_sleep_vs_performance.toFixed(3)}`
                   : "N/A"
@@ -262,11 +261,11 @@ export default function CorrelationsPage() {
                 })()}
               </StatCard>
               {data.regression && (
-                <StatCard label="Tendance" value={
-                  data.regression.slope > 0 ? "Positive" : data.regression.slope < 0 ? "Negative" : "Neutre"
+                <StatCard label="Trend" value={
+                  data.regression.slope > 0 ? "Positive" : data.regression.slope < 0 ? "Negative" : "Neutral"
                 }>
                   <span className="text-[11px] text-ink-400">
-                    {data.regression.slope > 0 ? "+" : ""}{data.regression.slope.toFixed(2)} kcal/min par heure
+                    {data.regression.slope > 0 ? "+" : ""}{data.regression.slope.toFixed(2)} kcal/min per hour
                   </span>
                 </StatCard>
               )}
@@ -287,7 +286,7 @@ export default function CorrelationsPage() {
             ) : (
               <div className="rounded-lg border border-ink-100 bg-white p-6 text-center shadow-card">
                 <p className="text-[13px] text-ink-500">
-                  Pas assez de donnees pour afficher le graphique (minimum 3 jours avec workout + sommeil).
+                  Not enough data to show the chart (minimum 3 days with both a workout and sleep).
                 </p>
               </div>
             )}
@@ -299,11 +298,11 @@ export default function CorrelationsPage() {
                   <thead>
                     <tr className="border-b border-ink-100 bg-ink-50 text-ink-500">
                       <th className="text-left px-3 py-2 font-medium">Date</th>
-                      <th className="text-right px-3 py-2 font-medium">Sommeil</th>
-                      <th className="text-right px-3 py-2 font-medium">Profond</th>
+                      <th className="text-right px-3 py-2 font-medium">Sleep</th>
+                      <th className="text-right px-3 py-2 font-medium">Deep</th>
                       <th className="text-right px-3 py-2 font-medium">Perf (kcal/min)</th>
                       <th className="text-right px-3 py-2 font-medium">Calories</th>
-                      <th className="text-right px-3 py-2 font-medium">Duree</th>
+                      <th className="text-right px-3 py-2 font-medium">Duration</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100">
