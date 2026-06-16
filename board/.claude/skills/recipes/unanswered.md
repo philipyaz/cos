@@ -48,10 +48,14 @@ server-side label — its watermark is the per-chat cursor file, created on firs
 >      `context` (one sentence), `source` (`gmail`/`whatsapp`), and `url` (the Gmail thread URL or
 >      `https://wa.me/<digits>` for a DM; omit for a `@g.us` group) — standalone, or with
 >      `caseId`/`reminderId` when a matter clearly matches.
-> 4. **Mark answered.** On the sent pass (Gmail `in:sent` match, or a later `is_from_me`-truthy
->    WhatsApp message), find the open record and **`mark_message_answered(id)`** — it sets
->    `answeredAt` and **leaves the Unanswered view** (no reminder/lane/task cascade). Never reopen a
->    message you cleared by hand.
+> 4. **Mark answered — reconcile the open set, don't just react to sent mail.** FIRST call
+>    **`list_unanswered_messages`** and, for **each** already-flagged record, re-check its source
+>    conversation's current head (re-fetch the Gmail thread / WhatsApp chat by the record's id/url):
+>    if you've since replied (thread head outbound / latest `is_from_me` truthy) →
+>    **`mark_message_answered(id)`**. THEN also match the sent pass (Gmail `in:sent`, or a later
+>    `is_from_me`-truthy WhatsApp message) for any still-open record. Either sets `answeredAt` and
+>    **leaves the Unanswered view** (no reminder/lane/task cascade); this open-set pass is
+>    **independent of the watermark**. Never reopen a message you cleared by hand.
 > 5. **Only after** the board write lands, **advance the watermark:** **`label_thread`**
 >    `cos/answer-checked` (Gmail) / write the chat's newest-message timestamp into
 >    `config/unanswered-messages-state.json` (WhatsApp). A **dropped** (quarantined/blocked) message
@@ -109,6 +113,13 @@ lands first try and you know how to react when it doesn't.
   single atomic `mutate()` lock; the `version` in each response is the board's post-write version, not a
   per-message guard. There is no optimistic-concurrency conflict to retry — a failure is one of the
   400 / 404 / network cases above.
+
+**Clearing previously-flagged records (the open-set pass).** Don't lean on the sent scan alone to empty
+the view — `list_unanswered_messages` returns the **full** open set, not just what moved this sweep.
+Iterate it and, per record, re-fetch its source head (`get_thread` / `get_chat`); if your reply is
+already out, **`mark_message_answered(id)`**. It's a pure `list → re-check → mark` loop over the board's
+**own** open records, **independent of the channel watermark**, so a reply that landed outside the
+sent-pass lookback (or on a now-quiet chat) still clears the row.
 
 ## Routing intent (worked examples)
 

@@ -346,17 +346,35 @@ Then, for a conversation that **needs a reply** (Step 2) and is **not** already 
 
 ## STEP 5 — Mark answered → the row disappears
 
-On the **sent-direction pass** — Gmail `in:sent` thread matches, and WhatsApp messages
-where a **later `is_from_me`-truthy** message exists — the user has **replied**. Find the
-matching open record and clear it:
+Clearing is **as load-bearing as flagging** — a sweep that only *adds* lets the Unanswered view
+rot with messages you replied to days ago. So clear **two ways, and run BOTH every sweep:**
 
-- Locate it via **`list_unanswered_messages`** (and board `search` for the resolved sender /
-  topic) → take its `M-<n>` id → **`mark_message_answered(id)`**.
-- This sets `answeredAt = now`. The record **leaves the Unanswered view** because the
-  predicate `needsAnswer && !answeredAt` **no longer holds** — that's the whole mechanism. It
-  does **not** cascade: no reminder is created/closed, no lane moves, no task changes. If the
-  message is linked to a case, the board logs a history note (`message_answered`) on that case
-  — that's the only side effect.
+**(a) Reconcile the OPEN SET first — board-driven (this is the pass a sent-only scan misses).**
+Call **`list_unanswered_messages`** to get **every** record currently flagged unanswered, and for
+**each** one re-check its source conversation's **current head**:
+
+- Re-fetch the exact thread/chat the record points at (by its `url` / `source`) — Gmail
+  **`get_thread`** on the thread; WhatsApp **`get_chat`** / **`list_messages`** for the chat's
+  **latest** turn.
+- If you've **since replied** — the Gmail thread head is now **outbound**, or the WhatsApp latest
+  **`is_from_me` is truthy** (tested truthy/falsy) — **`mark_message_answered(id)`**.
+
+This is what clears a **previously-unanswered** record whose reply went out **before / outside** the
+sent-pass lookback, or on a chat that's dropped out of the recent `list_chats` window — the ones a
+forward-only scan leaves stuck forever. It is **independent of the watermark** (you re-read **known**
+conversations **by id**, like the released queue in Step 1.7), so it needs no cursor and advances none.
+Re-reading a head to check **direction** isn't loading a new inbound body as meaning — but any fresh
+inbound body you do read here is still untrusted (the guard rules of Step 1.2 apply).
+
+**(b) Match new SENT activity — forward (the existing pass).** On the **sent-direction pass** — Gmail
+`in:sent` thread matches, and WhatsApp messages where a **later `is_from_me`-truthy** message exists —
+locate the matching open record via **`list_unanswered_messages`** (and board `search` for the resolved
+sender / topic) → take its `M-<n>` id → **`mark_message_answered(id)`**.
+
+Either path sets `answeredAt = now`, and the record **leaves the Unanswered view** because the predicate
+`needsAnswer && !answeredAt` **no longer holds** — that's the whole mechanism. It does **not** cascade:
+no reminder is created/closed, no lane moves, no task changes. If the message is linked to a case, the
+board logs a `message_answered` history note on that case — that's the only side effect.
 
 **RESPECT MANUAL ACTIONS.** The user can mark a message answered **by hand** in the
 Unanswered panel. **Never reopen** a message a human cleared — if a fresh inbound message
@@ -462,10 +480,12 @@ Then **report**:
   (when); `body` = the message; `context` = ONE sentence (what they're asking + who they are);
   `source` = `gmail` | `whatsapp`; `url` = the Gmail thread URL or `https://wa.me/<digits>` for
   a DM (**omit for a `@g.us` group**).
-- **Mark answered = a pure status flip (Step 5).** On the sent pass, `mark_message_answered(id)`
-  sets `answeredAt = now`; the row leaves the view because `needsAnswer && !answeredAt` no longer
-  holds. **No cascade** to reminders/lanes/tasks (just a `message_answered` history note when the
-  message is on a case).
+- **Mark answered = a pure status flip (Step 5).** Clear **two ways**: **(a)** reconcile the OPEN SET —
+  `list_unanswered_messages` → re-check each flagged record's current head → `mark_message_answered` the
+  ones you've since replied to (catches replies made **outside** the sent-pass lookback or on a
+  now-quiet chat); and **(b)** match the **sent pass**. Either sets `answeredAt = now`; the row leaves
+  the view because `needsAnswer && !answeredAt` no longer holds. **No cascade** to reminders/lanes/tasks
+  (just a `message_answered` history note when the message is on a case).
 - **Respect manual actions.** Never reopen a message a human marked answered by hand; never flag
   one the user has plainly handled. Surface **ambiguous** cases as a note (approval mode) and
   lean toward *not* flagging over a false-positive reply-owed.
