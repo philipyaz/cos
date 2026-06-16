@@ -46,6 +46,8 @@ interface WeeklyReview {
   nutrition: NutritionBlock;
   recommendations: string[];
   next_week_focus: string;
+  avg_form_score: number | null;
+  form_trend: string | null;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -70,8 +72,10 @@ const FATIGUE_BADGE: Record<string, string> = {
 
 const TREND_BADGE: Record<string, string> = {
   "en hausse": "bg-emerald-50 text-emerald-700 border-emerald-200",
+  hausse: "bg-emerald-50 text-emerald-700 border-emerald-200",
   stable: "bg-ink-50 text-ink-600 border-ink-200",
   "en baisse": "bg-red-50 text-red-700 border-red-200",
+  baisse: "bg-red-50 text-red-700 border-red-200",
 };
 
 function fmtH(n: number | undefined | null): string {
@@ -271,6 +275,36 @@ export default function WeeklyReviewPage() {
                 )}
               </Section>
             </div>
+
+            {/* Form Score */}
+            {review.avg_form_score != null && (
+              <Section title="Score de forme moyen">
+                <div className="flex items-center gap-4">
+                  <div
+                    className={`w-16 h-16 shrink-0 rounded-2xl border-2 flex flex-col items-center justify-center ${scoreRing(review.avg_form_score)}`}
+                  >
+                    <span className={`text-[24px] font-bold leading-none tabular-nums ${scoreColor(review.avg_form_score)}`}>
+                      {review.avg_form_score}
+                    </span>
+                    <span className="text-[9px] font-medium text-ink-400 mt-0.5">/ 100</span>
+                  </div>
+                  <div>
+                    <p className="text-[12px] text-ink-600 mb-1">
+                      Score de forme moyen sur la semaine
+                    </p>
+                    {review.form_trend && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-medium text-ink-400">Tendance :</span>
+                        <Badge
+                          label={review.form_trend}
+                          cls={TREND_BADGE[review.form_trend] ?? "bg-ink-50 text-ink-600 border-ink-200"}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Section>
+            )}
 
             {/* Recommendations */}
             {review.recommendations.length > 0 && (
