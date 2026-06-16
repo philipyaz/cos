@@ -3,7 +3,7 @@ import { listEntries } from "@/lib/health-store";
 import { readDB } from "@/lib/store";
 import {
   readAthlete, readApiKey, callClaude,
-  isoWeek, formatDate, last7DaysFrom,
+  isoWeek, formatDate,
 } from "@/lib/athlete-ai";
 
 export const dynamic = "force-dynamic";
@@ -106,18 +106,33 @@ export async function GET() {
     );
   }
 
-  // Health data — last 7 days
-  const fromISO = last7DaysFrom();
+  // Health data — last 7 days.
+  // Use date-only boundaries (YYYY-MM-DD) so the string-compare pre-filter in
+  // listEntries works for BOTH date-only ts ("2026-06-09") and full ISO ts
+  // ("2026-06-09T..."). Same approach as daily-summary.
+  const fromDate = formatDate((() => { const d = new Date(); d.setDate(d.getDate() - 7); return d; })());
+  const toDate = formatDate((() => { const d = new Date(); d.setDate(d.getDate() + 1); return d; })());
+
+  // Type names must match what's actually stored in health.json:
+  //   sleep_night (not "sleep"), heart_rate_variability (not "hrv"),
+  //   steps, resting_hr, workout.
   const [workouts, sleepData, hrvData, stepsData, restingHrData] = await Promise.all([
-    listEntries({ type: "workout", from: fromISO, limit: 50 }),
-    listEntries({ type: "sleep", from: fromISO, limit: 14 }),
-    listEntries({ type: "hrv", from: fromISO, limit: 14 }),
-    listEntries({ type: "steps", from: fromISO, limit: 14 }),
-    listEntries({ type: "resting_hr", from: fromISO, limit: 14 }),
+    listEntries({ type: "workout", from: fromDate, to: toDate, limit: 0 }),
+    listEntries({ type: "sleep_night", from: fromDate, to: toDate, limit: 0 }),
+    listEntries({ type: "heart_rate_variability", from: fromDate, to: toDate, limit: 0 }),
+    listEntries({ type: "steps", from: fromDate, to: toDate, limit: 0 }),
+    listEntries({ type: "resting_hr", from: fromDate, to: toDate, limit: 0 }),
   ]);
 
+  // Post-filter: keep only entries whose ts starts with a date in the range
+  const inRange = (e: { ts: string }) => e.ts >= fromDate && e.ts < toDate + "T";
+
+  console.log(
+    `[weekly-review] range ${fromDate}..${toDate} | workout: ${workouts.entries.filter(inRange).length}, sleep_night: ${sleepData.entries.filter(inRange).length}, hrv: ${hrvData.entries.filter(inRange).length}, steps: ${stepsData.entries.filter(inRange).length}, resting_hr: ${restingHrData.entries.filter(inRange).length}`,
+  );
+
   const health = {
-    workouts: workouts.entries.map((e) => ({
+    workouts: workouts.entries.filter(inRange).map((e) => ({
       date: e.ts.slice(0, 10),
       activity: e.data.activity,
       duration_min: e.data.duration_min,
@@ -125,7 +140,7 @@ export async function GET() {
       avg_hr: e.data.avg_hr,
       calories: e.data.calories,
     })),
-    sleep: sleepData.entries.map((e) => {
+    sleep: sleepData.entries.filter(inRange).map((e) => {
       const meta = e.data.metadata && typeof e.data.metadata === "object"
         ? (e.data.metadata as Record<string, unknown>) : {};
       return {
@@ -135,15 +150,15 @@ export async function GET() {
         rem_hours: meta.rem,
       };
     }),
-    hrv: hrvData.entries.map((e) => ({
+    hrv: hrvData.entries.filter(inRange).map((e) => ({
       date: e.ts.slice(0, 10),
       avg_ms: e.data.value ?? e.data.avg_ms,
     })),
-    steps: stepsData.entries.map((e) => ({
+    steps: stepsData.entries.filter(inRange).map((e) => ({
       date: e.ts.slice(0, 10),
       count: e.data.value ?? e.data.count,
     })),
-    resting_hr: restingHrData.entries.map((e) => ({
+    resting_hr: restingHrData.entries.filter(inRange).map((e) => ({
       date: e.ts.slice(0, 10),
       bpm: e.data.value ?? e.data.bpm,
     })),
