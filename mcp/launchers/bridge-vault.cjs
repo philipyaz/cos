@@ -1,6 +1,6 @@
-// Windows supergateway launcher for the health MCP bridge.
-// Spawns supergateway as a child process wrapping the health stdio server,
-// serving Streamable HTTP on HEALTH_BRIDGE_PORT (default 8011).
+// Windows supergateway launcher for the Vault MCP bridge.
+// Spawns supergateway wrapping vault-server/server.mjs,
+// serving Streamable HTTP on VAULT_BRIDGE_PORT (default 8005).
 //
 // Used by ecosystem.config.cjs (pm2) instead of a launchd plist.
 // A .cjs file avoids MSYS path mangling that breaks args when bash is
@@ -12,13 +12,11 @@ const { spawn } = require("child_process");
 const path = require("path");
 
 const REPO = path.resolve(__dirname, "..", "..");
-const PORT = process.env.HEALTH_BRIDGE_PORT || "8011";
-const SERVER = path.join(REPO, "mcp", "health-server", "server.mjs");
+const PORT = process.env.VAULT_BRIDGE_PORT || "8005";
+const SERVER = path.join(REPO, "mcp", "vault-server", "server.mjs");
 
-// Resolve supergateway: prefer the env var, fall back to global install.
 const SUPERGATEWAY = process.env.SUPERGATEWAY_BIN || "supergateway";
 
-// Load secrets (HEALTH_PUSH_TOKEN may live in cos.env or secrets.env).
 const env = { ...process.env };
 
 const args = [
@@ -30,8 +28,8 @@ const args = [
   "--logLevel", "info",
 ];
 
-console.log(`[bridge-health] launching supergateway on :${PORT}`);
-console.log(`[bridge-health] server: ${SERVER}`);
+console.log(`[bridge-vault] launching supergateway on :${PORT}`);
+console.log(`[bridge-vault] server: ${SERVER}`);
 
 const child = spawn(SUPERGATEWAY, args, {
   env,
@@ -42,16 +40,15 @@ const child = spawn(SUPERGATEWAY, args, {
 });
 
 child.on("error", (err) => {
-  console.error(`[bridge-health] spawn error: ${err.message}`);
+  console.error(`[bridge-vault] spawn error: ${err.message}`);
   process.exit(1);
 });
 
 child.on("exit", (code) => {
-  console.log(`[bridge-health] supergateway exited with code ${code}`);
+  console.log(`[bridge-vault] supergateway exited with code ${code}`);
   process.exit(code ?? 1);
 });
 
-// Forward SIGTERM/SIGINT to child for clean pm2 stop.
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => {
     child.kill(sig);
