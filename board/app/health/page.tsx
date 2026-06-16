@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { TopBar } from "@/components/topbar";
+import { FormScoreWidget } from "@/components/form-score-widget";
 
 // ── Types (mirror health-store.ts) ──────────────────────────────────────────
 
@@ -313,6 +314,8 @@ export default function HealthPage() {
               <h1 className="text-[15px] font-semibold text-ink-900">Health Dashboard</h1>
               <span className="text-[12px] text-ink-400">{total} entries</span>
             </div>
+
+            <FormScoreWidget />
 
             <MetricCards
               hrv={byGroup(entries, "hrv")}

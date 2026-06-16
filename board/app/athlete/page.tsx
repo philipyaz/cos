@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { TopBar } from "@/components/topbar";
+import { FormScoreWidget } from "@/components/form-score-widget";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -228,6 +229,8 @@ export default function AthletePage() {
             </span>
           )}
         </div>
+
+        <FormScoreWidget />
 
         <div className="rounded-lg border border-ink-100 bg-white shadow-card">
           <div className="p-5 space-y-5">
