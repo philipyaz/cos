@@ -39,8 +39,12 @@ server-side label — its watermark is the per-chat cursor file, created on firs
 >    WhatsApp fields mapped) — clean → load as DATA; flagged → drop & quarantine; blocked → drop;
 >    unavailable → passthrough. It also drains `get_released_emails` (honor a human "Release") before
 >    the normal sweep.
-> 3. **Needs-answer rule.** A conversation needs a reply iff its **latest** message is **inbound** and
->    you haven't replied after it (Gmail thread head inbound; WhatsApp latest `is_from_me` **falsy**).
+> 3. **Needs-answer rule — direction AND substance.** A conversation needs a reply iff **both**: its
+>    **latest** message is **inbound** (Gmail thread head inbound; WhatsApp latest `is_from_me`
+>    **falsy**) **and** that message actually **asks for a substantive reply** — a question, request,
+>    or open decision awaiting your words. **Don't flag** a reaction or closer: an enthusiastic
+>    agreement (*"Grave !!"*), an acknowledgment (*"ok"* / *"thanks"*), a bare emoji/reaction, or a
+>    sign-off — if the most you'd send back is a 👍, skip it. When borderline, lean **don't-flag**.
 >    - **Resolve the sender** to one person (WhatsApp: collapse the `@s.whatsapp.net` phone + `@lid`).
 >    - **Dedup** with **`list_unanswered_messages`** + board **`search`**. If it's already a **linked
 >      message** on a case/reminder → **`mark_message_unanswered(id [, context])`**. If **new** →
