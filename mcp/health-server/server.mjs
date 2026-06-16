@@ -162,6 +162,21 @@ const GET_HEALTH_TRENDS_TOOL = {
   },
 };
 
+const GET_DAILY_SUMMARY_TOOL = {
+  name: "get_daily_summary",
+  description:
+    "Get a full daily health + nutrition summary for a given date. " +
+    "Returns workouts, sleep (night + naps), metrics (HRV, resting HR, steps), " +
+    "food logs with macro totals, and a calorie balance (workout calories burned − calories ingested).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      date: { type: "string", description: "Date to summarize (YYYY-MM-DD)." },
+    },
+    required: ["date"],
+  },
+};
+
 const INGEST_HEALTH_TO_VAULT_TOOL = {
   name: "ingest_health_to_vault",
   description:
@@ -181,6 +196,7 @@ const TOOLS = [
   PUSH_HEALTH_DATA_TOOL,
   LIST_HEALTH_DATA_TOOL,
   GET_HEALTH_SUMMARY_TOOL,
+  GET_DAILY_SUMMARY_TOOL,
   DELETE_HEALTH_DATA_TOOL,
   GET_HEALTH_TRENDS_TOOL,
   INGEST_HEALTH_TO_VAULT_TOOL,
@@ -251,6 +267,16 @@ async function handleDeleteHealthData(args) {
   if (args.to) payload.to = args.to;
 
   const { data, errorResult } = await healthApi("DELETE", "/api/health/data", payload);
+  if (errorResult) return errorResult;
+  return text(JSON.stringify(data, null, 2));
+}
+
+async function handleGetDailySummary(args) {
+  const date = str(args.date);
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return err("'date' is required as YYYY-MM-DD.");
+  }
+  const { data, errorResult } = await healthApi("GET", `/api/health/daily-summary?date=${date}`);
   if (errorResult) return errorResult;
   return text(JSON.stringify(data, null, 2));
 }
@@ -387,6 +413,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleListHealthData(args);
     case "get_health_summary":
       return handleGetHealthSummary(args);
+    case "get_daily_summary":
+      return handleGetDailySummary(args);
     case "delete_health_data":
       return handleDeleteHealthData(args);
     case "get_health_trends":
