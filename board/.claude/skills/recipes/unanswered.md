@@ -74,6 +74,42 @@ server-side label — its watermark is the per-chat cursor file, created on firs
   cases/reminders/events, moves lanes, touches tasks, or sends a message. Marking answered is a pure
   status flip — the row disappears because `needsAnswer && !answeredAt` no longer holds.
 
+## Board API operations (the four `board`-MCP tools' contract)
+
+Every board write goes **only** through the `board` MCP — never `bash`/`curl` (Cowork's sandbox blocks
+outbound HTTP). Each tool is a thin proxy over one board API route; here is the exact contract so a call
+lands first try and you know how to react when it doesn't.
+
+| Tool (params; `*` = required) | Route → success | Required, else **400** | Defaults / notes |
+|---|---|---|---|
+| `add_unanswered_message(source*, from*, [subject], [preview], [body], [receivedAt], [context], [caseId], [reminderId], [read], [url])` | `POST /api/messages` → **201** `{message, version}` | **`source`** (`gmail`\|`whatsapp`\|`jira`\|`agent`\|`client`\|`system`) and a non-empty **`from`** | `needsAnswer` defaults **true** server-side; `receivedAt` defaults **now**; `read` defaults **false**. The new id is **`message.id`** (`M-<n>`) — **keep it** if you'll mark it later. |
+| `mark_message_unanswered(id*, [context])` | `PATCH /api/messages/{id}` → **200** `{message, version}` | **`id`** | Flags an **existing** record; never mints a duplicate. |
+| `mark_message_answered(id*)` | `PATCH /api/messages/{id}` → **200** `{message, version}` | **`id`** | Sets `answeredAt = now`, clears `needsAnswer`; logs a `message_answered` note on the linked case (**no** lane/task/reminder cascade). |
+| `list_unanswered_messages([limit])` | `GET /api/messages?status=unanswered` → **200** `{messages[], version}` | — (read-only) | The open set **newest-first** (`needsAnswer === true && !answeredAt`); `limit` trims client-side. |
+
+**Errors come back as an MCP `isError: true` text result — READ it, don't blindly retry:**
+
+- **`Board returned 400: …`** — a malformed call. Almost always a missing **`source`** or empty
+  **`from`** on `add_unanswered_message` (also: a `url` that isn't an absolute `http(s)` link — **omit
+  `url` for a `@g.us` group**; or a wrong-typed `context`/`caseId`/`reminderId`). **Fix the call** —
+  never resend it byte-for-byte.
+- **`Not found.` (404)** — on `add_*`, a `caseId`/`reminderId` that doesn't exist (drop it and record
+  **standalone**); on a `mark_*`, a **stale `M-<n>`** (the record was deleted, or the id was guessed).
+  Re-run `list_unanswered_messages` for the **live** id, then retry.
+- **`Could not reach the board at <url>` (network)** — the board or its bridge is down. **Stop, report,
+  and do NOT advance the watermark** (so the chat/thread re-enters next sweep).
+
+**Two contract facts that shape the flow:**
+
+- **The API does NOT dedup.** `POST /api/messages` always mints a fresh `M-<n>` and appends it — there
+  is **no** server-side de-duplication. "One reply-owed = one record" is **your** job: always
+  `list_unanswered_messages` **+** board `search` first, and flag an existing linked message with
+  `mark_message_unanswered` rather than a second `add_unanswered_message`.
+- **Messages aren't individually versioned (no 409 to handle).** Every write goes through the board's
+  single atomic `mutate()` lock; the `version` in each response is the board's post-write version, not a
+  per-message guard. There is no optimistic-concurrency conflict to retry — a failure is one of the
+  400 / 404 / network cases above.
+
 ## Routing intent (worked examples)
 
 > WhatsApp DM from a contact: *"Are we still on for Thursday? Let me know what time works."* — no reply
