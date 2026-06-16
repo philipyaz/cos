@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { listEntries } from "@/lib/health-store";
 import {
   readAthlete, readApiKey, callClaude,
-  isoWeek, formatDate, last7DaysFrom,
+  isoWeek, formatDate,
 } from "@/lib/athlete-ai";
 
 export const dynamic = "force-dynamic";
@@ -103,15 +103,22 @@ export async function GET() {
     );
   }
 
-  const fromISO = last7DaysFrom();
+  // Use date-only boundaries so the filter works for both date-only ts
+  // ("2026-06-09") and full ISO ts ("2026-06-09T...").
+  const fromDate = formatDate((() => { const d = new Date(); d.setDate(d.getDate() - 7); return d; })());
+  const toDate = formatDate((() => { const d = new Date(); d.setDate(d.getDate() + 1); return d; })());
+  const inRange = (e: { ts: string }) => e.ts >= fromDate && e.ts < toDate + "T";
+
+  // Type names must match what's stored in health.json:
+  //   sleep_night (not "sleep"), heart_rate_variability (not "hrv").
   const [workouts, sleep, hrv] = await Promise.all([
-    listEntries({ type: "workout", from: fromISO, limit: 50 }),
-    listEntries({ type: "sleep", from: fromISO, limit: 14 }),
-    listEntries({ type: "hrv", from: fromISO, limit: 14 }),
+    listEntries({ type: "workout", from: fromDate, to: toDate, limit: 0 }),
+    listEntries({ type: "sleep_night", from: fromDate, to: toDate, limit: 0 }),
+    listEntries({ type: "heart_rate_variability", from: fromDate, to: toDate, limit: 0 }),
   ]);
 
   const healthSummary = {
-    workouts: workouts.entries.map((e) => ({
+    workouts: workouts.entries.filter(inRange).map((e) => ({
       date: e.ts.slice(0, 10),
       activity: e.data.activity,
       duration_min: e.data.duration_min,
@@ -119,7 +126,7 @@ export async function GET() {
       avg_hr: e.data.avg_hr,
       calories: e.data.calories,
     })),
-    sleep: sleep.entries.map((e) => {
+    sleep: sleep.entries.filter(inRange).map((e) => {
       const meta = e.data.metadata && typeof e.data.metadata === "object"
         ? (e.data.metadata as Record<string, unknown>) : {};
       return {
@@ -129,7 +136,7 @@ export async function GET() {
         rem: meta.rem,
       };
     }),
-    hrv: hrv.entries.map((e) => ({
+    hrv: hrv.entries.filter(inRange).map((e) => ({
       date: e.ts.slice(0, 10),
       avg_ms: e.data.value ?? e.data.avg_ms,
     })),
