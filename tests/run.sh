@@ -87,17 +87,17 @@
 #      404s POST /weight + PUT /goal while GET /weight + /goal + /targets stay 200), and
 #      delete. Snapshots+restores cases.json (weights + nutritionGoal + settings.addons
 #      live there → net-zero). Skipped when no board is up.
-#  10h. api-health-gate — ONLY if a board is running: the Add-ons GATE contract for
-#      the unified "health" add-on (/api/health/* + /api/athlete + /api/addons[/:id]). A
-#      DISABLED add-on rejects every WRITE (POST /api/health/push with a valid x-health-token,
-#      POST /api/athlete) with 404 while its GETs stay 200; PATCH /api/addons/health flips the
+#  10h. api-fitness-gate — ONLY if a board is running: the Add-ons GATE contract for
+#      the unified "fitness" add-on (/api/fitness/* + /api/fitness/profile + /api/addons[/:id]). A
+#      DISABLED add-on rejects every WRITE (POST /api/fitness/push with a valid x-fitness-token,
+#      POST /api/fitness/profile) with 404 while its GETs stay 200; PATCH /api/addons/fitness flips the
 #      gate live + bumps db.version; unknown-id 404 + non-boolean-enabled 400. Snapshots+restores
 #      cases.json (settings.addons + healthEntries + athleteProfile live there). Skipped when no board.
-#  10i. api-health-push — ONLY if a board is running: a push INGEST → SUMMARIZE round-trip that
-#      kills the split-brain-taxonomy bug — POST /api/health/push a realistic HAE payload (sleep +
-#      heart_rate_variability metrics + a workout), then assert GET /api/health/summary returns
+#  10i. api-fitness-push — ONLY if a board is running: a push INGEST → SUMMARIZE round-trip that
+#      kills the split-brain-taxonomy bug — POST /api/fitness/push a realistic HAE payload (sleep +
+#      heart_rate_variability metrics + a workout), then assert GET /api/fitness/summary returns
 #      NON-EMPTY sleep + hrv (reading canonical type "sleep_night"/"hrv" + data.value) and
-#      GET /api/health/daily-summary surfaces them. Needs HEALTH_PUSH_TOKEN. Snapshots+restores
+#      GET /api/fitness/daily-summary surfaces them. Needs FITNESS_PUSH_TOKEN. Snapshots+restores
 #      cases.json. Skipped when no board.
 #  11. api-trust — ONLY if a board is running: drives the guard sender-trust
 #      WHITELIST API via the board's thin PROXY routes (/api/trust[/:email] →
@@ -180,9 +180,9 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/cos-tests.XXXXXX")"
 TEST_BOARD_PID=""
 TEST_BOARD_PORT="${COS_TEST_BOARD_PORT:-3999}"
 BASE=""
-# The token the health-push route requires (x-health-token). A throwaway value shared by the
-# test board AND the api-health-* steps so the push round-trip is exercised (not 503'd).
-export HEALTH_PUSH_TOKEN="${HEALTH_PUSH_TOKEN:-test-health-token}"
+# The token the fitness-push route requires (x-fitness-token). A throwaway value shared by the
+# test board AND the api-fitness-* steps so the push round-trip is exercised (not 503'd).
+export FITNESS_PUSH_TOKEN="${FITNESS_PUSH_TOKEN:-test-fitness-token}"
 BOARD_UP=0
 HTTP_CODE="test-board"
 # Shared by the test board AND the test processes so trust-derivation agrees on
@@ -217,7 +217,7 @@ start_test_board() {
   # self-contained: api-search falls back to keyword (finds its own marker), and
   # the guard-proxy tests see online:false and self-skip — nothing live is touched.
   ( cd "${sb}" && COS_DATA_DIR="${sb}/data" COS_PRINCIPAL_EMAIL="${COS_PRINCIPAL_EMAIL}" \
-      HEALTH_PUSH_TOKEN="${HEALTH_PUSH_TOKEN}" \
+      FITNESS_PUSH_TOKEN="${FITNESS_PUSH_TOKEN}" \
       COS_SEARCH_URL="http://127.0.0.1:59999" COS_GUARD_URL="http://127.0.0.1:59999" \
       "${BOARD_SRC}/node_modules/.bin/next" dev -p "${TEST_BOARD_PORT}" >"${TMP}/test-board.log" 2>&1 ) &
   TEST_BOARD_PID=$!
@@ -674,48 +674,48 @@ else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
-# --- 10h. api-health-gate (only when a board is healthy) ---------------------
-# The Add-ons GATE contract for the unified "health" add-on (/health + /athlete). A DISABLED
-# add-on rejects every WRITE (POST /api/health/push with a valid x-health-token, POST
-# /api/athlete) with 404 while its GET reads (GET /api/health/summary, GET /api/athlete) stay
-# 200; enabling via PATCH /api/addons/health flips the gate live AND bumps db.version; an
+# --- 10h. api-fitness-gate (only when a board is healthy) --------------------
+# The Add-ons GATE contract for the unified "fitness" add-on (/fitness + /fitness/health). A DISABLED
+# add-on rejects every WRITE (POST /api/fitness/push with a valid x-fitness-token, POST
+# /api/fitness/profile) with 404 while its GET reads (GET /api/fitness/summary, GET /api/fitness/profile) stay
+# 200; enabling via PATCH /api/addons/fitness flips the gate live AND bumps db.version; an
 # unknown add-on id 404s and a non-boolean enabled 400s. The push-write checks need
-# HEALTH_PUSH_TOKEN (the test board exports it); the athlete-profile gate runs regardless.
+# FITNESS_PUSH_TOKEN (the test board exports it); the athlete-profile gate runs regardless.
 # Snapshots + restores board/data/cases.json (settings.addons + healthEntries + athleteProfile
 # live there → net-zero). Skipped when no board.
 echo
-echo "--- [10h] api-health-gate (live board) ----------------------"
+echo "--- [10h] api-fitness-gate (live board) ---------------------"
 if [ "${BOARD_UP}" -eq 1 ]; then
-  if CRM_BASE_URL="${BASE}" HEALTH_PUSH_TOKEN="${HEALTH_PUSH_TOKEN}" node "${SCRIPT_DIR}/api-health-gate.mjs"; then
-    echo "api-health-gate: PASS"
+  if CRM_BASE_URL="${BASE}" FITNESS_PUSH_TOKEN="${FITNESS_PUSH_TOKEN}" node "${SCRIPT_DIR}/api-fitness-gate.mjs"; then
+    echo "api-fitness-gate: PASS"
   else
-    echo "api-health-gate: FAIL"
+    echo "api-fitness-gate: FAIL"
     fail=1
-    fail_reasons="${fail_reasons} api-health-gate"
+    fail_reasons="${fail_reasons} api-fitness-gate"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
-# --- 10i. api-health-push (only when a board is healthy) ---------------------
-# A round-trip through the health-push INGEST → SUMMARIZE pipeline that kills the bug the old
-# test masked: with the add-on ENABLED, POST /api/health/push a realistic Health-Auto-Export
+# --- 10i. api-fitness-push (only when a board is healthy) --------------------
+# A round-trip through the fitness-push INGEST → SUMMARIZE pipeline that kills the bug the old
+# test masked: with the add-on ENABLED, POST /api/fitness/push a realistic Health-Auto-Export
 # payload (a sleep_analysis night + a heart_rate_variability series + a workout), then assert
-# GET /api/health/summary returns NON-EMPTY sleep {count,avg_hours} + hrv {count,avg_ms} +
+# GET /api/fitness/summary returns NON-EMPTY sleep {count,avg_hours} + hrv {count,avg_ms} +
 # workout (reading the CANONICAL taxonomy — type "sleep_night"/"hrv", data.value — NOT the
-# legacy "heart_rate_variability"/data.avg_ms shapes), and GET /api/health/daily-summary
-# surfaces the same. Needs HEALTH_PUSH_TOKEN (the push route is token-gated); SKIPs gracefully
+# legacy "heart_rate_variability"/data.avg_ms shapes), and GET /api/fitness/daily-summary
+# surfaces the same. Needs FITNESS_PUSH_TOKEN (the push route is token-gated); SKIPs gracefully
 # when unset. Snapshots + restores board/data/cases.json (healthEntries + settings.addons live
 # there → net-zero). Skipped when no board.
 echo
-echo "--- [10i] api-health-push (live board) ----------------------"
+echo "--- [10i] api-fitness-push (live board) ---------------------"
 if [ "${BOARD_UP}" -eq 1 ]; then
-  if CRM_BASE_URL="${BASE}" HEALTH_PUSH_TOKEN="${HEALTH_PUSH_TOKEN}" node "${SCRIPT_DIR}/api-health-push.mjs"; then
-    echo "api-health-push: PASS"
+  if CRM_BASE_URL="${BASE}" FITNESS_PUSH_TOKEN="${FITNESS_PUSH_TOKEN}" node "${SCRIPT_DIR}/api-fitness-push.mjs"; then
+    echo "api-fitness-push: PASS"
   else
-    echo "api-health-push: FAIL"
+    echo "api-fitness-push: FAIL"
     fail=1
-    fail_reasons="${fail_reasons} api-health-push"
+    fail_reasons="${fail_reasons} api-fitness-push"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."

@@ -185,7 +185,7 @@ Each of these was a real mistake in the feature this skill reviews. Don't repeat
 
 - **Standalone store.** `board/lib/health-store.ts` + a separate data file — re-implementing what
   `cases.json` gives free and **losing SSE + backup + attribution**. → Fold onto `DBShape`;
-  retire the standalone store. (Repoint every `@/lib/health-store` import to `@/lib/health`.)
+  retire the standalone store. (Repoint every `@/lib/health-store` import to `@/lib/fitness`.)
 - **Unregistered feature.** Pages + routes shipped with **no `ADDON_REGISTRY` entry**, so no
   catalog row, no toggle, no gate. → One manifest gives all of it.
 - **Ungated writes.** Mutations with no `assertAddonEnabled` (or the check only at the route edge,

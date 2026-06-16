@@ -31,6 +31,7 @@ import { useLiveBoard } from "@/lib/use-live-board";
 import {
   IconChef,
   IconHeart,
+  IconRunner,
   IconBolt,
   IconWarning,
   IconCheckCircle,
@@ -45,6 +46,7 @@ import type { ComponentType, SVGProps } from "react";
 const ADDON_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   IconChef,
   IconHeart,
+  IconRunner,
 };
 
 export function AddonsView({ initial }: { initial: AddonView[] }) {

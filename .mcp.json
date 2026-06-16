@@ -28,7 +28,7 @@
       "type": "http",
       "url": "http://localhost:8007/mcp"
     },
-    "health": {
+    "fitness": {
       "type": "http",
       "url": "http://localhost:8011/mcp"
     }

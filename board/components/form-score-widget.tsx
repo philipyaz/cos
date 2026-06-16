@@ -48,7 +48,7 @@ export function FormScoreWidget() {
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
-    fetch(`/api/athlete/form-score?date=${today}`)
+    fetch(`/api/fitness/form-score?date=${today}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setData(d))
       .catch(() => {})

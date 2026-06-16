@@ -15,9 +15,9 @@ writes; turning it off hides the nav and refuses new writes — while the data i
 **readable** the whole time.
 
 So far there are **two** add-ons — **[Nutrition & Chef](../features/nutrition.md)** (the food log,
-the pantry, and the meal plan) and **[Health & Athlete](../features/health.md)** (Apple Watch
+the pantry, and the meal plan) and **[Fitness](../features/fitness.md)** (Apple Watch
 ingestion + an AI training coach) — but the framework is built to take more. This page is the
-framework; the two feature pages are the worked examples. (Health & Athlete also exercises the
+framework; the two feature pages are the worked examples. (Fitness also exercises the
 [optional inter-add-on dependency](#optional-inter-add-on-dependencies-dependson) — it reads
 nutrition's food log when it is present.)
 
@@ -178,26 +178,26 @@ add-on data is indistinguishable from a pre-add-on board.
 The framework is generic; the registry currently holds two literal entries, each a different shape of
 the same four-layer slice:
 
-| | **[Nutrition & Chef](../features/nutrition.md)** | **[Health & Athlete](../features/health.md)** |
+| | **[Nutrition & Chef](../features/nutrition.md)** | **[Fitness](../features/fitness.md)** |
 |---|---|---|
-| `id` | `nutrition` | `health` |
+| `id` | `nutrition` | `fitness` |
 | Owned **arrays** (`dataArrays`) | `foodLogs`, `pantryItems`, `mealPlanEntries`, `weights` | `healthEntries` |
 | Singleton (not in `dataArrays`) | `db.nutritionGoal` | `db.athleteProfile` |
 | Schema versions | v9 (the three diary arrays) + v10 (weight-loss) | v11 (`healthEntries` + `athleteProfile`) |
-| API prefixes | `/api/nutrition` | `/api/health`, `/api/athlete` |
-| MCP server / bridge port | `nutrition` / `:8007` | `health` / `:8011` |
+| API prefixes | `/api/nutrition` | `/api/fitness` |
+| MCP server / bridge port | `nutrition` / `:8007` | `fitness` / `:8011` |
 | The "intelligence" | calorie estimation — in the **operator skill** | AI coaching — in the **route** (forced-tool Claude calls) |
 | `dependsOn` | — | **soft** edge → `nutrition` |
 
 The two diverge on two instructive points, both inside the framework's rules rather than around them:
 
 - **Where the gated write authenticates.** Nutrition's writes attribute a `human` / `agent` **actor**
-  on the activity log, the board default. Health's central ingest — `POST /api/health/push` — is a
-  machine-to-machine push off the watch, so it authenticates with a **shared-secret `x-health-token`
+  on the activity log, the board default. Fitness's central ingest — `POST /api/fitness/push` — is a
+  machine-to-machine push off the watch, so it authenticates with a **shared-secret `x-fitness-token`
   header** instead of an actor. The **add-on gate is identical** either way (`assertAddonEnabled`
-  inside `mutate()`); only the *identity* shape differs. (See [Health & Athlete](../features/health.md)
+  inside `mutate()`); only the *identity* shape differs. (See [Fitness](../features/fitness.md)
   for the HAE ingest + token model.)
-- **An inter-add-on dependency.** Health's AI coach folds in nutrition's food log when it is present —
+- **An inter-add-on dependency.** Fitness's AI coach folds in nutrition's food log when it is present —
   the first use of the optional `dependsOn` field below.
 
 ## Optional inter-add-on dependencies (`dependsOn`)
@@ -209,8 +209,8 @@ dependsOn?: { id: string; required: boolean }[];
 ```
 
 Today every edge is **soft** (`required: false`). A soft edge means: this add-on **reads** another
-add-on's core-store data and works **better** with it, but **degrades gracefully** without it. Health
-& Athlete declares `dependsOn: [{ id: "nutrition", required: false }]` — the daily summary and the
+add-on's core-store data and works **better** with it, but **degrades gracefully** without it. Fitness
+declares `dependsOn: [{ id: "nutrition", required: false }]` — the daily summary and the
 weekly review read `db.foodLogs` to fold nutrition into the coaching context (calories in vs. workout
 calories out), and simply have nothing to fold when nutrition is absent.
 
@@ -240,8 +240,8 @@ comment on the `dependsOn` member for the full posture).
 - **[Nutrition & Chef](../features/nutrition.md)** — the first worked example: the food log, pantry,
   meal plan, and weight-loss verticals, the data model, the routes, the 19 MCP tools, and the operator
   skill.
-- **[Health & Athlete](../features/health.md)** — the second worked example: Apple Watch HAE ingestion
-  + the `x-health-token` push, the canonical health taxonomy, the AI coach, and the soft nutrition
+- **[Fitness](../features/fitness.md)** — the second worked example: Apple Watch HAE ingestion
+  + the `x-fitness-token` push, the canonical health taxonomy, the AI coach, and the soft nutrition
   dependency.
 - **[MCP servers](mcp-servers.md)** — the bridge topology and the child-lifecycle contract the add-on
   bridge inherits.

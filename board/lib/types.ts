@@ -101,7 +101,7 @@ export const VALID_BIOLOGICAL_SEX: BiologicalSex[] = ["male", "female"];
 // context — a still-owed reply is the same message carrying a status flag) — additive
 // optionals, read-compatible, migrate() is a no-op (the messages[] array rides through
 // verbatim); an absent needsAnswer === not flagged. Unanswered === needsAnswer && !answeredAt.
-// v12 adds the Health & Athlete add-on data: db.healthEntries (HealthEntry[], the Apple
+// v12 adds the Fitness add-on data: db.healthEntries (HealthEntry[], the Apple
 // Watch time-series) AND db.athleteProfile (a SINGLETON AthleteProfile object, NOT an
 // array) — purely additive; old v11 files read unchanged (healthEntries defaults to [],
 // athleteProfile absent === no profile set). New enums: HealthEntryType, AthleteGoal,
@@ -437,18 +437,19 @@ export interface NutritionGoal {
   updatedAt: string;
 }
 
-// ── Health & Athlete add-on records (v12) ─────────────────────────────────────
-// The "health" add-on stores its data in the CORE store (cases.json) alongside the
+// ── Fitness add-on records (v12) ──────────────────────────────────────────────
+// The "fitness" add-on stores its data in the CORE store (cases.json) alongside the
 // nutrition records — db.healthEntries (the Apple Watch time-series) and db.athleteProfile
-// (the singleton training profile). Both ride the same mutate() chokepoint + version
-// counter (so they get SSE live-update, the off-site backup, and actor attribution for
-// free) and are gated by Settings.addons.health (a disabled add-on's data stays on disk +
-// readable, only its WRITES are refused — see lib/addons.ts).
+// (the singleton training profile). The data fields keep their descriptive names (health
+// entries, athlete profile); the add-on IDENTITY is "fitness". Both ride the same mutate()
+// chokepoint + version counter (so they get SSE live-update, the off-site backup, and actor
+// attribution for free) and are gated by Settings.addons.fitness (a disabled add-on's data
+// stays on disk + readable, only its WRITES are refused — see lib/addons.ts).
 
 // The canonical health-entry taxonomy — ONE source of truth shared by the ingest route
-// (board/app/api/health/push), the store helpers (board/lib/health.ts), every consumer
-// (daily-summary, the athlete scoring/AI routes), and MIRRORED — with a lockstep comment —
-// in the health MCP server (mcp/health-server/server.mjs). These are the KNOWN types; the
+// (board/app/api/fitness/push), the store helpers (board/lib/fitness.ts), every consumer
+// (daily-summary, the fitness scoring/AI routes), and MIRRORED — with a lockstep comment —
+// in the fitness MCP server (mcp/fitness-server/server.mjs). These are the KNOWN types; the
 // ingest route also stores unmapped Health Auto Export metric names verbatim (so a new HAE
 // export never loses data), hence HealthEntry.type is a plain string, not this union.
 export type HealthEntryType =

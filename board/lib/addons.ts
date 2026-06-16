@@ -90,38 +90,43 @@ const NUTRITION_ADDON: AddonManifest = {
   },
 };
 
-// The second add-on: Health & Athlete. ONE vertical spanning two surfaces — Apple Watch
-// health ingestion + dashboard (/health) and the athlete training profile + AI coach
-// (/athlete) — behind one flag, one bridge, one setup skill. Its data lives in the core
-// store: db.healthEntries (the Apple Watch time-series, the owned ARRAY) plus
-// db.athleteProfile — a SINGLETON object (the training profile), intentionally NOT listed
-// in dataArrays since it is not an array (exactly like nutrition's db.nutritionGoal). All
-// of it shares the single per-add-on gate (Settings.addons.health.enabled). It SOFT-depends
-// on Nutrition: the daily-summary + weekly-review read db.foodLogs to fold nutrition into
-// the coaching context, but degrade gracefully when Nutrition is off (see dependsOn).
-const HEALTH_ADDON: AddonManifest = {
-  id: "health",
-  title: "Health & Athlete",
+// The second add-on: Fitness. ONE vertical under a single /fitness surface + /api/fitness
+// prefix — Apple Watch health ingestion + dashboard (/fitness/health), the athlete training
+// profile, and the AI coach (training plan, weekly review, pre-workout brief, correlations) —
+// behind one flag, one bridge, one setup skill. Its data lives in the core store:
+// db.healthEntries (the Apple Watch time-series, the owned ARRAY) plus db.athleteProfile — a
+// SINGLETON object (the training profile), intentionally NOT listed in dataArrays since it is
+// not an array (exactly like nutrition's db.nutritionGoal). The data fields keep their
+// descriptive names (health entries, athlete profile) — the add-on IDENTITY is "fitness", the
+// data it owns is still health/athlete data (mirrors nutrition owning foodLogs/weights). All
+// of it shares the single per-add-on gate (Settings.addons.fitness.enabled). It SOFT-depends
+// on Nutrition: daily-summary + weekly-review read db.foodLogs to fold nutrition into the
+// coaching context, but degrade gracefully when Nutrition is off (see dependsOn).
+const FITNESS_ADDON: AddonManifest = {
+  id: "fitness",
+  title: "Fitness",
   description: "Ingest Apple Watch health data, keep an athlete profile, and get AI training coaching.",
-  icon: "IconHeart",
+  icon: "IconRunner",
   navItems: [
-    { href: "/health", label: "Health", icon: "IconHeart" },
-    { href: "/athlete", label: "Athlete", icon: "IconRunner" },
-    { href: "/athlete/training-plan", label: "Training Plan", icon: "IconCalendar" },
-    { href: "/athlete/weekly-review", label: "Weekly Review", icon: "IconTrend" },
-    { href: "/athlete/pre-workout-brief", label: "Pre-Workout Brief", icon: "IconBolt" },
-    { href: "/athlete/correlations", label: "Correlations", icon: "IconSpark" },
+    { href: "/fitness", label: "Overview", icon: "IconRunner" },
+    { href: "/fitness/health", label: "Health Data", icon: "IconHeart" },
+    { href: "/fitness/training-plan", label: "Training Plan", icon: "IconCalendar" },
+    { href: "/fitness/weekly-review", label: "Weekly Review", icon: "IconTrend" },
+    { href: "/fitness/pre-workout-brief", label: "Pre-Workout Brief", icon: "IconBolt" },
+    { href: "/fitness/correlations", label: "Correlations", icon: "IconSpark" },
   ],
-  apiPrefixes: ["/api/health", "/api/athlete"],
+  apiPrefixes: ["/api/fitness"],
   // Owned db ARRAYS only. db.athleteProfile (the v11 training-profile singleton) is a bare
   // object, not an array, so it is deliberately omitted here (mirrors db.nutritionGoal).
   dataArrays: ["healthEntries"],
   dependsOn: [{ id: "nutrition", required: false }],
   mcp: {
-    server: "health",
-    bridgePortVar: "HEALTH_BRIDGE_PORT",
+    server: "fitness",
+    bridgePortVar: "FITNESS_BRIDGE_PORT",
     defaultPort: 8011,
-    setupSkill: "health-mcp-setup",
+    setupSkill: "fitness-mcp-setup",
+    // Tool names stay health-descriptive (they act on health data), exactly as nutrition's
+    // tools are log_food/read_pantry — a tool name describes its action, not the add-on id.
     tools: [
       "push_health_data",
       "list_health_data",
@@ -135,7 +140,7 @@ const HEALTH_ADDON: AddonManifest = {
 };
 
 // The static add-on registry — one entry per add-on. Order is the catalog/display order.
-export const ADDON_REGISTRY: AddonManifest[] = [NUTRITION_ADDON, HEALTH_ADDON];
+export const ADDON_REGISTRY: AddonManifest[] = [NUTRITION_ADDON, FITNESS_ADDON];
 
 // Every known add-on (the full registry).
 export function listAddons(): AddonManifest[] {
