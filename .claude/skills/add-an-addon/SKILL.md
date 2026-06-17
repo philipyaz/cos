@@ -32,6 +32,18 @@ are always-on, never gated), or a pure agent-skill with no new data/nav/routes.
 ## The mental model (memorise this)
 
 > **One four-layer slice, gated by ONE flag. Writes close; reads stay open.**
+> **A component is a STATE MACHINE — it never calls an LLM; the agent is the intelligence.**
+
+An add-on is a **deterministic state machine**: it persists state and exposes it via an **API + an
+MCP server**, and that is the whole contract. It **does NOT call an LLM / the Anthropic API.** Any
+generative step (a training plan, a summary, a drafted reply) is produced by the **external agent**
+(your operator skill, Claude Cowork) and written back through an **MCP write tool** / a `POST`; the
+add-on only validates, versions, attributes, stores, and serves it. Deterministic **server-side
+compute** (stats, projections, aggregations) is fine — only **generative LLM inference** is
+delegated. **The sole exception in the whole repo is the vault MCP (`mcp/vault-server`)**, which
+embeds the Claude Agent SDK and is itself an agent. If you catch yourself reaching for
+`@anthropic-ai/sdk` (or any LLM client) inside an add-on route or MCP server, **stop** — that
+generative step belongs in the agent's context, not the component.
 
 - **Four layers:** **nav** + **API** + **data** + **MCP server** — the same machinery the core
   uses, parametrised by an `AddonManifest`. Nothing about an add-on is special-cased.
@@ -88,10 +100,12 @@ For each resource under `board/app/api/<prefix>/`:
 - **NEVER call a sibling route over loopback HTTP.** No `fetch` to your own `/api/*`. If two
   routes share logic, extract a function into `board/lib/<x>.ts` and call it **in-process**.
 - **Zero `console.log`** in `board/app/api` — and absolutely no logging of user/biometric data.
-- If a route runs an **LLM** (a coach/summary endpoint), it is still a normal gated route:
-  harden the call (validate the model's JSON **before** it reaches a store write — never persist
-  raw model output), add a `cache_control` breakpoint on the stable prefix, and keep the model id
-  in one place. **Check the `claude-api` skill before touching any Anthropic/Claude call.**
+- **A route NEVER calls an LLM.** The component is a state machine; the **agent** generates. A
+  "coach/summary" endpoint is a **CRUD seam** that **accepts** an already-generated artifact (the
+  agent built it in its own context and `POST`s it) — validate the artifact's JSON **before** the
+  store write (never persist an unvalidated body), version it, attribute it, store it. Deterministic
+  **compute** (stats, a projection, an aggregator in `board/lib/<x>.ts`) is fine — only *generative
+  inference* is off-limits. The **vault MCP is the one exception** (it embeds the Agent SDK).
 
 ### 4. Nav — from the manifest only
 
@@ -103,8 +117,9 @@ hardcodes them on for everyone and defeats the gate.
 
 Create `mcp/<name>-server/server.mjs` using **`packages/mcp-kit`** (`err`, `text`, `str`,
 `start`, `baseUrl`, `makeBoardApi`) — copy `mcp/nutrition-server/server.mjs`. Every tool is a
-thin `fetch` over your `/api/*` routes on `CRM_BASE_URL`; **no business logic in the MCP** (the
-intelligence lives in the operator skill or the route). Every WRITE tool sends
+thin `fetch` over your `/api/*` routes on `CRM_BASE_URL`; **no business logic and NO LLM calls in
+the MCP** (the intelligence lives in the operator skill / the agent; the vault MCP is the one server
+that embeds an LLM, and it is the exception, not the template). Every WRITE tool sends
 `{ actor: "agent" }` + an `x-actor: agent` header. A disabled add-on 404s writes → surface as a
 `Not found.` tool error. Adding a new `mcp/<x>-server` makes it a **root npm workspace member**:
 run `npm install` at the repo root and **commit `package-lock.json`**, or CI's `npm ci` fails.
@@ -168,8 +183,9 @@ When your add-on **reads** another add-on's data (e.g. a coach folding in the fo
 - [ ] Routes reuse `isISODate` / `resolveActor` / `storeErrorToResponse`; **no re-inline**.
 - [ ] **No loopback `fetch`** to own `/api/*`; shared logic in `board/lib/<x>.ts`, in-process.
 - [ ] **Zero `console.log`** in `board/app/api`; no PII/biometric logging.
-- [ ] Any LLM call: validate model JSON **before** any store write; `cache_control` breakpoint;
-      model id in one place; `claude-api` skill consulted.
+- [ ] **No LLM client** imported anywhere in the add-on (route OR MCP) — the component is a state
+      machine; the agent generates and `POST`s. Any "coach" route is a CRUD seam that **validates
+      the artifact JSON before the store write**. (Vault is the sole LLM-bearing server.)
 - [ ] Nav from manifest only; **core sidebar array untouched**.
 - [ ] MCP = thin `mcp-kit` fetch wrapper; `{ actor: "agent" }` on writes; `npm install` at root +
       `package-lock.json` committed.
@@ -200,9 +216,16 @@ Each of these was a real mistake in the feature this skill reviews. Don't repeat
   instead of the canonical contract — **tests must assert the contract**, or they certify the bug.
 - **Loopback self-calls.** A route `fetch`-ing its sibling `/api/*` over HTTP. → Extract to
   `board/lib/<x>.ts`, call in-process.
-- **Re-inlined helpers + unvalidated LLM JSON.** Date checks re-written instead of `isISODate`;
-  raw model output written **straight to the store**. → Reuse route-helpers; validate model JSON
-  before any write.
+- **Re-inlined helpers + unvalidated artifact JSON.** Date checks re-written instead of `isISODate`;
+  an agent-supplied artifact body written **straight to the store** without validation. → Reuse
+  route-helpers; validate the artifact shape before any write (raw bodies are never trusted).
+- **An LLM call inside a component.** A route or MCP server that imports `@anthropic-ai/sdk` and
+  generates a plan/summary/reply server-side — turning a state machine into a key-bearing,
+  offline-broken, non-deterministically-testable thing. (This is exactly what the fitness add-on's
+  removed board-side `GET /api/fitness/training-plan|weekly-review|pre-workout-brief` generate
+  routes did.) → **Delegate generation to the agent**; expose a **CRUD seam** (`POST
+  /api/fitness/coaching` + the `save_*` MCP tools) that accepts the agent's already-generated,
+  validated artifact and persists it. The **vault MCP** is the only server that may embed an LLM.
 - **Debug PII logging.** `console.log` of biometric data in API routes. → Zero `console.log`.
 - **Silent missed-day data drop.** The HAE ingest converter kept only *today's* points and
   discarded the rest of the re-sent history, so a single missed sync lost those days **permanently**

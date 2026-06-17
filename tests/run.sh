@@ -99,6 +99,15 @@
 #      NON-EMPTY sleep + hrv (reading canonical type "sleep_night"/"hrv" + data.value) and
 #      GET /api/fitness/daily-summary surfaces them. Needs FITNESS_PUSH_TOKEN. Snapshots+restores
 #      cases.json. Skipped when no board.
+#  10j. api-fitness-coaching — ONLY if a board is running: full CRUD + gate + upsert + token
+#      contract for the "fitness" add-on's STATEFUL coaching artifacts (/api/fitness/coaching[/:id]
+#      + db.coachingArtifacts). With the add-on ENABLED a tokened POST mints a COACH-<n> artifact
+#      (201, created:true); GET ?kind=training_plan lists it; GET-by-id reads it back; a re-POST
+#      for the SAME (kind, periodKey) UPSERTS (created:false, same id — exactly one row per week,
+#      no duplicate); a POST WITHOUT x-fitness-token → 401 (edge token gate); the GATE (a DISABLED
+#      add-on 404s the tokened POST while GET stays 200 — reads open); DELETE with the token drops
+#      the id (a re-GET 404s). Needs FITNESS_PUSH_TOKEN; SKIPs when unset. Snapshots+restores
+#      cases.json (coachingArtifacts + settings.addons live there). Skipped when no board.
 #  11. api-trust — ONLY if a board is running: drives the guard sender-trust
 #      WHITELIST API via the board's thin PROXY routes (/api/trust[/:email] →
 #      the guard sidecar :8009): GET always-200 online shape, add (default
@@ -716,6 +725,31 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-fitness-push: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-fitness-push"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10j. api-fitness-coaching (only when a board is healthy) ----------------
+# Full CRUD + gate + upsert + token contract for the "fitness" add-on's STATEFUL coaching
+# artifacts (/api/fitness/coaching[/:id] + db.coachingArtifacts) with the add-on ENABLED:
+# a tokened POST mints a COACH-<n> artifact (201, created:true); GET ?kind=training_plan lists
+# it (total >= 1); GET-by-id reads it back; a re-POST for the SAME (kind, periodKey) UPSERTS
+# (created:false, same id — the list still holds EXACTLY ONE training_plan for that week, no
+# duplicate); a POST WITHOUT x-fitness-token → 401 (edge token gate); the GATE (a DISABLED
+# add-on 404s the tokened POST while GET stays 200 — reads open); re-enable then DELETE with
+# the token → ok and a re-GET 404s. Needs FITNESS_PUSH_TOKEN (the coaching writes are
+# token-gated); SKIPs gracefully when unset. Snapshots + restores board/data/cases.json
+# (coachingArtifacts + settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10j] api-fitness-coaching (live board) -----------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" FITNESS_PUSH_TOKEN="${FITNESS_PUSH_TOKEN}" node "${SCRIPT_DIR}/api-fitness-coaching.mjs"; then
+    echo "api-fitness-coaching: PASS"
+  else
+    echo "api-fitness-coaching: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-coaching"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."

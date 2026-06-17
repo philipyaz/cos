@@ -17,6 +17,39 @@ sidecar ports + URLs, etc.) so nothing is hardcoded. The `config/` dir splits by
 (machine paths/ports, gitignored), `secrets.env` (the Anthropic API key), `settings.json` (board prefs),
 and `auto-sync.json` (router switch); only the `*.example` files are committed.
 
+## Architecture philosophy — Cos is a state machine; agents are the intelligence
+
+Internalise this before you build anything. **Every component — the `board/` and every add-on —
+is a deterministic STATE MACHINE.** It owns and persists its state (on `cases.json`, through the
+single `mutate()` chokepoint) and exposes that state two ways: a **rich, fully-typed HTTP API**
+(`/api/*`) and a **stdio MCP server** (`mcp/<name>-server/`). Those two surfaces are the *whole*
+contract — any external agent (Claude Code, Claude Cowork, a cron routine) can **read AND write
+every functionality natively** through them.
+
+**Components do NOT call an LLM / the Anthropic API.** Any generative or "intelligent" step —
+generate a training plan, draft a reply, summarize a week — happens in the **external agent's
+context**, and the agent writes the structured result back through the API/MCP. The component only
+**validates, versions (SSE), attributes (`human` vs `agent`), stores, and serves** it.
+
+- **Worked example:** the fitness add-on does **not** generate a training plan. The *agent*
+  generates it (e.g. via the `fitness-coach` skill, reading the health + profile data through the
+  MCP) and persists it via the `save_training_plan` MCP tool / `POST /api/fitness/coaching`. The
+  board validates the shape, upserts it by period into `db.coachingArtifacts`, attributes it, and
+  serves it back as a history feed. The board never calls Claude.
+- **Why it matters:** components stay **key-free, offline-capable, deterministically testable, and
+  composable**. A new feature is "done" when it is a **state machine with an API + MCP** — not when
+  it has a clever prompt. (Deterministic **server-side compute** is fine — e.g. the correlations
+  stats, Pearson + linear regression. Only **generative LLM inference** is delegated to the agent.)
+- **THE ONE EXCEPTION — the vault MCP.** `mcp/vault-server` embeds the **Claude Agent SDK** and
+  legitimately runs LLM calls server-side (ingest/query) — it is **itself an agent**, not a
+  state-machine component. The `ANTHROPIC_API_KEY` in `config/secrets.env` exists **solely** for
+  the vault; **no other component reads it**.
+
+**Building a new component/add-on?** Make it a state machine: persist state on the core store,
+expose an **API + an MCP server**, and **never import an LLM client** — delegate any generative step
+to the agent via an MCP write tool. Follow the [`add-an-addon`](.claude/skills/add-an-addon/SKILL.md)
+skill.
+
 ## Documentation — write it in MkDocs, not loose Markdown
 
 All project documentation lives in the **MkDocs site** (`docs/`, Material theme, config in

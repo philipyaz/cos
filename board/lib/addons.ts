@@ -117,8 +117,10 @@ const FITNESS_ADDON: AddonManifest = {
   ],
   apiPrefixes: ["/api/fitness"],
   // Owned db ARRAYS only. db.athleteProfile (the v11 training-profile singleton) is a bare
-  // object, not an array, so it is deliberately omitted here (mirrors db.nutritionGoal).
-  dataArrays: ["healthEntries"],
+  // object, not an array, so it is deliberately omitted here (mirrors db.nutritionGoal). The
+  // v12 db.coachingArtifacts array holds the FOUR stateful AI coaching surfaces (training
+  // plan / weekly review / pre-workout brief / correlations), upserted by (kind, periodKey).
+  dataArrays: ["healthEntries", "coachingArtifacts"],
   dependsOn: [{ id: "nutrition", required: false }],
   mcp: {
     server: "fitness",
@@ -135,6 +137,20 @@ const FITNESS_ADDON: AddonManifest = {
       "delete_health_data",
       "get_health_trends",
       "ingest_health_to_vault",
+      // Athlete profile singleton (token-gated set; ungated get) + the two board-computed
+      // signals the coach interprets (form score, sleep/performance correlations; ungated).
+      "get_athlete_profile",
+      "set_athlete_profile",
+      "get_form_score",
+      "get_correlations",
+      // v12 stateful coaching artifacts (token-gated writes; ungated reads).
+      "save_training_plan",
+      "save_weekly_review",
+      "save_pre_workout_brief",
+      "save_correlation_report",
+      "list_coaching_artifacts",
+      "get_coaching_artifact",
+      "delete_coaching_artifact",
     ],
   },
 };

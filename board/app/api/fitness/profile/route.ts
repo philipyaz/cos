@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getProfile, setProfile } from "@/lib/fitness";
+import { setProfile } from "@/lib/fitness";
+import { readDB } from "@/lib/store";
 import { storeErrorToResponse, isISODate } from "@/lib/route-helpers";
 import {
   VALID_ATHLETE_GOAL,
@@ -16,8 +17,10 @@ export const dynamic = "force-dynamic";
 // GET /api/fitness/profile — the athlete training-profile singleton, read from the store (cases.json),
 // or { profile: null } when none is set. Ungated.
 export async function GET() {
-  const profile = await getProfile();
-  return NextResponse.json({ profile });
+  // Read db once at the route level so we can return version (db.version) alongside the
+  // profile — additive, lets views wire useLiveBoard without changing getProfile's signature.
+  const db = await readDB();
+  return NextResponse.json({ profile: db.athleteProfile ?? null, version: db.version });
 }
 
 const posIntOrNull = (v: unknown, lo: number, hi: number): number | null =>

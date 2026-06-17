@@ -14,9 +14,19 @@
 // HealthEntryType + the data.value/data.metadata shape the ingest route produces). The
 // aggregators below MUST stay in lockstep with what board/app/api/fitness/push writes.
 
-import { mutate, readDB, setAthleteProfile } from "./store";
+import {
+  mutate,
+  readDB,
+  setAthleteProfile,
+  upsertCoachingArtifact,
+  findCoachingArtifact,
+  applyCoachingArtifactUpdate,
+  removeCoachingArtifact,
+  NotFoundError,
+} from "./store";
 import { assertAddonEnabled } from "./addons";
-import type { HealthEntry, AthleteProfile } from "./types";
+import type { HealthEntry, AthleteProfile, CoachingArtifact } from "./types";
+import type { CoachingArtifactInput } from "./fitness-artifacts";
 
 const HEALTH_ADDON_ID = "fitness";
 const RETENTION_DAYS = 90;
@@ -263,6 +273,93 @@ export async function setProfile(
     assertAddonEnabled(db, HEALTH_ADDON_ID);
     const profile = setAthleteProfile(db, input);
     return { profile, version: db.version };
+  });
+}
+
+// ── Coaching artifacts (v12) — gated writes / ungated reads ─────────────────────
+// The "fitness" add-on's FOUR AI coaching surfaces are STATEFUL: persisted in ONE
+// polymorphic array (db.coachingArtifacts), upserted by (kind, periodKey). Writes funnel
+// through mutate() with assertAddonEnabled FIRST (a disabled add-on → NotFoundError → 404);
+// reads stay open. The caller passes an already-validated input (lib/fitness-artifacts.ts).
+
+/**
+ * Create-or-replace a coaching artifact (upsert by kind+periodKey). GATED (disabled add-on
+ * → 404). Returns the artifact, whether it was newly created, and the post-write version.
+ */
+export async function saveCoachingArtifact(
+  input: CoachingArtifactInput,
+): Promise<{ artifact: CoachingArtifact; version: number; created: boolean }> {
+  return mutate((db) => {
+    assertAddonEnabled(db, HEALTH_ADDON_ID);
+    const r = upsertCoachingArtifact(db, input);
+    return { artifact: r.artifact, created: r.created, version: db.version };
+  });
+}
+
+/**
+ * List coaching artifacts, newest-first by createdAt. Ungated read. `kind` filters exact;
+ * `from`/`to` compare against createdAt's date-only prefix (from inclusive ">=", to exclusive
+ * "<"). `total` is the count BEFORE the limit; default limit 50 (limit<=0 means no limit).
+ */
+export async function listCoachingArtifacts(opts: {
+  kind?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}): Promise<{ items: CoachingArtifact[]; total: number; version: number }> {
+  const db = await readDB();
+  let items = db.coachingArtifacts ?? [];
+
+  if (opts.kind) items = items.filter((x) => x.kind === opts.kind);
+  if (opts.from) items = items.filter((x) => x.createdAt.slice(0, 10) >= opts.from!);
+  if (opts.to) items = items.filter((x) => x.createdAt.slice(0, 10) < opts.to!);
+
+  items = [...items].sort((a, b) => (a.createdAt > b.createdAt ? -1 : a.createdAt < b.createdAt ? 1 : 0));
+
+  const total = items.length;
+  const limit = opts.limit ?? 50;
+  if (limit > 0) items = items.slice(0, limit);
+
+  return { items, total, version: db.version };
+}
+
+/** Read one coaching artifact by id, or null when missing. Ungated read. */
+export async function getCoachingArtifact(
+  id: string,
+): Promise<{ artifact: CoachingArtifact | null; version: number }> {
+  const db = await readDB();
+  return { artifact: findCoachingArtifact(db, id) ?? null, version: db.version };
+}
+
+/**
+ * Patch a coaching artifact (present-keys-only). GATED (disabled add-on → 404). Throws
+ * NotFoundError when no artifact matches the id.
+ */
+export async function updateCoachingArtifact(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<{ artifact: CoachingArtifact; version: number }> {
+  return mutate((db) => {
+    assertAddonEnabled(db, HEALTH_ADDON_ID);
+    const rec = findCoachingArtifact(db, id);
+    if (!rec) throw new NotFoundError(`Coaching artifact ${id} not found`);
+    const artifact = applyCoachingArtifactUpdate(rec, patch);
+    return { artifact, version: db.version };
+  });
+}
+
+/**
+ * Delete a coaching artifact by id. GATED (disabled add-on → 404). Throws NotFoundError when
+ * no artifact matches the id.
+ */
+export async function deleteCoachingArtifact(
+  id: string,
+): Promise<{ deleted: boolean; version: number }> {
+  return mutate((db) => {
+    assertAddonEnabled(db, HEALTH_ADDON_ID);
+    const deleted = removeCoachingArtifact(db, id);
+    if (!deleted) throw new NotFoundError(`Coaching artifact ${id} not found`);
+    return { deleted, version: db.version };
   });
 }
 

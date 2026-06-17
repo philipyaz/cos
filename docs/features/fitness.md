@@ -13,14 +13,21 @@ skill:
   resting heart rate, steps, VO₂max — ingested off your phone and read back as a daily summary,
   trends, and a Markdown report.
 - **`/fitness` — the coach.** A singleton training profile (your goal, level, available days,
-  equipment) that feeds an **AI coach**: a weekly training plan, a weekly review, a pre-workout
-  brief, a daily form score, and sleep/performance correlations.
+  equipment) that feeds **AI coaching** — a weekly training plan, a weekly review, a pre-workout
+  brief, a daily form score, and sleep/performance correlations. The generative coaching is produced
+  by the **external agent** and persisted back to the board (the board itself never calls an LLM);
+  the form score and correlations are the board's own deterministic compute.
 
-The division of labour mirrors the rest of Cos: the **human reads** the views at a glance; data
-**writes in** from the watch (via a token-gated push) and the **agent reads** through the fitness
-MCP. The one piece of genuine intelligence — turning raw biometrics into coaching — lives in the
-**AI coaching routes** (forced-tool calls to Claude), not in the MCP, which stays a thin fetch
-wrapper.
+The division of labour mirrors the rest of Cos — and follows the
+[founding philosophy](https://github.com/philipyaz/cos/blob/main/CLAUDE.md):
+**the board is a state machine; the agent is the intelligence.** The **human reads** the views at a
+glance; data **writes in** from the watch (via a token-gated push); and the one piece of genuine
+intelligence — turning raw biometrics into a plan, a review, a brief — lives in the **external agent**
+(e.g. the `fitness-coach` skill), **not on the board**. The board **never calls an LLM**: the agent
+generates a coaching artifact in its own context and **persists it back** through the fitness MCP's
+`save_*` tools / `POST /api/fitness/coaching`, and the board validates, versions, attributes, stores,
+and serves it. Correlations are the one coaching surface the board produces itself — because they are
+**deterministic compute** (Pearson + linear regression), not generative inference.
 
 ## It rides the core store — so it is cheap
 
@@ -29,6 +36,9 @@ Like [nutrition](nutrition.md) and the [calendar](calendar.md), fitness is **not
 
 - **`db.healthEntries[]`** — the Apple Watch time-series (the owned **array**), written through the
   **same serialized `mutate()` chokepoint** as cases and events.
+- **`db.coachingArtifacts[]`** — the persisted AI coaching outputs (training plans, weekly reviews,
+  pre-workout briefs, correlation reports), a **second owned array** (v12 — see
+  [Coaching artifacts are persisted & externally-creatable](#coaching-artifacts-are-persisted-externally-creatable)).
 - **`db.athleteProfile`** — the training profile, a **singleton object** (not an array, so —
   exactly like nutrition's `db.nutritionGoal` — it is intentionally **not** in the add-on's
   `dataArrays`).
@@ -37,9 +47,10 @@ So the add-on inherits the board's machinery for free: the monotonic **`version`
 **SSE live-refresh** (a watch push or an MCP read lands on the read-only view without a reload),
 the timestamped **daily backup** (the data rides `cases.json`, so it is snapshotted whole), and the
 **actor attribution** baseline. The schema bump to **v11** (`db.healthEntries` + `db.athleteProfile`)
-is **purely additive** — old v10 files read unchanged, the array defaults to `[]`, the profile is
-simply absent until you set one, and a board with the add-on disabled is indistinguishable from a
-pre-add-on board. (See [Add-ons](../architecture/addons.md) for why this is the whole point.)
+and then **v12** (`db.coachingArtifacts`) is **purely additive** — old files read unchanged, each new
+array defaults to `[]`, the profile is simply absent until you set one, and a board with the add-on
+disabled is indistinguishable from a pre-add-on board. (See [Add-ons](../architecture/addons.md) for
+why this is the whole point.)
 
 The data and helpers live in
 [`board/lib/types.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/types.ts) (the types +
@@ -133,6 +144,9 @@ usual actor gate:
 | `GET /api/fitness/daily-summary?date=` | one day of health **folded with nutrition** (see below) | ungated |
 | `GET /api/fitness/trends?days=&type=` | per-day series over the last N days | ungated |
 | `GET /api/fitness/report?days=` | a human-readable **Markdown** report (for vault ingestion) | ungated |
+| `GET /api/fitness/coaching?kind=&from=&to=&limit=` | list persisted [coaching artifacts](#coaching-artifacts-are-persisted-externally-creatable) | ungated |
+| `POST /api/fitness/coaching` | upsert one coaching artifact by `(kind, periodKey)` | **`x-fitness-token`** + add-on gate |
+| `GET\|PATCH\|DELETE /api/fitness/coaching/<id>` | read / patch / delete one artifact | reads ungated; writes **`x-fitness-token`** + gate |
 
 ### The `summarize()` contract
 
@@ -156,9 +170,11 @@ a missing key as "nothing logged", never as zero.
 
 ## The athlete sub-surface
 
-`/fitness` is where the raw biometrics become coaching. It hangs off one **singleton profile** and a
-small family of read routes — the [form score](#the-daily-form-score) is a pure helper; the
-[training plan / weekly review / pre-workout brief](#the-ai-coach) are AI calls.
+`/fitness` is where the raw biometrics become coaching. It hangs off one **singleton profile** plus
+two deterministic board computes (the [form score](#the-daily-form-score), a pure helper, and
+[correlations](#correlations), pure stats) — and the **persisted coaching artifacts** (training plan,
+weekly review, pre-workout brief) that the [agent generates and the board stores](#the-coaching-surfaces-are-stateful-artifacts-the-agent-generates-the-board-stores).
+The board does **not** call an LLM here; the agent does the generating.
 
 ### The profile singleton — `AthleteProfile`
 
@@ -197,27 +213,41 @@ sub-scores (HRV, sleep, resting HR, recent load), each 0–100, into one daily *
 with a `level` / `color` / `recommendation`. It is the headline widget on both `/fitness/health` and
 `/fitness`, and the weekly review + pre-workout brief call it **in-process**.
 
-### The AI coach
+### The coaching surfaces are stateful artifacts — the agent generates, the board stores
 
-Three routes turn the profile + recent health (+ nutrition, when present) into structured coaching.
-They share
-[`board/lib/fitness-ai.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/fitness-ai.ts)'s
-hardened `callClaude`:
+The three generative coaching surfaces — the **training plan**, the **weekly review**, and the
+**pre-workout brief** — are **stateful artifacts**, not board-side LLM calls. Following Cos's
+[founding philosophy](https://github.com/philipyaz/cos/blob/main/CLAUDE.md),
+**the board never calls an LLM.** The **agent** (e.g. the
+[`fitness-coach` skill](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/fitness-coach/SKILL.md), reading the same profile +
+recent health + nutrition through the fitness MCP) **generates** the plan / review / brief in its own
+context, and **persists it back** through the MCP `save_*` tools / `POST /api/fitness/coaching`. The
+board only **validates** the artifact's shape (raw bodies are never trusted), **versions** it (SSE),
+**attributes** it (`agent` vs `human` vs `board`), **stores** it (upserted into
+`db.coachingArtifacts` by period), and **serves** it back.
 
-- **Model `claude-sonnet-4-6`** — supports forced tool use + prompt caching.
-- **Forced tool use** — the model is forced to call a tool whose `input_schema` *is* the output
-  shape, so the route gets **already-valid JSON** back: no markdown-fence stripping, no bare
-  `JSON.parse` on free text. A `max_tokens` truncation is caught and returned as a clear error.
-- **A `cache_control` breakpoint** sits at the end of the **stable** coaching system prompt; the
-  **volatile** per-request context (profile + health + nutrition + dates) is appended *after* it, so
-  the cached prefix is never invalidated by the changing data.
-- The API key is read from `config/secrets.env` (placeholder/empty values rejected).
+!!! warning "The board-side generate routes are removed"
+    There used to be three board-side LLM routes — `GET /api/fitness/training-plan`,
+    `GET /api/fitness/weekly-review`, `GET /api/fitness/pre-workout-brief` — that called Claude on the
+    board's Anthropic key via a hardened `callClaude` (`board/lib/fitness-ai.ts`) and returned ephemeral
+    JSON. **Those routes (and `fitness-ai.ts`) are gone.** A component is a state machine; it does not
+    embed an LLM. Generation moved out to the agent; the board exposes only the **CRUD seam**
+    ([`/api/fitness/coaching`](#the-crud-seam-apifitnesscoaching-token-gated-writes-open-reads)) that
+    accepts and persists the agent's artifact. (The **vault MCP** remains the one component in the repo
+    that legitimately runs LLM calls — it embeds the Claude Agent SDK.)
 
-| Route | What it returns |
+| Artifact | What it captures |
 |---|---|
-| `POST /api/fitness/training-plan` | a personalized **weekly plan** (per-day sport/duration/intensity/zones), adapted to the recovery state (HRV/sleep/load) and the profile's constraints (days/equipment/max session) |
-| `POST /api/fitness/weekly-review` | a **weekly review** — an `overall_score`, training-vs-plan, sleep trend, recovery/fatigue, and 3–5 recommendations — folding the [form score](#the-daily-form-score) and (soft) nutrition |
-| `POST /api/fitness/pre-workout-brief` | a same-day **readiness brief** — ready / cautious / rest-recommended, a recommended session, warnings, and green-lights |
+| **Training plan** | a personalized **weekly plan** (per-day sport/duration/intensity/zones), adapted to the recovery state (HRV/sleep/load) and the profile's constraints (days/equipment/max session) |
+| **Weekly review** | an `overall_score`, training-vs-plan, sleep trend, recovery/fatigue, and 3–5 recommendations — folding the [form score](#the-daily-form-score) and (soft) nutrition |
+| **Pre-workout brief** | a same-day **readiness brief** — ready / cautious / rest-recommended, a recommended session, warnings, and green-lights |
+
+The matching `/fitness/*` UI pages are **history feeds** over the persisted artifacts — they show the
+**latest** artifact of that kind by default and let you **page back** through the stored history (see
+[the history feed UI](#the-history-feed-ui)); they hold a **Generate** action that hands off to the
+agent rather than calling an LLM on the board. These reads/writes are **informational estimates, not
+medical advice** — a low-HRV / poor-sleep "train easy" read is a conservative default, never a
+substitute for clinical judgement.
 
 A generated plan can be **materialized onto the calendar** via
 **`POST /api/fitness/push-plan-to-calendar`**, which mints `db.events` (gated on the fitness add-on,
@@ -225,11 +255,105 @@ validated day-by-day inside `mutate()`) — the same opt-in calendar bridge nutr
 
 ### Correlations
 
+**Correlations are the one coaching surface the board produces itself** — because they are
+**deterministic compute, not generative inference.** A state machine may compute deterministically;
+only generative LLM inference is delegated to the agent.
+
 **`GET /api/fitness/correlations?days=N`**
 ([source](https://github.com/philipyaz/cos/blob/main/board/app/api/fitness/correlations/route.ts))
 correlates per-day **sleep** against per-day **workout performance** (calories per minute) over the
 last N days — Pearson `r` + a linear regression — to answer "does sleeping better make me train
-better?" It reads the canonical taxonomy directly (no AI; pure stats).
+better?" It reads the canonical taxonomy directly (no LLM; pure stats), so the board runs it itself.
+The response carries the window's `from` / `to` (`YYYY-MM-DD`), and the report is **persisted
+best-effort** as a `correlations` artifact keyed on `<from>_<to>` (these are **observational
+correlations, not causation, and not medical advice**).
+
+## Coaching artifacts are persisted & externally-creatable
+
+The four coaching surfaces are **stateful artifacts** on **one polymorphic array**,
+`db.coachingArtifacts[]`. (An earlier design had the board generate three of them with a server-side
+Claude call and throw the JSON away — no history, and an external agent could not produce one without
+the board's key. That is gone: the board never calls an LLM, so all four kinds are simply persisted,
+and the three generative kinds are created by a **token-gated agent** that generated them in its own
+context. Correlations the board still computes itself — deterministic stats, not generation.)
+
+### One record, four kinds — `CoachingArtifact`
+
+Rather than four parallel arrays, the four kinds share **one** record
+([`board/lib/types.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/types.ts)):
+
+```ts
+interface CoachingArtifact {
+  id: string;            // minted "COACH-<n>"
+  kind: CoachingArtifactKind;   // "training_plan" | "weekly_review" | "pre_workout_brief" | "correlations"
+  periodKey: string;     // UNIQUE per (kind, periodKey)
+  source: ArtifactSource;       // "agent" | "human" | "board"
+  payload: Record<string, unknown>;  // the kind-specific body, verbatim (the agent-generated artifact, or the correlations compute)
+  generatedAt: string;   // ISO; payload.generated_at if present, else createdAt
+  createdAt: string;     // ISO; STICKY first-persist time
+  updatedAt: string;     // ISO; bumped on every upsert
+}
+```
+
+The **`periodKey`** is what makes the array a *register of the latest per period* rather than an
+append-only log — there is **at most one artifact per `(kind, periodKey)`**, and re-persisting the
+same period **upserts in place** (the `id` + `createdAt` stay sticky; `payload` / `source` /
+`generatedAt` / `updatedAt` are replaced). The key shape is kind-specific:
+
+| `kind` | `periodKey` | Derived from |
+|---|---|---|
+| `training_plan` | ISO week, e.g. `2026-W25` | `payload.week` |
+| `weekly_review` | ISO week, e.g. `2026-W25` | `payload.week` |
+| `pre_workout_brief` | `YYYY-MM-DD` | `payload.date` (else today) |
+| `correlations` | `<from>_<to>` | the window's `from` / `to` |
+
+The enums (`VALID_COACHING_ARTIFACT_KIND`, `VALID_ARTIFACT_SOURCE`) are single-sourced in
+`types.ts`; the validators that enforce the per-kind minimal payload shape (so **the agent's artifact
+is never persisted unvalidated** — the board does not trust a raw body) and derive the `periodKey` live in
+[`board/lib/fitness-artifacts.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/fitness-artifacts.ts).
+
+### The CRUD seam — `/api/fitness/coaching` (token-gated writes / open reads)
+
+A new route family follows the add-on contract exactly — **reads ungated, writes token-gated then
+add-on-gated**:
+
+| Method + route | What it does | Auth |
+|---|---|---|
+| `GET /api/fitness/coaching?kind=&from=&to=&limit=` | list artifacts (newest-first; `from`/`to` against `createdAt`) | ungated |
+| `POST /api/fitness/coaching` | upsert one artifact by `(kind, periodKey)` | **`x-fitness-token`** + add-on gate |
+| `GET /api/fitness/coaching/<id>` | one artifact by id | ungated |
+| `PATCH /api/fitness/coaching/<id>` | patch an artifact (payload / source / generatedAt) | **`x-fitness-token`** + add-on gate |
+| `DELETE /api/fitness/coaching/<id>` | delete an artifact | **`x-fitness-token`** + add-on gate |
+
+The **token gate sits at the edge** of every write (before validation or the store lock), exactly
+like the HAE push — a missing server token → `503`, a wrong/absent header → `401` — and the add-on
+gate (`assertAddonEnabled(db, "fitness")`) runs **inside `mutate()`** so a disabled add-on → `404`.
+That edge token is precisely what lets **the agent (Claude Cowork) create artifacts without any
+Anthropic key on the board**: the agent generates the plan/review/brief in its own context and
+`POST`s it with `x-fitness-token`; the board persists it without ever calling Claude. (When the actor
+resolves to `agent`, the route forces `source: "agent"`; `source: "board"` is reserved for the
+correlations compute the board runs itself.)
+
+### The history feed UI
+
+The four `/fitness/*` coaching pages render through one shared client component,
+[`artifact-feed.tsx`](https://github.com/philipyaz/cos/blob/main/board/components/fitness/artifact-feed.tsx):
+it lists `GET /api/fitness/coaching?kind=<kind>` **newest-first**, defaults to the **latest**
+artifact, and offers **prev/next** stepping back through the persisted history. The feed is the
+**single source of truth** for artifact data — the pages are **history feeds over the stored
+artifacts**, not live generators. For the three generative kinds the page's **Generate** action hands
+off to the agent (which generates and `POST`s back); for correlations it triggers the board's
+deterministic compute. The feed subscribes to SSE, so an agent `POST` lands on the page without a
+reload.
+
+### The seven new MCP tools
+
+The [fitness MCP server](https://github.com/philipyaz/cos/blob/main/mcp/fitness-server/server.mjs)
+gains seven thin wrappers over the new routes (total **14**) — four `save_*` writers (one per kind),
+plus list / get / delete — so an agent can persist and browse artifacts entirely through the MCP. The
+four `save_*` tools and `delete_coaching_artifact` are **token-gated writes**; `list_coaching_artifacts`
+and `get_coaching_artifact` are ungated reads. See
+[the MCP tool table below](#the-fitness-mcp-the-agents-read-verbs).
 
 ## The soft Nutrition dependency
 
@@ -266,8 +390,17 @@ LLM calls**, and — unlike the nutrition MCP — authenticates its **writes wit
 | `get_health_trends` | `GET /trends` | per-day series over N days |
 | `delete_health_data` | `DELETE /data` | delete by ids/range; token-gated write |
 | `ingest_health_to_vault` | `GET /report` | fetch the Markdown report and forward it to the vault |
+| `save_training_plan` | `POST /coaching` | persist a `training_plan` artifact; token-gated write |
+| `save_weekly_review` | `POST /coaching` | persist a `weekly_review` artifact; token-gated write |
+| `save_pre_workout_brief` | `POST /coaching` | persist a `pre_workout_brief` artifact; token-gated write |
+| `save_correlation_report` | `POST /coaching` | persist a `correlations` artifact; token-gated write |
+| `list_coaching_artifacts` | `GET /coaching` | list artifacts by kind / range |
+| `get_coaching_artifact` | `GET /coaching/<id>` | one artifact by id |
+| `delete_coaching_artifact` | `DELETE /coaching/<id>` | delete an artifact; token-gated write |
 
-A write on a **disabled** add-on returns the board's `404`, surfaced as a `Not found.` tool error.
+The four `save_*` tools let an agent (Claude Cowork) persist a generated plan / review / brief /
+report **without the board's Anthropic key** — the token gate is the only credential needed. A write
+on a **disabled** add-on returns the board's `404`, surfaced as a `Not found.` tool error.
 
 ## The read-only views
 

@@ -107,7 +107,12 @@ export const VALID_BIOLOGICAL_SEX: BiologicalSex[] = ["male", "female"];
 // athleteProfile absent === no profile set). New enums: HealthEntryType, AthleteGoal,
 // AthleteLevel. migrate() carries db.healthEntries forward when it is an array and
 // db.athleteProfile forward when it is an object (mirroring db.weights and db.nutritionGoal).
-export const SCHEMA_VERSION = 12;
+// v13 makes the "fitness" add-on's AI coaching artifacts STATEFUL: db.coachingArtifacts
+// (CoachingArtifact[], ONE polymorphic array for all four kinds — training_plan, weekly_review,
+// pre_workout_brief, correlations) — purely additive; old v12 files read unchanged
+// (coachingArtifacts defaults to []). New enums: CoachingArtifactKind, ArtifactSource.
+// migrate() carries db.coachingArtifacts forward when it is an array (mirroring db.healthEntries).
+export const SCHEMA_VERSION = 13;
 
 // Who performed a mutation — drives activity attribution + note authorship.
 export type Actor = "human" | "agent" | "system";
@@ -518,7 +523,7 @@ export const VALID_ATHLETE_EQUIPMENT: string[] = [
 
 // The athlete training-profile SINGLETON (db.athleteProfile, NOT an array) — mirrors
 // db.nutritionGoal: exactly one current profile, a bare object set/replaced (never minted
-// with an id). Owned by the "health" add-on; feeds the AI coaching routes (training plan,
+// with an id). Owned by the "fitness" add-on; feeds the AI coaching routes (training plan,
 // weekly review, pre-workout brief). Weights are kilograms (canonical, like WeightEntry).
 export interface AthleteProfile {
   goal: AthleteGoal;
@@ -533,6 +538,48 @@ export interface AthleteProfile {
   notes: string;                 // freeform context for the coach (capped at the route)
   createdAt: string;             // sticky first-set time (preserved across replaces)
   updatedAt: string;
+}
+
+// ── Fitness AI coaching artifacts (v13; "fitness" add-on) ──────────────────────
+// The "fitness" add-on's FOUR AI coaching surfaces — a weekly training plan, a weekly
+// review, a daily pre-workout brief, and a sleep/performance correlation report — were
+// generated on demand and thrown away. v12 makes them STATEFUL: persisted on the core
+// store in ONE polymorphic array (db.coachingArtifacts), creatable by an EXTERNAL agent
+// (Claude Cowork) over a token-gated HTTP POST + MCP WITHOUT the board's Anthropic key,
+// and navigable as history in the UI. Owned by the "fitness" add-on, gated by
+// Settings.addons.fitness (a disabled add-on's data stays on disk + readable, only its
+// WRITES are refused — see lib/addons.ts). The four kinds share ONE record, distinguished
+// by `kind`; `payload` holds the kind-specific canonical body verbatim.
+
+// Which of the four coaching surfaces an artifact is. ONE source of truth shared by the
+// route validator (lib/fitness-artifacts.ts), the persistence API (lib/fitness.ts), the
+// HTTP routes, and MIRRORED in the fitness MCP server (mcp/fitness-server/server.mjs).
+export type CoachingArtifactKind = "training_plan" | "weekly_review" | "pre_workout_brief" | "correlations";
+export const VALID_COACHING_ARTIFACT_KIND: CoachingArtifactKind[] = [
+  "training_plan", "weekly_review", "pre_workout_brief", "correlations",
+];
+
+// Who authored an artifact: "agent" (Claude Cowork over the token gate), "human" (a manual
+// UI/API write), or "board" (the board's own on-demand generate routes persisting their output).
+export type ArtifactSource = "agent" | "human" | "board";
+export const VALID_ARTIFACT_SOURCE: ArtifactSource[] = ["agent", "human", "board"];
+
+// One coaching artifact. `id` is minted "COACH-<n>" (like CASE-<n>). UNIQUE per
+// (kind, periodKey): the periodKey is the ISO week ("2026-W25") for plan/review, a
+// "YYYY-MM-DD" day for a brief, and "<from>_<to>" for a correlation report — re-persisting
+// the same (kind, periodKey) UPSERTS (replaces payload/source/generatedAt, keeps id +
+// createdAt sticky). `payload` is the kind-specific canonical body stored verbatim (the
+// existing generate route's output). `generatedAt` is the model-generation time (payload's
+// own generated_at when present, else createdAt); createdAt is the sticky first-persist time.
+export interface CoachingArtifact {
+  id: string;            // minted "COACH-<n>"
+  kind: CoachingArtifactKind;
+  periodKey: string;     // UNIQUE per (kind, periodKey): ISO week / "YYYY-MM-DD" / "<from>_<to>"
+  source: ArtifactSource;
+  payload: Record<string, unknown>; // the kind-specific canonical body (verbatim)
+  generatedAt: string;   // ISO; payload.generated_at if present else createdAt
+  createdAt: string;     // ISO; sticky first-persist time (preserved across upsert)
+  updatedAt: string;     // ISO; bumped on every upsert
 }
 
 // ── Guard sender-trust whitelist (lives in the guard SIDECAR, not this store) ──
@@ -854,8 +901,9 @@ export interface DBShape {
   mealPlanEntries?: MealPlanEntry[]; // Nutrition & Chef meal-plan entries (v9); owned by the "nutrition" add-on
   weights?: WeightEntry[]; // Nutrition weigh-in time-series (v10); owned by the "nutrition" add-on
   nutritionGoal?: NutritionGoal; // Nutrition goal/profile SINGLETON (v10); owned by the "nutrition" add-on (NOT an array)
-  healthEntries?: HealthEntry[]; // Apple Watch health time-series (v12); owned by the "health" add-on
-  athleteProfile?: AthleteProfile; // Athlete training-profile SINGLETON (v12); owned by the "health" add-on (NOT an array)
+  healthEntries?: HealthEntry[]; // Apple Watch health time-series (v12); owned by the "fitness" add-on
+  athleteProfile?: AthleteProfile; // Athlete training-profile SINGLETON (v12); owned by the "fitness" add-on (NOT an array)
+  coachingArtifacts?: CoachingArtifact[]; // Fitness AI coaching artifacts (v13); ONE polymorphic array (all four kinds); owned by the "fitness" add-on
   pending?: PendingMutation[]; // approval queue
   views?: SavedView[]; // saved views
   labels?: LabelDef[]; // the active label catalog (installed bundles + custom labels)

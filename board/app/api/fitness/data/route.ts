@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { listEntries, deleteEntries } from "@/lib/fitness";
+import { readDB } from "@/lib/store";
 import { storeErrorToResponse } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,10 @@ export async function GET(req: NextRequest) {
   const limit = limitStr ? parseInt(limitStr, 10) : undefined;
 
   const result = await listEntries({ type, from, to, limit });
-  return NextResponse.json(result);
+  // version is read at the route level (db.version) so views can wire useLiveBoard —
+  // additive to listEntries' {entries,total}, avoiding a signature change in lib/fitness.
+  const db = await readDB();
+  return NextResponse.json({ ...result, version: db.version });
 }
 
 // DELETE /api/fitness/data — delete entries by IDs and/or date range.

@@ -38,14 +38,34 @@ names onto these and stores unmapped names verbatim.
 
 ## MCP tools
 
+18 tools — 7 health-data tools, 4 athlete-profile / readiness / correlation tools, plus 7
+stateful **coaching-artifact** tools (v12). The
+coaching surfaces (training plan, weekly review, pre-workout brief, sleep/performance
+correlations) are persisted on the board's core store (`db.coachingArtifacts`) and upserted
+by `(kind, periodKey)`. The `save_*` tools are token-gated writes; the `list_*` / `get_*`
+reads are ungated. An external agent (Claude Cowork) can create artifacts **without** the
+board's Anthropic key — the `x-fitness-token` is the only credential.
+
 | Tool | Description |
 |------|-------------|
 | `push_health_data` | Push a batch of HealthKit entries (token-gated) |
 | `list_health_data` | List entries with optional type/date filters |
 | `get_health_summary` | Aggregated summary for a date or range |
+| `get_daily_summary` | Full daily health + nutrition summary (workouts, sleep, metrics, food, calorie balance) for one date |
 | `delete_health_data` | Delete by IDs or date range (token-gated) |
 | `get_health_trends` | Daily trends over last N days |
 | `ingest_health_to_vault` | Fetch the board's composed health report (`GET /api/fitness/report`) for vault ingestion |
+| `get_athlete_profile` | Read the athlete training-profile singleton (ungated) |
+| `set_athlete_profile` | Create-or-replace the athlete profile (token-gated; board validates the enums) |
+| `get_form_score` | Board-computed daily readiness ("form") score 0-100 with breakdown (ungated) |
+| `get_correlations` | Board-computed sleep-vs-performance correlation + regression over N days; persists to history (ungated) |
+| `save_training_plan` | Persist a weekly training plan (upsert by week; token-gated) |
+| `save_weekly_review` | Persist a weekly review (upsert by week; token-gated) |
+| `save_pre_workout_brief` | Persist a daily pre-workout readiness brief (upsert by date; token-gated) |
+| `save_correlation_report` | Persist a sleep/performance correlation report (upsert by `<from>_<to>`; token-gated) |
+| `list_coaching_artifacts` | List persisted coaching artifacts, newest-first (ungated; filter by kind/date) |
+| `get_coaching_artifact` | Fetch one coaching artifact by id (ungated) |
+| `delete_coaching_artifact` | Delete one coaching artifact by id (token-gated) |
 
 ## Setup
 

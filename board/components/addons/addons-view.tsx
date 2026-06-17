@@ -30,9 +30,14 @@ import { fetchAddons, setAddonEnabled, type AddonView } from "@/lib/board-client
 import { useLiveBoard } from "@/lib/use-live-board";
 import {
   IconChef,
+  IconFridge,
+  IconMealPlan,
   IconHeart,
   IconRunner,
+  IconCalendar,
+  IconTrend,
   IconBolt,
+  IconSpark,
   IconWarning,
   IconCheckCircle,
   IconCheck,
@@ -45,8 +50,14 @@ import type { ComponentType, SVGProps } from "react";
 // glyph so a future add-on still renders a card.
 const ADDON_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   IconChef,
+  IconFridge,
+  IconMealPlan,
   IconHeart,
   IconRunner,
+  IconCalendar,
+  IconTrend,
+  IconBolt,
+  IconSpark,
 };
 
 export function AddonsView({ initial }: { initial: AddonView[] }) {

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { listEntries } from "@/lib/fitness";
+import { listEntries, saveCoachingArtifact } from "@/lib/fitness";
+import { validateCoachingArtifactInput } from "@/lib/fitness-artifacts";
 import { pearson, linearRegression } from "@/lib/fitness-correlations";
 
 export const dynamic = "force-dynamic";
@@ -100,9 +101,16 @@ export async function GET(req: NextRequest) {
   const deepPerfVals = deepPoints.map((p) => p.performance);
   const rDeep = pearson(deepVals, deepPerfVals);
 
-  return NextResponse.json({
+  // The analysed window, as bare calendar-day strings. `fromDate` is the inclusive start
+  // (today - days); `windowTo` is today (the inclusive end the human sees). These are the
+  // upsert key for the persisted report (periodKey = "<from>_<to>") and ride the payload too.
+  const windowTo = fmtDate(today);
+
+  const body = {
     days,
     data_points: dataPoints.length,
+    from: fromDate,
+    to: windowTo,
     correlation: {
       sleep_vs_performance: r != null ? Math.round(r * 1000) / 1000 : null,
       deep_sleep_vs_performance: rDeep != null ? Math.round(rDeep * 1000) / 1000 : null,
@@ -112,5 +120,23 @@ export async function GET(req: NextRequest) {
       intercept: Math.round(regression.intercept * 1000) / 1000,
     } : null,
     points: dataPoints,
-  });
+  };
+
+  // Persist-on-generate (BEST-EFFORT): fold the report onto db.coachingArtifacts so it joins
+  // the history feed, keyed by the analysed window ("<from>_<to>"). This route is PURE COMPUTE
+  // (no Claude key needed) — Cowork can equally POST a report via the coaching route. A disabled
+  // add-on or a write failure must NOT break the ephemeral response — validate then swallow.
+  try {
+    const v = validateCoachingArtifactInput({
+      kind: "correlations",
+      source: "board",
+      payload: body,
+      periodKey: `${fromDate}_${windowTo}`,
+    });
+    if (v.ok) await saveCoachingArtifact(v.value);
+  } catch {
+    // Swallow — the computed report stands on its own; persistence is opportunistic.
+  }
+
+  return NextResponse.json(body);
 }

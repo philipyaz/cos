@@ -25,7 +25,15 @@ nutrition's food log when it is present.)
 
 An add-on is an **optional, self-contained vertical layered over the core board**. It contributes
 exactly four things, and nothing about it is special-cased in the core — it is the same machinery the
-core uses, parametrised by a manifest:
+core uses, parametrised by a manifest.
+
+A component (the core **and** every add-on) is a **deterministic state machine**: it persists state
+and exposes it via an **API + an MCP server**, and it **does not call an LLM** — any generative step
+is done by the **external agent** and written back through the API/MCP (the board's job is to
+validate, version, attribute, and serve). Deterministic server-side **compute** is fine; only
+*generative inference* is delegated. (The sole LLM-bearing component in the repo is the **vault MCP**,
+which embeds the Claude Agent SDK — see the repo-root
+[`CLAUDE.md`](https://github.com/philipyaz/cos/blob/main/CLAUDE.md).)
 
 | Layer | What the add-on contributes | Where it lives |
 |---|---|---|
@@ -181,12 +189,12 @@ the same four-layer slice:
 | | **[Nutrition & Chef](../features/nutrition.md)** | **[Fitness](../features/fitness.md)** |
 |---|---|---|
 | `id` | `nutrition` | `fitness` |
-| Owned **arrays** (`dataArrays`) | `foodLogs`, `pantryItems`, `mealPlanEntries`, `weights` | `healthEntries` |
+| Owned **arrays** (`dataArrays`) | `foodLogs`, `pantryItems`, `mealPlanEntries`, `weights` | `healthEntries`, `coachingArtifacts` |
 | Singleton (not in `dataArrays`) | `db.nutritionGoal` | `db.athleteProfile` |
-| Schema versions | v9 (the three diary arrays) + v10 (weight-loss) | v11 (`healthEntries` + `athleteProfile`) |
+| Schema versions | v9 (the three diary arrays) + v10 (weight-loss) | v11 (`healthEntries` + `athleteProfile`) + v12 (`coachingArtifacts`) |
 | API prefixes | `/api/nutrition` | `/api/fitness` |
 | MCP server / bridge port | `nutrition` / `:8007` | `fitness` / `:8011` |
-| The "intelligence" | calorie estimation — in the **operator skill** | AI coaching — in the **route** (forced-tool Claude calls) |
+| The "intelligence" | calorie estimation — in the **operator skill** (the agent) | coaching generation — in the **agent**, persisted via the MCP/`POST` (the board runs only deterministic stats) |
 | `dependsOn` | — | **soft** edge → `nutrition` |
 
 The two diverge on two instructive points, both inside the framework's rules rather than around them:
