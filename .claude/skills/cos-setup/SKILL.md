@@ -387,8 +387,15 @@ Start each shell with `source "$(git rev-parse --show-toplevel)/config/load-conf
 4. **A backup dry-run verifies** — `node backup/backup.mjs && node backup/restore.mjs` →
    `auth tag OK ✓ / sha256 OK ✓ / JSON-verified ✓`, with `vault/$VAULT_NAME` present in the
    manifest.
+5. **The Cowork config is actually wired** (don't just assume it — it's the one client whose file is
+   off-repo at `$COWORK_CONFIG`): the file exists, parses, and lists the core stdio servers.
+   ```sh
+   node -e 'const fs=require("fs"),p=process.env.COWORK_CONFIG;let c;try{c=JSON.parse(fs.readFileSync(p,"utf8"))}catch(e){console.log("FAIL: Cowork config missing/invalid at "+p+" — set COWORK_CONFIG in cos.env + re-run /mcp-bridge-setup §5");process.exit(1)}const m=c.mcpServers||{},miss=["board","calendar","guard","vault"].filter(n=>!m[n]);console.log(miss.length?"FAIL: missing from Cowork config: "+miss.join(", ")+" — re-run /mcp-bridge-setup §5":"OK: Cowork config lists "+Object.keys(m).join(", "))'
+   ```
+   (Cowork only *reads* it at launch — the next section is the one-time UI activation; this just
+   proves the file is on disk and correct first.)
 
-If all four pass, the Cos system is fully stood up: vault populated, guard classifying,
+If all five pass, the Cos system is fully stood up: vault populated, guard classifying,
 all bridges live for Cowork + Claude Code, and the live data under encrypted off-site backup.
 Tell the user so, then hand off with the **first-open** and **Day-to-day** notes below.
 
