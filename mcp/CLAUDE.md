@@ -67,7 +67,9 @@ Steps are tagged **[shared]** (drives both OSes), **[mac]**, **[win]**, **[setup
 6. **[setup]** Install it on the machine via the setup skill (which runs the generators):
    `node scripts/gen-launchd.mjs --install` (macOS) renders+loads the plist; `node mcp/cos-services.cjs
    start` (Windows) reads the manifest; `node scripts/gen-mcp-json.mjs` writes the `.mcp.json` entry
-   (CI verifies it matches); `node scripts/gen-cowork-config.mjs` writes the Cowork entry.
+   (CI verifies it matches); `node scripts/gen-cowork-config.mjs` writes the Cowork entry — this needs
+   **`COWORK_CONFIG`** to point at the real `claude_desktop_config.json` (cos-setup detects + records it
+   per OS; the generator refuses a missing dir — see the Cowork gotcha).
 7. **[shared]** Verify on both clients: `curl` an MCP `initialize` POST to `…/mcp` →
    `serverInfo.name == "<name>"`, then round-trip one read + one write tool.
 
@@ -143,7 +145,10 @@ debug, but you don't hand-write them:
   unexpectedly"*) and never on sidecars/runner.
 - **Cowork rejects HTTP `url` entries; Claude Code requires them.** Cowork's `claude_desktop_config.json`
   takes only direct-stdio `command`/`args`/`env`; `.mcp.json` takes the HTTP urls. Mixing them up is the
-  #1 wiring failure. After editing the Cowork file, ⌘Q + reopen Cowork.
+  #1 wiring failure. After editing the Cowork file, ⌘Q + reopen Cowork. **Its path is `COWORK_CONFIG`**
+  (from `config/load-config.sh`/`cos.env`) — macOS `~/Library/Application Support/Claude/…`, Windows
+  `%APPDATA%/Claude/…`. cos-setup detects + records it per OS and `gen-cowork-config.mjs` refuses a
+  missing dir, so the path is *confirmed*, never assumed — fix it in `cos.env` if Cowork lives elsewhere.
 - **Add-on double-gate.** An add-on needs BOTH the bridge reachable AND `Settings.addons.<id>.enabled`.
   Reads are always open; only **writes** are gated (a disabled write 404s as *"Not found."*).
 - **Guard model is config, and an empty value fails loud.** `COS_GUARD_MODEL`/`COS_GUARD_THRESHOLD` come

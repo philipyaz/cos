@@ -213,6 +213,10 @@ one needing the key + a vault dir):
 
 ```sh
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+# Precondition: $COWORK_CONFIG must point at the REAL Cowork config (cos-setup detects + records it;
+# default macOS path below, %APPDATA%/Claude on Windows). Confirm its dir exists before merging —
+# the generator refuses a missing dir rather than writing an orphan config Cowork never reads.
+[ -d "$(dirname "$COWORK_CONFIG")" ] || echo "FIX FIRST: set COWORK_CONFIG in config/cos.env to your real claude_desktop_config.json (dir '$(dirname "$COWORK_CONFIG")' missing — Cowork installed?)"
 node "$REPO_ROOT/scripts/gen-cowork-config.mjs" board calendar guard vault
 ```
 > Only `vault` carries `ANTHROPIC_API_KEY` (it makes outbound LLM calls — see

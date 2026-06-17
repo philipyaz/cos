@@ -13,7 +13,7 @@
 // (preferences, unrelated servers) intact, after writing a .bak. ⌘Q + reopen Cowork to pick it up.
 
 import { readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { getManifest } from '../mcp/service-manifest.mjs'
 import { loadConfig, REPO_ROOT } from '../config/load-config.mjs'
 
@@ -62,6 +62,19 @@ if (process.argv.includes('--print')) {
   const target = cfg.COWORK_CONFIG
   if (!target) {
     process.stderr.write('[gen-cowork-config] COWORK_CONFIG is unset in config/load-config.sh\n')
+    process.exit(1)
+  }
+  // Refuse to write into a directory that doesn't exist: that almost always means COWORK_CONFIG points
+  // at the wrong place (Cowork installed elsewhere, or not installed) — better a clear error than
+  // silently creating an orphan config Cowork will never read. The cos-setup step detects + records
+  // this path; if it's wrong, fix COWORK_CONFIG in config/cos.env to the real claude_desktop_config.json.
+  const dir = dirname(target)
+  if (!existsSync(dir)) {
+    process.stderr.write(
+      `[gen-cowork-config] Cowork config dir not found: ${dir}\n` +
+        `  COWORK_CONFIG points there but it doesn't exist. Is Claude Cowork Desktop installed?\n` +
+        `  Set COWORK_CONFIG in config/cos.env to the real claude_desktop_config.json path and retry.\n`,
+    )
     process.exit(1)
   }
   let current = {}
