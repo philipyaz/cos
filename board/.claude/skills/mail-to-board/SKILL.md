@@ -622,4 +622,4 @@ After a sweep, the user can:
   the senders / topics this sweep touched and writes the `vaultLinks` ↔ `cases:`
   cross-links.
 - **Re-run the sweep** — it's idempotent, so extra cycles that find nothing new simply
-  no-op (or let the scheduled mail recipe hand it the next batch).
+  no-op (or let the next scheduled run hand it the next batch).

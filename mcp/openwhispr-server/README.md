@@ -125,9 +125,9 @@ to run off fixtures while OpenWhispr isn't installed.
 > `node "$REPO_ROOT/scripts/gen-launchd.mjs" --install openwhispr` (see the `/openwhispr-mcp-setup`
 > skill).
 
-## How the voice recipe uses it
+## How a voice-processing run uses it
 
-The scheduled voice recipe (and the `second-brain-ingest` router) runs the idempotent loop:
+The `voice-operations` skill (and the `second-brain-ingest` router) runs the idempotent loop:
 
 1. **`list_transcripts`** → get the unprocessed voice notes (watermark already filters out anything routed before).
 2. For each, **`get_transcript(id)`** → full text → the **router** classifies it:

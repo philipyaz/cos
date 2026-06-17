@@ -347,6 +347,6 @@ it more often is cheap and safe.
 The reconcilers feed this sweep: **`/mail-to-board`** and **`/whatsapp-triage`**
 create flat cases (one clean, entity-tagged card per matter) and leave structure to
 this job. Run them on their channel cadence; run **`/board-organize`** on a slower
-cadence (every few hours / daily) to file what they drop. See
-[`recipes/board-organize.md`](../recipes/board-organize.md) for the scheduled-task
-block.
+cadence (every few hours / daily) to file what they drop. Schedule it as a Cowork task
+(`Run /board-organize`); see the [skills README](../README.md) for the scheduling
+playbook.

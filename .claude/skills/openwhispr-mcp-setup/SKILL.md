@@ -170,8 +170,8 @@ curl -s -X POST "$OPENWHISPR_BRIDGE_URL/mcp" \
 ```
 - **CHECKPOINT** — `list_transcripts` returns `Source: sqlite` (your live notes) and both clients
   see `openwhispr` after a ⌘Q reopen. The voice ingest loop (`list_transcripts → get_transcript →
-  route to vault/board → mark_processed`) is then exercised by **`/second-brain-ingest`** + the
-  voice recipe — those own the routing; this skill only proves the plumbing.
+  route to vault/board → mark_processed`) is then exercised by **`/voice-operations`** (the reads +
+  watermark) + **`/second-brain-ingest`** (the routing); this skill only proves the plumbing.
 
 ## Manage
 ```sh

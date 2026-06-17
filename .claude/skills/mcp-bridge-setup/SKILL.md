@@ -450,8 +450,8 @@ or Cowork entry.)
 > **`:8002`**, surfaces the external OpenWhispr desktop app's local transcript store. It's wired
 > exactly like the core four (a supergateway bridge in `.mcp.json` + a Cowork stdio entry) but
 > lives in its **own** skill because of that external-app dependency — run
-> **`/openwhispr-mcp-setup`** to add it (and `/second-brain-ingest` + the voice recipe own the
-> board-side routing).
+> **`/openwhispr-mcp-setup`** to add it (and `/voice-operations` owns the reads + watermark,
+> `/second-brain-ingest` the board-side routing).
 >
 > **WhatsApp add-on (`/whatsapp-mcp-setup`).** Another optional server, `whatsapp`, lives in an
 > **external** repo and is a worked example of wiring **both** a bridge AND a sidecar at once: the

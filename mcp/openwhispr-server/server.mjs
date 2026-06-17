@@ -449,7 +449,7 @@ const LIST_TRANSCRIPTS_TOOL = {
     "List OpenWhispr voice transcripts. By DEFAULT returns only UNPROCESSED transcripts — those newer " +
     "than the watermark (the last id passed to mark_processed) — so the ingest loop never reprocesses a " +
     "note. Each item is { id, created, preview }. Set includeProcessed:true to list everything regardless " +
-    "of the watermark. The voice recipe calls this first, routes each transcript to the vault + board, " +
+    "of the watermark. A voice-processing run calls this first, routes each transcript to the vault + board, " +
     "then calls mark_processed.",
   inputSchema: {
     type: "object",

@@ -43,7 +43,7 @@ git subtree add --prefix=.claude/skills second-brain-origin main
 
 The previous setup synced the notes vault to git from the host via a `sync.sh` script driven by a
 **launchd** job (`com.example.notes-sync`). **That mechanism is not part of this monorepo.** Periodic
-work is now triggered **only** by **Cowork scheduled tasks** (see `recipes/` and [Spec](../architecture/spec.md) §5) — there
+work is now triggered **only** by **Cowork scheduled tasks** (see [Spec](../architecture/spec.md) §5) — there
 is no host-side cron, launchd, or shell script in this repo, and at the end of the build nothing runs
 on our side.
 

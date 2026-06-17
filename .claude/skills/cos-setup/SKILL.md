@@ -273,7 +273,7 @@ fi
 
 ### Step 3.4 — openwhispr-mcp-setup (OPTIONAL: the voice-notes add-on)
 - **What it does** — wires the **`openwhispr`** voice server (a Node stdio MCP fronted by a
-  supergateway + launchd bridge on `:8002`, plus a direct Cowork stdio entry) so the voice recipe
+  supergateway + launchd bridge on `:8002`, plus a direct Cowork stdio entry) so **`/voice-operations`**
   and **`/second-brain-ingest`** can read your OpenWhispr transcripts and route them onto the
   board / vault. Entirely optional: skip it if you don't use the OpenWhispr desktop app.
 - **Why HERE (after the core bridges)** — it reuses the same supergateway/launchd/`ensure-bridges.sh`
