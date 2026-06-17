@@ -101,6 +101,39 @@ Pure declarative DATA — names/refs only, validated by `mcp/service-manifest.mj
 
 ---
 
+## Add-ons: supervision is always on; the board toggle gates **writes** (not just display)
+
+An add-on (e.g. Nutrition & Chef) is an optional vertical = nav + API + data + an MCP server. Two
+**independent** layers govern it — conflating them is the usual confusion:
+
+**1. Supervision (this directory's concern) — always on once set up.** An add-on's MCP server is an
+ordinary bridge/sidecar whose descriptor carries `addon: "<id>"`. It is installed + supervised like
+any other service (launchd / `cos-services.cjs`), so **its tools are always mounted and reachable**
+whenever the server is running — there is no per-tool gate at the MCP layer. The `addon` field affects
+exactly one thing here: the **probe** treats it as optional, so a machine that never installed the
+add-on is skipped silently (no `WARN`) instead of flagged. Supervision **never** reads `Settings.addons`.
+
+**2. Board enablement (`Settings.addons.<id>.enabled`) — a real server-side gate, default OFF.** This is
+separate from supervision and lives in `board/lib/addons.ts`:
+- `isAddonEnabled(db, id)` is `db.settings?.addons?.[id]?.enabled === true` — **absent ⇒ off**.
+- When **disabled**, the add-on's **writes are blocked**: every mutation funnels through
+  `assertAddonEnabled()` inside `mutate()`, which throws `NotFoundError` → **HTTP 404** (`"Add-on <id>
+  is not enabled"`). So an MCP **write** tool (`log_food`, `add_pantry_item`, …) called against a
+  disabled add-on gets a **404** — it does **not** silently succeed. **Reads (`GET`) are ungated**, so
+  `list_food_log` etc. still return data.
+- The **nav/UI** is gated by the *same* flag but separately: the sidebar reads `isAddonEnabled` and the
+  toggle flips it **live over SSE**.
+- **Enabling is an explicit action**, never implied by the server being up: `PATCH /api/addons/<id>
+  {"enabled":true}`.
+
+So the common shorthand "add-ons are always on; the toggle just shows/hides them" is **half right**: the
+**server** is always on and its tools are always callable, and the toggle *does* show/hide the nav — but
+the toggle is **not** display-only. Disabling is a genuine write gate (writes 404; reads still work), so
+a tool can be *reachable* yet *refused*. A new add-on therefore needs **both** its server supervised
+(this doc) **and** its gate enabled (the `PATCH`) before its writes land.
+
+---
+
 ## macOS vs Windows — differences the renderers handle for you
 
 You write one descriptor; each platform's renderer does the OS-specific thing. Know these so you can
@@ -149,8 +182,8 @@ debug, but you don't hand-write them:
   (from `config/load-config.sh`/`cos.env`) — macOS `~/Library/Application Support/Claude/…`, Windows
   `%APPDATA%/Claude/…`. cos-setup detects + records it per OS and `gen-cowork-config.mjs` refuses a
   missing dir, so the path is *confirmed*, never assumed — fix it in `cos.env` if Cowork lives elsewhere.
-- **Add-on double-gate.** An add-on needs BOTH the bridge reachable AND `Settings.addons.<id>.enabled`.
-  Reads are always open; only **writes** are gated (a disabled write 404s as *"Not found."*).
+- **Add-on double-gate.** An add-on needs BOTH its server supervised AND `Settings.addons.<id>.enabled`;
+  a disabled add-on's **writes** 404 while reads stay open. See *"Add-ons: supervision is always on…"* above.
 - **Guard model is config, and an empty value fails loud.** `COS_GUARD_MODEL`/`COS_GUARD_THRESHOLD` come
   from `load-config.sh`. To disable the real model, set `COS_GUARD_MODEL=heuristic-only` — never a blank
   value (a blank `${COS_GUARD_MODEL}` is an unresolved-var error, by the "never silently guess" rule).
