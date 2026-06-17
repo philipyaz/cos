@@ -1,6 +1,6 @@
 #!/bin/sh
 # mcp/ensure-bridges.sh — the "make sure the MCP bridges + sidecars are up right now" nudge, called
-# from board/package.json predev/prestart (via mcp/ensure-bridges.cjs) so the bridges are guaranteed
+# from board/package.json predev/prestart (via mcp/ensure-bridges.mjs) so the bridges are guaranteed
 # up whenever the app comes up. One-way on purpose: it NEVER stops anything — Claude Cowork Desktop
 # needs the bridges even when the dev app is down.
 #
@@ -11,7 +11,7 @@
 # PLATFORMS (gated on `uname`, NOT on a missing launchctl — Linux/CI have no launchctl either):
 #   - macOS   : launchd owns lifecycle (RunAtLoad + KeepAlive); this bootstraps + kickstarts each
 #               installed LaunchAgent, then probes.
-#   - Windows : delegates to mcp/cos-services.cjs (the Node process manager; no launchd).
+#   - Windows : delegates to mcp/cos-services.mjs (the Node process manager; no launchd).
 #   - other   : probe-only (no supervisor) — best-effort.
 #
 # SECURITY POSTURE (unchanged): the search sidecar is a pure accelerator — a cold/missing one only
@@ -85,9 +85,9 @@ OS=$(uname -s 2>/dev/null || echo unknown)
 case "$OS" in
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     # --- Windows: the Node process manager supervises everything (no launchd). NOTE: the normal
-    # predev path reaches Windows via mcp/ensure-bridges.cjs (which calls cos-services directly); this
+    # predev path reaches Windows via mcp/ensure-bridges.mjs (which calls cos-services directly); this
     # branch only fires if someone runs `sh ensure-bridges.sh` by hand under Git Bash. ---
-    "$NODE" "$REPO/mcp/cos-services.cjs" start
+    "$NODE" "$REPO/mcp/cos-services.mjs" start
     exit 0
     ;;
   Darwin)

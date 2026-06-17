@@ -17,7 +17,7 @@
 // makes a cos.env override propagate to every OS and makes it impossible to commit a personal path.
 //
 // CONSUMERS
-//   - mcp/cos-services.cjs (Windows process manager)  →  `node service-manifest.mjs --json`
+//   - mcp/cos-services.mjs (Windows process manager)  →  `node service-manifest.mjs --json`
 //   - mcp/ensure-bridges.sh (both branches' probes)   →  `node service-manifest.mjs --probe-list`
 //   - scripts/gen-launchd.mjs (macOS LaunchAgents)    →  import { getManifest }
 //   - scripts/gen-mcp-json.mjs (.mcp.json, Claude Code) → import { getManifest }
@@ -31,7 +31,7 @@ export const SCHEMA_VERSION = 1
 
 // supergateway's --stdio takes ONE shell-command string that it re-parses with shell-word splitting.
 // Join the stdio argv into that string, quoting any token containing whitespace so a path like
-// "C:/My Tools/node.exe" survives the re-split intact. Shared by gen-launchd.mjs + cos-services.cjs so
+// "C:/My Tools/node.exe" survives the re-split intact. Shared by gen-launchd.mjs + cos-services.mjs so
 // both render the bridge command identically. (Use forward-slash paths on Windows — the repo convention.)
 export function stdioToArg(stdio) {
   return stdio.map((t) => (/\s/.test(t) ? `"${t}"` : t)).join(' ')

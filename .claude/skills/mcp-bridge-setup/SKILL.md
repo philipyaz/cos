@@ -272,14 +272,14 @@ The generated entries look like (one per `claude-code` bridge, port-ascending):
   with `Unexpected content type: null`. Prefer the direct stdio above (it's simpler anyway).
 
 ### 6. The app brings the bridges up (already wired — no edit)
-`mcp/ensure-bridges.sh` + `mcp/ensure-bridges.cjs` are **committed**; you don't author them. And
+`mcp/ensure-bridges.sh` + `mcp/ensure-bridges.mjs` are **committed**; you don't author them. And
 `board/package.json` already chains them via `predev`/`prestart` so starting the app guarantees the
 bridges are up first (cross-platform, no `sh` in the npm script):
 ```json
-"predev":   "node ../mcp/ensure-bridges.cjs",
-"prestart": "node ../mcp/ensure-bridges.cjs"
+"predev":   "node ../mcp/ensure-bridges.mjs",
+"prestart": "node ../mcp/ensure-bridges.mjs"
 ```
-`ensure-bridges.cjs` is the platform dispatcher: on Windows it runs `mcp/cos-services.cjs start`;
+`ensure-bridges.mjs` is the platform dispatcher: on Windows it runs `mcp/cos-services.mjs start`;
 everywhere else it runs `mcp/ensure-bridges.sh`. That shell script is a **thin consumer of the
 service manifest** — it iterates `node mcp/service-manifest.mjs --probe-list` (NOT a hardcoded
 service list), and on macOS bootstraps + kickstarts each installed LaunchAgent then probes it.

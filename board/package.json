@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "node ../mcp/ensure-bridges.cjs",
+    "predev": "node ../mcp/ensure-bridges.mjs",
     "dev": "next dev",
     "build": "next build",
-    "prestart": "node ../mcp/ensure-bridges.cjs",
+    "prestart": "node ../mcp/ensure-bridges.mjs",
     "start": "next start",
     "lint": "eslint .",
     "gen:favicon": "node scripts/gen-favicon.mjs"

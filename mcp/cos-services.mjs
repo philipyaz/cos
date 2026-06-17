@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// mcp/cos-services.cjs — the WINDOWS process manager for the MCP bridges + sidecars, the Windows arm
+// mcp/cos-services.mjs — the WINDOWS process manager for the MCP bridges + sidecars, the Windows arm
 // of "define a service once". launchd is macOS-only, so Windows needs its own supervisor — but it is
 // a THIN CONSUMER of mcp/service-manifest.mjs (which it dynamic-imports), NOT a second hand-kept list.
 // There are no hardcoded ports, paths, usernames, or per-service spawn blocks here: everything comes
@@ -7,24 +7,25 @@
 // can be committed. (This replaces the PR's hardcoded SERVICES[]/status() map, the per-service
 // launchers/bridge-*.cjs, and ecosystem.config.cjs — all deleted.)
 //
-//   node mcp/cos-services.cjs start    — start missing/dead services (idempotent nudge; used by predev)
-//   node mcp/cos-services.cjs watch    — foreground SUPERVISOR: start all, respawn crashes with backoff
+//   node mcp/cos-services.mjs start    — start missing/dead services (idempotent nudge; used by predev)
+//   node mcp/cos-services.mjs watch    — foreground SUPERVISOR: start all, respawn crashes with backoff
 //                                        (the launchd KeepAlive equivalent; run from a startup shortcut)
-//   node mcp/cos-services.cjs stop     — stop all (taskkill /T /F the recorded PIDs)
-//   node mcp/cos-services.cjs status   — show each service + PID + running/stopped
-//   node mcp/cos-services.cjs restart  — stop + start
-//   node mcp/cos-services.cjs plan     — print the resolved spawn command per service (no spawn; cross-platform)
+//   node mcp/cos-services.mjs stop     — stop all (taskkill /T /F the recorded PIDs)
+//   node mcp/cos-services.mjs status   — show each service + PID + running/stopped
+//   node mcp/cos-services.mjs restart  — stop + start
+//   node mcp/cos-services.mjs plan     — print the resolved spawn command per service (no spawn; cross-platform)
 //
 // Spawns are windowsHide:true so no console windows pop. A service whose external dependency is absent
 // (an add-on whose repo isn't installed, a sidecar whose .venv isn't provisioned, a missing supergateway)
 // is skipped quietly rather than spawned into a dead-pid loop.
 
-const path = require('path')
-const fs = require('fs')
-const { spawn, execSync } = require('child_process')
-const { pathToFileURL } = require('url')
+import path from 'node:path'
+import fs from 'node:fs'
+import { spawn, execSync } from 'node:child_process'
+import { loadConfig } from '../config/load-config.mjs'
+import { getManifest, stdioToArg } from './service-manifest.mjs'
 
-const REPO = path.resolve(__dirname, '..')
+const REPO = path.resolve(import.meta.dirname, '..')
 const LOGS = path.join(REPO, 'mcp', 'logs')
 const PID_FILE = path.join(LOGS, '.cos-services.pid')
 const IS_WINDOWS = process.platform === 'win32'
@@ -89,9 +90,7 @@ function toSpawn(e, cfg, stdioToArg) {
   return { cmd, args, env, cwd: e.cwd }
 }
 
-async function load() {
-  const { loadConfig } = await import(pathToFileURL(path.join(REPO, 'config', 'load-config.mjs')))
-  const { getManifest, stdioToArg } = await import(pathToFileURL(path.join(REPO, 'mcp', 'service-manifest.mjs')))
+function load() {
   const cfg = loadConfig()
   const services = getManifest().map((e) => ({ entry: e, spawn: toSpawn(e, cfg, stdioToArg) }))
   return { cfg, services }
@@ -279,7 +278,7 @@ const run = {
   restart: async () => { guard(); stop(); await start() }, // guard FIRST so a refused restart never tears down
 }[cmd]
 if (!run) {
-  process.stderr.write('Usage: node mcp/cos-services.cjs [start|watch|stop|status|restart|plan]\n')
+  process.stderr.write('Usage: node mcp/cos-services.mjs [start|watch|stop|status|restart|plan]\n')
   process.exit(1)
 }
 Promise.resolve(run()).catch((e) => {

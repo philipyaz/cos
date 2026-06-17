@@ -5,7 +5,7 @@ vault, nutrition, …) and the **supervision glue** that keeps them running on b
 Each server is a small stdio process; agents reach it either over a **supergateway HTTP bridge** on a
 fixed loopback port (Claude Code, via the repo-root `.mcp.json`) or as a **direct stdio command**
 (Claude Cowork Desktop, via `claude_desktop_config.json`). On macOS, **launchd** supervises the
-bridges; on Windows, the Node process manager `mcp/cos-services.cjs` does.
+bridges; on Windows, the Node process manager `mcp/cos-services.mjs` does.
 
 **A service is defined exactly once.** Each one ships a co-located, OS-agnostic descriptor
 `<name>.service.json`; `mcp/service-manifest.mjs` resolves all of them against `config/load-config.sh`
@@ -21,7 +21,7 @@ config/load-config.sh  (ports/paths)    ──┤
                                           │
         ┌───────────────┬────────────────┼─────────────────┬──────────────────┐
         ▼               ▼                 ▼                 ▼                  ▼
- gen-launchd.mjs   cos-services.cjs  ensure-bridges.sh   gen-mcp-json.mjs   gen-cowork-config.mjs
+ gen-launchd.mjs   cos-services.mjs  ensure-bridges.sh   gen-mcp-json.mjs   gen-cowork-config.mjs
  (macOS plists)    (Windows mgr)     (probe, both OS)    (.mcp.json + CI)   (Cowork stdio)
 ```
 
@@ -31,7 +31,7 @@ config/load-config.sh  (ports/paths)    ──┤
 
 **Never add a macOS-only or Windows-only MCP server.** Because the descriptor drives every platform,
 "both OSes" is now one descriptor, not two parallel edits — but the discipline still holds: a server
-isn't done until it comes up on launchd *and* under `cos-services.cjs`, and is reachable from *both*
+isn't done until it comes up on launchd *and* under `cos-services.mjs`, and is reachable from *both*
 clients. The two invariants that keep this honest:
 
 - **Ports and paths live in `config/load-config.sh` (+ `config/cos.env`), nowhere else.** A descriptor
@@ -39,7 +39,7 @@ clients. The two invariants that keep this honest:
   absolute path, a username, or a toolchain location. The resolver fails LOUDLY on an unknown `${VAR}`.
   This is what makes a `cos.env` override propagate to every OS and makes it *impossible* to commit a
   personal path (the bug the first Windows attempt shipped: `8001`, `C:/Users/kmy38`, `vault/kam-vault`).
-- **Supervisors are thin consumers.** `cos-services.cjs`, `ensure-bridges.sh`, and the generators read
+- **Supervisors are thin consumers.** `cos-services.mjs`, `ensure-bridges.sh`, and the generators read
   the manifest; none of them redefines a port, path, or spawn command.
 
 ---
@@ -65,7 +65,7 @@ Steps are tagged **[shared]** (drives both OSes), **[mac]**, **[win]**, **[setup
    separate board action** — `PATCH /api/addons/<name> {"enabled":true}`. Supervision being up does NOT
    flip the gate.
 6. **[setup]** Install it on the machine via the setup skill (which runs the generators):
-   `node scripts/gen-launchd.mjs --install` (macOS) renders+loads the plist; `node mcp/cos-services.cjs
+   `node scripts/gen-launchd.mjs --install` (macOS) renders+loads the plist; `node mcp/cos-services.mjs
    start` (Windows) reads the manifest; `node scripts/gen-mcp-json.mjs` writes the `.mcp.json` entry
    (CI verifies it matches); `node scripts/gen-cowork-config.mjs` writes the Cowork entry — this needs
    **`COWORK_CONFIG`** to point at the real `claude_desktop_config.json` (cos-setup detects + records it
@@ -108,7 +108,7 @@ An add-on (e.g. Nutrition & Chef) is an optional vertical = nav + API + data + a
 
 **1. Supervision (this directory's concern) — always on once set up.** An add-on's MCP server is an
 ordinary bridge/sidecar whose descriptor carries `addon: "<id>"`. It is installed + supervised like
-any other service (launchd / `cos-services.cjs`), so **its tools are always mounted and reachable**
+any other service (launchd / `cos-services.mjs`), so **its tools are always mounted and reachable**
 whenever the server is running — there is no per-tool gate at the MCP layer. The `addon` field affects
 exactly one thing here: the **probe** treats it as optional, so a machine that never installed the
 add-on is skipped silently (no `WARN`) instead of flagged. Supervision **never** reads `Settings.addons`.
@@ -139,16 +139,16 @@ a tool can be *reachable* yet *refused*. A new add-on therefore needs **both** i
 You write one descriptor; each platform's renderer does the OS-specific thing. Know these so you can
 debug, but you don't hand-write them:
 
-| Concern | macOS (`gen-launchd.mjs` → launchd) | Windows (`cos-services.cjs`) |
+| Concern | macOS (`gen-launchd.mjs` → launchd) | Windows (`cos-services.mjs`) |
 |---|---|---|
-| **Supervisor / restart** | launchd LaunchAgent; `RunAtLoad`+`KeepAlive` = real crash-restart at login | `cos-services.cjs`: `start` = idempotent nudge (detached, `windowsHide`); `watch` = foreground supervisor that respawns crashes with exponential backoff + a fast-crash cap (the launchd-`KeepAlive` equivalent — run it from a startup shortcut for persistent supervision) |
+| **Supervisor / restart** | launchd LaunchAgent; `RunAtLoad`+`KeepAlive` = real crash-restart at login | `cos-services.mjs`: `start` = idempotent nudge (detached, `windowsHide`); `watch` = foreground supervisor that respawns crashes with exponential backoff + a fast-crash cap (the launchd-`KeepAlive` equivalent — run it from a startup shortcut for persistent supervision) |
 | **Toolchain** | `$BREW_PREFIX/bin/{node,supergateway,uv}`; plist `PATH` leads with `$BREW_PREFIX/bin` | `$NODE_BIN`/`$SUPERGATEWAY_BIN`/`$UV_BIN` from `cos.env` — never `%APPDATA%/npm/...` or a pinned `pythoncore-3.x` literal |
 | **supergateway** | `$SUPERGATEWAY_BIN --stdio "…"` | `node <supergateway>/dist/index.js --stdio "…"` (no `cmd.exe` window; dodges MSYS `/mcp` path-mangling) |
 | **Secret (vault/vaultjobs)** | `secretWrapper` (`launch.sh`) sources `config/secrets.env`, then execs — key never in the plist | `loadSecrets()` reads `config/secrets.env` and spreads the declared `secrets[]` into the spawn env — key never in committed source |
 | **uv sidecars (search/guardsvc)** | `uv run [--extra model] --directory <dir> uvicorn sidecar:app …` (uv self-provisions the venv) | `<dir>/.venv/Scripts/uvicorn.exe …` directly (venv pre-provisioned by `uv sync`) — avoids the `uv`→`cmd.exe` visible window |
 | **Stop** | `launchctl bootout` | `taskkill /T /F` against the PID file (`mcp/logs/.cos-services.pid`) |
 | **Spawn hygiene** | n/a | `windowsHide:true`; **forward-slash paths**; `--stdio` tokens are quoted so a path with a space survives supergateway's re-split |
-| **Platform selection** | `ensure-bridges.sh` gates on `uname` = `Darwin` | `ensure-bridges.cjs` (predev) routes `win32` → `cos-services`; `ensure-bridges.sh` Windows branch is a manual-invocation fallback |
+| **Platform selection** | `ensure-bridges.sh` gates on `uname` = `Darwin` | `ensure-bridges.mjs` (predev) routes `win32` → `cos-services`; `ensure-bridges.sh` Windows branch is a manual-invocation fallback |
 | **Guard model** | `COS_GUARD_MODEL` default `llama-prompt-guard-2-86m` (real gated Llama) | set `COS_GUARD_MODEL=heuristic-only` in `cos.env` (no CUDA) — a per-machine *setting*, not a code fork; guard still fails CLOSED |
 
 ---
@@ -216,7 +216,7 @@ node mcp/service-manifest.mjs --probe-list    # name/port/kind/probe/gate (ensur
 node scripts/gen-mcp-json.mjs [--check]       # write (or CI-verify) .mcp.json
 node scripts/gen-launchd.mjs [--print <name>|--out <dir>|--install]   # macOS plists (dry-run by default)
 node scripts/gen-cowork-config.mjs [--print]  # Cowork stdio entries (backup-first merge)
-node mcp/cos-services.cjs [start|watch|stop|status|restart|plan]      # Windows manager
+node mcp/cos-services.mjs [start|watch|stop|status|restart|plan]      # Windows manager
 ```
 
 ---
@@ -225,7 +225,7 @@ node mcp/cos-services.cjs [start|watch|stop|status|restart|plan]      # Windows 
 
 The manifest drives **everything**: the macOS launchd plists (`gen-launchd.mjs --install`, rendered
 from the descriptors — there are **no** committed `*.plist.template` files anymore), the Windows
-manager (`cos-services.cjs`), the probes (`ensure-bridges.sh` reads `--probe-list`), the committed
+manager (`cos-services.mjs`), the probes (`ensure-bridges.sh` reads `--probe-list`), the committed
 `.mcp.json` (`gen-mcp-json.mjs` + its CI sync-check), and the Cowork stdio entries
 (`gen-cowork-config.mjs`). The setup **skills** install by calling those generators — they no longer
 sed a template or hand-merge Cowork. So a service's plist content is edited in exactly one place: its
