@@ -143,21 +143,22 @@ fi
 
 ### Step 1 — setup-vault (FIRST: create the knowledge target)
 - **What it does** — creates a **private vault instance** from the committed template
-  `$REPO_ROOT/vault/example-vault/` (`cp -R vault/example-vault vault/<name>`), points
-  **`COS_VAULT_DIR`** at it (set ONLY in the installed launchd plist + the Cowork config — see
-  step 3), **registers it with Obsidian and records its unique vault ID** in
+  `$REPO_ROOT/vault/example-vault/` (`cp -R vault/example-vault vault/<name>`), records the slug as
+  **`VAULT_NAME`** in `config/cos.env` (the loader derives `$VAULT_DIR` from it, and the vault plist's
+  **`COS_VAULT_DIR`** regenerates from that via `scripts/gen-launchd.mjs` when step 3 installs it),
+  **registers it with Obsidian and records its unique vault ID** in
   `config/settings.json` (so the board's `obsidian://` deep-links open THIS in-repo vault, not a
-  same-named copy elsewhere — STEP 3.5 of setup-vault), **registers it in the backup `SCOPE`**
-  (`backup/config.mjs`), and confirms it is **gitignored** (the real vault holds PII and is NOT
-  git-backed — its durability comes from step 4's encrypted off-site backup; only `example-vault`
-  is tracked).
+  same-named copy elsewhere — STEP 3.5 of setup-vault), **folds it into the backup `SCOPE`**
+  (auto-derived from `VAULT_NAME` in `backup/config.mjs` — no hand-edit), and confirms it is
+  **gitignored** (the real vault holds PII and is NOT git-backed — its durability comes from step 4's
+  encrypted off-site backup; only `example-vault` is tracked).
 - **Why FIRST** — the MCP needs a target to scope `COS_VAULT_DIR` to, and backup needs something
   to protect. Nothing downstream works without the vault directory existing.
 - **Prereq** — the committed template `$REPO_ROOT/vault/example-vault/` is present (it ships with
   the repo). Confirm: `ls "$REPO_ROOT/vault/example-vault/"`.
 - **Run** — invoke **`/setup-vault`** (or follow its steps): `cp -R vault/example-vault vault/<name>`,
-  fill `__VAULT_NAME__` where used, add `"vault/<name>"` to `SCOPE` in `backup/config.mjs` (and
-  remove an old vault entry if this replaces it).
+  record `VAULT_NAME="<name>"` in `config/cos.env` (backup `SCOPE` then auto-derives from it; the
+  vault plist's `COS_VAULT_DIR` regenerates from `$VAULT_DIR` when step 3 installs the bridge).
 - **CHECKPOINT** — all three must hold before step 2 (`VAULT_DIR` resolves to
   `$REPO_ROOT/vault/$VAULT_NAME` once setup-vault has set `VAULT_NAME` in `cos.env`):
   ```sh
@@ -182,8 +183,9 @@ fi
 - **What it does** — configures the **guard classifier model** the sidecar (`guard/sidecar.py`,
   `:8009`) runs: picks a preset (default the **gated Meta `Llama-Prompt-Guard-2-86M`**), accepts the
   Llama license + authenticates with `hf`, prefetches the model, sets
-  `COS_GUARD_MODEL`/`COS_GUARD_THRESHOLD`/`COS_GUARD_CLASSIFIER`, installs the guardsvc launchd
-  plist from its committed template, and verifies the sidecar reports the **real model**, not the
+  `COS_GUARD_MODEL`/`COS_GUARD_THRESHOLD`/`COS_GUARD_CLASSIFIER` in `config/cos.env`, installs the
+  guardsvc launchd plist (generated from `guard/guardsvc.service.json` by `scripts/gen-launchd.mjs`
+  — see `mcp/CLAUDE.md`), and verifies the sidecar reports the **real model**, not the
   `heuristic-fallback`. (The guard MCP *bridge* on `:8004` is wired in step 3 — this step is just
   the model + `:8009` sidecar.)
 - **Why now (before the bridges)** — wiring the guard bridge is pointless until the sidecar behind
@@ -194,7 +196,8 @@ fi
   token) — honest but degraded; you can upgrade to the model later.
 - **Run** — invoke **`/guard-setup`** (or follow its steps: `hf auth login` → `hf download
   meta-llama/Llama-Prompt-Guard-2-86M` → `uv sync --directory "$REPO_ROOT/guard" --extra model` →
-  install the `guard/deploy/com.chiefofstaff.mcp-guardsvc.plist.template` → `kickstart -k`).
+  set `COS_GUARD_MODEL`/`COS_GUARD_THRESHOLD` in `config/cos.env` →
+  `node "$REPO_ROOT/scripts/gen-launchd.mjs" --install guardsvc`).
 - **CHECKPOINT** — the sidecar is up and reports the real model (not the heuristic):
   ```sh
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"
@@ -220,11 +223,11 @@ fi
   **`config/secrets.env`** (copied from `config/secrets.env.example`) and exports the key before
   exec'ing supergateway — so the secret lives in one machine-local file, never in the installed
   plist or a committed file. `COS_VAULT_DIR` (= `$VAULT_DIR`, i.e. `$REPO_ROOT/vault/$VAULT_NAME`)
-  IS set in the installed plist (`EnvironmentVariables`) and the Cowork config; the **committed**
-  template `mcp/vault-server/deploy/com.chiefofstaff.mcp-vault.plist.template` carries only the
-  `__REPO__` + `__VAULT_NAME__` placeholders (their values come from `$REPO_ROOT` / `$VAULT_NAME`;
-  the API key has no placeholder — it stays in `config/secrets.env`). Restart it after editing the
-  key or the plist (rotating the key needs only this restart, no plist edit):
+  IS set in the installed plist (`EnvironmentVariables`) and the Cowork config; the plist is
+  generated from `mcp/vault-server/vault.service.json` by `scripts/gen-launchd.mjs` (it resolves
+  `$REPO_ROOT` / `$VAULT_DIR` from `config/load-config.sh` — see `mcp/CLAUDE.md`; the API key has no
+  placeholder, it stays in `config/secrets.env`). Restart it after editing the key (rotating the key
+  needs only this restart, no plist regen):
   ```sh
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"; U=$(id -u)
   launchctl bootout   gui/$U/com.chiefofstaff.mcp-vault 2>/dev/null || true
@@ -235,9 +238,11 @@ fi
   target); the **guard model from step 2** (so `:8004` reports the real classifier); an
   **ANTHROPIC_API_KEY** in **`config/secrets.env`** (`cp config/secrets.env.example config/secrets.env`,
   then edit in the `sk-ant-…` key) for the vault bridge.
-- **Run** — invoke **`/mcp-bridge-setup`** (or follow its steps: per-server plists for the core
-  four on 8001/8003/8004/8005, the search + guardsvc sidecar plists, register Cowork stdio +
-  Claude Code `.mcp.json`, `mcp/ensure-bridges.sh`).
+- **Run** — invoke **`/mcp-bridge-setup`** (or follow its steps: `node "$REPO_ROOT/scripts/gen-launchd.mjs"
+  --install` renders + loads the core plists — board/calendar/guard/vault bridges on 8001/8003/8004/8005
+  plus the search + guardsvc sidecars; `node "$REPO_ROOT/scripts/gen-mcp-json.mjs"` regenerates the
+  Claude Code `.mcp.json`; `node "$REPO_ROOT/scripts/gen-cowork-config.mjs" board calendar guard vault`
+  merges the Cowork stdio entries; `mcp/ensure-bridges.sh`).
 - **CHECKPOINT** — all four core bridges answer an MCP `initialize`, and the vault one is scoped:
   ```sh
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"; U=$(id -u)
@@ -333,8 +338,8 @@ fi
   stores (board `board/data/`, guard `guard/data/`, `config/`, and the **vault**) to a private
   GitHub repo, with the recovery key in the macOS Keychain (`cos-backup-key`) + an offline copy.
 - **Why LAST** — backup snapshots the **populated** stores; running it before the vault exists and
-  the bridges are wired would back up an empty/partial system. The backup `SCOPE` already lists the
-  vault entry you added in step 1.
+  the bridges are wired would back up an empty/partial system. The backup `SCOPE` already covers the
+  active vault — it auto-derives from the `VAULT_NAME` you recorded in step 1.
 - **Prereq** — a **private GitHub backup repo** (e.g. `gh repo create cos-backups --private`) and a
   **recovery passphrase** stored in the macOS Keychain as `cos-backup-key` (plus a password-manager
   copy — it is unrecoverable). The backup LaunchAgent (`com.chiefofstaff.backup`, daily 03:30)

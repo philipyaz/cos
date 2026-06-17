@@ -116,7 +116,11 @@ cd mcp/calendar-server && npm install
 ## `.mcp.json` entry (registry name: `calendar`)
 
 The bridge port for this server is **`8003`** (board = `8001`, openwhispr = `8002`,
-search = `8008`).
+search = `8008`). In this repo the committed `.mcp.json` (Claude Code) is **generated** from
+`mcp/calendar-server/calendar.service.json` by `scripts/gen-mcp-json.mjs`, the macOS launchd bridge
+plist by `scripts/gen-launchd.mjs`, and the Cowork direct-stdio entry by
+`scripts/gen-cowork-config.mjs` (see [`mcp/CLAUDE.md`](../CLAUDE.md) and the `/mcp-bridge-setup`
+skill). The blocks below show what those generators produce.
 
 ### Option A — HTTP via supergateway (the bridged setup)
 

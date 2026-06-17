@@ -112,26 +112,19 @@ earlier phase). Confirm it points at the `:8007` bridge — do **not** clobber t
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"
   grep -q '"nutrition"' "$REPO_ROOT/.mcp.json" && echo ".mcp.json nutrition entry OK"
   ```
-  If it is somehow missing, add the one entry above (merged into the existing `mcpServers`).
+  `.mcp.json` is GENERATED + CI-checked — never hand-edit it. If the entry is somehow missing,
+  regenerate it from the manifest: `node "$REPO_ROOT/scripts/gen-mcp-json.mjs"` (see `mcp/CLAUDE.md`).
 
 ### 4. Install the launchd BRIDGE (`:8007`)
-Install from the **committed template**
-`mcp/nutrition-server/deploy/com.chiefofstaff.mcp-nutrition.plist.template` — same pattern as the
-guardsvc/vault/whatsapp templates — substituting the loader's absolute paths + the bridge port
-(launchd cannot expand `$VARS`, so the rendered plist carries literal values):
+The plist is generated from `mcp/nutrition-server/nutrition.service.json` by
+`scripts/gen-launchd.mjs` (see `mcp/CLAUDE.md`) — it renders the descriptor against the loader's
+absolute paths + bridge port (launchd cannot expand `$VARS`, so the rendered plist carries literal
+values) AND does the `launchctl bootout → bootstrap → kickstart` in one step:
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"; U=$(id -u)
-mkdir -p "$REPO_ROOT/mcp/logs"
-sed -e "s#__BREW_PREFIX__#$BREW_PREFIX#g" \
-    -e "s#__REPO__#$REPO_ROOT#g" \
-    -e "s#__NUTRITION_BRIDGE_PORT__#${NUTRITION_BRIDGE_PORT:-8007}#g" \
-  "$REPO_ROOT/mcp/nutrition-server/deploy/com.chiefofstaff.mcp-nutrition.plist.template" \
-  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-nutrition.plist"
-launchctl bootout   gui/$U/com.chiefofstaff.mcp-nutrition 2>/dev/null || true
-launchctl bootstrap gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-nutrition.plist"
-launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-nutrition
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install nutrition
 ```
-The template runs supergateway DIRECTLY around the node child (no launch wrapper — like
+The bridge runs supergateway DIRECTLY around the node child (no launch wrapper — like
 board/calendar, UNLIKE vault, because this server needs **no secret**). Its only env is:
 - `PATH` starting with `$BREW_PREFIX/bin` (launchd can't see an nvm/asdf shim),
 - `CRM_BASE_URL=http://localhost:3000` (the board; pinned so it doesn't depend on the launchd cwd),
@@ -151,24 +144,12 @@ board/calendar, UNLIKE vault, because this server needs **no secret**). Its only
 `.mcp.json` (§3) covers **Claude Code**. **Claude Cowork Desktop** registers **differently**:
 `claude_desktop_config.json` (`$COWORK_CONFIG`) accepts **stdio `command` servers only** (an HTTP
 `url` is rejected — the same validated rule as mcp-bridge-setup §5). Cowork spawns the node server
-itself. Write it with a **backup-first node merge** that preserves the other servers + `preferences`
-and refreshes only the `nutrition` entry from the **resolved** loader values — mirroring
-mcp-bridge-setup's Cowork merge exactly:
+itself. Merge the `nutrition` entry with `gen-cowork-config.mjs` — it does a **backup-first** write
+that preserves the other servers + `preferences` and refreshes only the named `nutrition` entry from
+the **resolved** loader values (secrets inlined; named = additive):
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # resolves NODE_BIN/REPO_ROOT/BOARD_URL/COWORK_CONFIG from cos.env
-"$NODE_BIN" - <<'NODE'
-const fs = require('node:fs'), E = process.env;
-const server = {
-  command: E.NODE_BIN,
-  args: [`${E.REPO_ROOT}/mcp/nutrition-server/server.mjs`],
-  env: { CRM_BASE_URL: E.BOARD_URL || 'http://localhost:3000' },   // the board; NO secret, NO idle-exit here
-};
-const p = E.COWORK_CONFIG, cfg = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p,'utf8')) : {};
-cfg.mcpServers = { ...(cfg.mcpServers||{}), nutrition: server };   // refresh OURS; keep other servers + preferences intact
-if (fs.existsSync(p)) fs.copyFileSync(p, p + '.bak');             // back up before write
-fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n');
-console.log('Cowork mcpServers ->', Object.keys(cfg.mcpServers).join(', '));
-NODE
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-cowork-config.mjs" nutrition
 ```
 - **Absolute `node` path** (`$NODE_BIN`, from the loader): Claude Desktop's spawn env, like
   launchd's, lacks Homebrew on `PATH`.
@@ -324,13 +305,13 @@ echo "Uninstalled the nutrition bridge + both registrations. ⌘Q + reopen Cowor
   and the search sidecar `:8008`. A foreign process on it breaks §4 — change `NUTRITION_BRIDGE_PORT`
   in `cos.env` and re-render §3/§4.
 - **launchd cannot expand `$VARS`.** As with every Cos plist, the **rendered** plist in
-  `~/Library/LaunchAgents` carries **literal absolute paths** (`sed`-substituted from the loader in
-  §4) and a `PATH` that starts with `$BREW_PREFIX/bin` — launchd never inherits your login shell and
-  can't see an nvm/asdf shim. The template invokes supergateway by its **absolute**
-  `$BREW_PREFIX/bin/supergateway` path; the inner `--stdio "node …/server.mjs"` child resolves
-  `node` via that `$BREW_PREFIX/bin`-leading `PATH` (supergateway's own `#!/usr/bin/env node` shebang
-  needs it too), which is why the `PATH` placeholder is load-bearing.
+  `~/Library/LaunchAgents` carries **literal absolute paths** (resolved from the loader by
+  `scripts/gen-launchd.mjs` in §4) and a `PATH` that starts with `$BREW_PREFIX/bin` — launchd never
+  inherits your login shell and can't see an nvm/asdf shim. The generated plist invokes supergateway
+  by its **absolute** `$BREW_PREFIX/bin/supergateway` path; the inner `--stdio "node …/server.mjs"`
+  child resolves `node` via that `$BREW_PREFIX/bin`-leading `PATH` (supergateway's own
+  `#!/usr/bin/env node` shebang needs it too), which is why the `PATH` is load-bearing.
 - **The node/simdjson + pm2 gotchas in mcp-bridge-setup apply here too** — same Node, same
   supergateway, same launchd supervisor. If the bridge dies with a `libsimdjson` dyld error after a
-  `brew install`, `brew reinstall node`. Don't reintroduce pm2 (the template notes pm2 6.x can't
-  fork on this machine — launchd owns the lifecycle).
+  `brew install`, `brew reinstall node`. Don't reintroduce pm2 (pm2 6.x can't fork on this machine —
+  launchd owns the lifecycle).

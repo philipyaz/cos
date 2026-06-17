@@ -55,6 +55,15 @@ jobs:
       - name: Install workspace deps
         run: npm ci
 
+      # Service manifest is the single source of truth for the MCP bridges/sidecars on every OS:
+      # assert every descriptor still resolves, and that the committed .mcp.json equals generator
+      # output (so a hand-edit of .mcp.json — or a drifted descriptor — fails the build instead of
+      # silently diverging). Mirrors the gen-labels-doc generated-file discipline. Needs only node + sh.
+      - name: Check service manifest + generated .mcp.json
+        run: |
+          node mcp/service-manifest.mjs --json > /dev/null
+          node scripts/gen-mcp-json.mjs --check
+
       # Board deps so start_test_board finds node_modules/.bin/next and the
       # api-* integration steps RUN instead of silently skipping.
       - name: Install board deps

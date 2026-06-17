@@ -66,8 +66,9 @@ loop, collapses to one job plus a submission count instead of fanning out duplic
 
 ## The runner
 
-`jobs-runner.mjs` is a launchd sidecar (like the guard/search sidecars), installed from
-[`deploy/com.chiefofstaff.mcp-vaultjobs.plist.template`](https://github.com/philipyaz/cos/blob/main/mcp/vault-server/deploy/com.chiefofstaff.mcp-vaultjobs.plist.template)
+`jobs-runner.mjs` is a launchd runner (like the guard/search sidecars), whose plist is generated
+from its descriptor [`mcp/vault-server/vaultjobs.service.json`](https://github.com/philipyaz/cos/blob/main/mcp/vault-server/vaultjobs.service.json)
+by `scripts/gen-launchd.mjs` (see [`mcp/CLAUDE.md`](https://github.com/philipyaz/cos/blob/main/mcp/CLAUDE.md))
 and supervised by `ensure-bridges.sh`. It owns execution: on boot it requeues jobs orphaned by a
 previous crash (a dead-pid `running` job → back to `working`), then claims and runs jobs one at a
 time. It needs `ANTHROPIC_API_KEY` (sourced by `jobs-runner-launch.sh` from `config/secrets.env`) and

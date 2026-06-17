@@ -96,46 +96,35 @@ mv "$tmp" "$REPO_ROOT/config/cos.env"
 grep '^VAULT_NAME=' "$REPO_ROOT/config/cos.env"   # confirm exactly one line, the new name
 ```
 
-`COS_VAULT_DIR` is then set in TWO places: the **installed launchd plist** and the **Cowork config**.
+`COS_VAULT_DIR` flows from `VAULT_NAME` into TWO places: the **installed launchd plist** (it is
+**`${VAULT_DIR}`** in the vault descriptor, resolved at generation time) and the **Cowork config**.
 
-**Installed plist** — `$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vault.plist`. If it does **not**
-exist, the bridge has not been installed yet: tell the user to run **mcp-bridge-setup** first (or, if
-this is `cos-setup`, that orchestrator runs the MCP step AFTER this — note it and skip the plist edit
-for now; the operator will set `COS_VAULT_DIR` to `vault/<name>` when installing). If it exists, point
-its `COS_VAULT_DIR` `<string>` at the new vault (rewrite ONLY the `COS_VAULT_DIR` value, not other
-absolute paths):
+**Installed plist** — `$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vault.plist`. You do **not** hand-edit
+its `COS_VAULT_DIR` `<string>` anymore: the plist is generated from
+`mcp/vault-server/vault.service.json` by `scripts/gen-launchd.mjs`, which resolves `COS_VAULT_DIR =
+${VAULT_DIR}` from the `VAULT_NAME` you just recorded (see `mcp/CLAUDE.md`). Regenerate + reload it in
+one step — the generator renders the plist AND does `launchctl bootout`→`bootstrap`→`kickstart` on
+macOS. (If this is `cos-setup`, the orchestrator runs the MCP step AFTER this with `gen-launchd
+--install` for all core services — note it and skip this command for now; the regenerated plist will
+pick up your `VAULT_NAME` then.)
 
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # gives $REPO_ROOT, $LAUNCH_AGENTS_DIR (fresh shell)
-name="<name>"   # the literal slug from STEP 1
-# Re-validate the slug before any plist write — an empty/invalid $name would rewrite
-# COS_VAULT_DIR to the vault PARENT dir and corrupt the installed plist.
-case "$name" in (*[!a-z0-9-]*|"") echo "bad slug"; exit 1;; esac
-PLIST="$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vault.plist"
-test -f "$PLIST" || { echo "MISSING: run mcp-bridge-setup first (or cos-setup sequences it after)"; }
-# Replace the <string> immediately after the COS_VAULT_DIR <key>.
-/usr/bin/perl -0pi -e \
-  "s#(<key>COS_VAULT_DIR</key>\s*<string>)[^<]*(</string>)#\${1}$REPO_ROOT/vault/$name\${2}#" "$PLIST"
-grep -A1 COS_VAULT_DIR "$PLIST"   # confirm it now reads $REPO_ROOT/vault/$name
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # gives $REPO_ROOT, $VAULT_DIR (fresh shell)
+# VAULT_NAME (recorded above) drives $VAULT_DIR → the generated COS_VAULT_DIR. No slug substitution here.
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install vault
+grep -A1 COS_VAULT_DIR "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vault.plist"   # confirm it reads $VAULT_DIR
 ```
 
 **Async ingest runner** — the vault also has a detached jobs-runner sidecar
 (`com.chiefofstaff.mcp-vaultjobs`) that executes async `ingest` jobs (see
-[docs/reference/vault-async.md](../../../docs/reference/vault-async.md)). Install it from its committed
-template the same way — it carries the same `__REPO__` + `__VAULT_NAME__` placeholders, needs
-`ANTHROPIC_API_KEY` (its launch wrapper sources `config/secrets.env`), and has no port:
+[docs/reference/vault-async.md](../../../docs/reference/vault-async.md)). It is generated from its
+descriptor `mcp/vault-server/vaultjobs.service.json` the same way — `COS_VAULT_DIR = ${VAULT_DIR}`,
+needs `ANTHROPIC_API_KEY` (its launch wrapper `jobs-runner-launch.sh` sources `config/secrets.env`),
+and has no port. It is `optional`, so name it explicitly:
 
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # gives $REPO_ROOT, $LAUNCH_AGENTS_DIR
-name="<name>"   # the literal slug from STEP 1
-case "$name" in (*[!a-z0-9-]*|"") echo "bad slug"; exit 1;; esac
-U=$(id -u)
-sed -e "s#__REPO__#$REPO_ROOT#g" -e "s#__VAULT_NAME__#$name#g" \
-  "$REPO_ROOT/mcp/vault-server/deploy/com.chiefofstaff.mcp-vaultjobs.plist.template" \
-  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vaultjobs.plist"
-launchctl bootout   gui/$U/com.chiefofstaff.mcp-vaultjobs 2>/dev/null || true
-launchctl bootstrap gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vaultjobs.plist"
-launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-vaultjobs
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # gives $REPO_ROOT
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install vaultjobs
 launchctl list | grep com.chiefofstaff.mcp-vaultjobs   # loaded?
 tail -n 3 "$REPO_ROOT/mcp/logs/vaultjobs.err.log"      # expect "[vault-jobs] runner up …" with NO fatal line after it
 ```
@@ -175,14 +164,9 @@ if [ -f "$COWORK_CONFIG" ] && grep -q '"vault"' "$COWORK_CONFIG"; then
 else echo "No Cowork vault entry — skipping (mcp-bridge-setup wires Cowork)."; fi
 ```
 
-**Restart the bridge and verify** (only if the installed plist exists):
+**Verify the bridge** (the `gen-launchd --install vault` above already reloaded it; just confirm):
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # gives $REPO_ROOT, $LAUNCH_AGENTS_DIR, $VAULT_BRIDGE_PORT (fresh shell)
-name="<name>"   # the literal slug from STEP 1
-U=$(id -u)
-launchctl bootout   gui/$U/com.chiefofstaff.mcp-vault 2>/dev/null || true
-launchctl bootstrap gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vault.plist"
-launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-vault
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # gives $REPO_ROOT, $VAULT_BRIDGE_PORT (fresh shell)
 sleep 2   # supergateway + node cold start
 # initialize → serverInfo.name must be "vault"
 curl -s -X POST "http://127.0.0.1:$VAULT_BRIDGE_PORT/mcp" \
@@ -192,10 +176,11 @@ curl -s -X POST "http://127.0.0.1:$VAULT_BRIDGE_PORT/mcp" \
 # the server ready line must echo the NEW COS_VAULT_DIR
 grep COS_VAULT_DIR "$REPO_ROOT/mcp/logs/vault.out.log" | tail -1
 ```
-`serverInfo.name=="vault"` AND the ready line echoing `$REPO_ROOT/vault/$name` = bridge is up and pointed at
-the new vault. (The vault server also needs a real `ANTHROPIC_API_KEY` for its outbound LLM calls —
-this lives in the gitignored `config/secrets.env`, loaded by the launch wrapper, NOT in the plist;
-mcp-bridge-setup sets it up. A cold start may connection-refuse for a few seconds — re-probe.)
+`serverInfo.name=="vault"` AND the ready line echoing `$VAULT_DIR` (= `$REPO_ROOT/vault/<name>`) = bridge
+is up and pointed at the new vault. (The vault server also needs a real `ANTHROPIC_API_KEY` for its
+outbound LLM calls — this lives in the gitignored `config/secrets.env`, loaded by the launch wrapper,
+NOT in the plist; mcp-bridge-setup sets it up. A cold start may connection-refuse for a few seconds —
+re-probe.)
 
 ## STEP 3.5 — Register with Obsidian & capture the vault ID (deep-links)
 
@@ -343,13 +328,15 @@ which classifies and files items into the per-domain (`work/`, `life/`, `shared/
   `config/secrets.env` (the launch wrapper sources it). The bridge still boots (fail-soft); fix the key
   and `launchctl kickstart -k gui/$(id -u)/com.chiefofstaff.mcp-vault`. Note `COS_VAULT_MODEL` must be a
   valid public-API model id (default `claude-sonnet-4-6`) — a stale id 404s with `not_found_error`.
-- **Ready line still shows the OLD vault** — the `COS_VAULT_DIR` perl-replace didn't land or you didn't
-  `kickstart -k`. Re-check `grep -A1 COS_VAULT_DIR "$PLIST"`, then bootout/bootstrap/kickstart again.
+- **Ready line still shows the OLD vault** — `VAULT_NAME` didn't land in `config/cos.env` (re-run the
+  STEP 3 `cos.env` block) or you didn't regenerate the plist. Re-check
+  `grep -A1 COS_VAULT_DIR "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vault.plist"`, then
+  `node "$REPO_ROOT/scripts/gen-launchd.mjs" --install vault` again (it bootout/bootstrap/kickstarts for you).
 - **`git check-ignore` prints nothing** — the broad `/vault/*` + `!/vault/example-vault/` pattern isn't
   in `.gitignore` (a single `vault/<old-name>/` line only covers that one name). Add the two lines
   above. NEVER `git add` a real vault.
-- **Installed plist absent** — the bridge isn't installed; run **mcp-bridge-setup** (it copies the
-  committed template `mcp/vault-server/deploy/com.chiefofstaff.mcp-vault.plist.template`, substituting
-  `__REPO__` + `__VAULT_NAME__` with `$REPO_ROOT` + `$VAULT_NAME`; the API key is NOT a plist
-  placeholder — it lives in `config/secrets.env`, loaded by `launch.sh`). From `cos-setup`, that step
-  runs after this.
+- **Installed plist absent** — the bridge isn't installed; run **mcp-bridge-setup** (it generates the
+  plist from `mcp/vault-server/vault.service.json` via `scripts/gen-launchd.mjs`, resolving
+  `COS_VAULT_DIR = ${VAULT_DIR}` from `config/load-config.sh` — see `mcp/CLAUDE.md`; the API key is NOT
+  a plist placeholder — it lives in `config/secrets.env`, loaded by `launch.sh`). From `cos-setup`, that
+  step runs after this.

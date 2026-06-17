@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "name": "board",
+  "kind": "bridge",
+  "runtime": "bridge",
+  "core": true,
+  "portVar": "BOARD_BRIDGE_PORT",
+  "stdio": ["${NODE_BIN}", "${REPO_ROOT}/mcp/board-server/server.mjs"],
+  "env": { "CRM_BASE_URL": "${BOARD_URL}" },
+  "idleExit": true,
+  "clients": ["claude-code", "cowork"],
+  "probe": { "type": "httpListen" }
+}

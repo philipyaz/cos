@@ -1,139 +1,128 @@
 #!/bin/sh
-# Ensure the MCP HTTP bridges (board :8001, openwhispr :8002, calendar :8003,
-# guard :8004, vault :8005, whatsapp :8006, nutrition :8007) + the uv sidecars (search :8008,
-# guardsvc :8009) + the WhatsApp Go bridge sidecar (:8010) are loaded + running.
+# mcp/ensure-bridges.sh — the "make sure the MCP bridges + sidecars are up right now" nudge, called
+# from board/package.json predev/prestart (via mcp/ensure-bridges.cjs) so the bridges are guaranteed
+# up whenever the app comes up. One-way on purpose: it NEVER stops anything — Claude Cowork Desktop
+# needs the bridges even when the dev app is down.
 #
-# Called from board/package.json `dev`/`start` so that whenever the app comes up,
-# the bridges are guaranteed up too. One-way on purpose: this NEVER stops them —
-# Claude Cowork Desktop needs the bridges even when the dev app is down, and
-# openwhispr doesn't depend on the app at all. launchd still owns their lifecycle
-# (boot + crash-restart); this is just a "make sure they're up right now" nudge.
+# SINGLE SOURCE OF TRUTH: the service list + ports come from `node mcp/service-manifest.mjs
+# --probe-list` (the descriptors + config/load-config.sh), NOT a hardcoded list here. Add a service by
+# dropping a descriptor; this script picks it up with no edit. (See mcp/CLAUDE.md.)
 #
-# The search sidecar (search/sidecar.py, uv-run on :8008) is a pure ranking
-# ACCELERATOR over the same cases.json — never a hard dependency. So it gets the
-# same nudge, but its probe is lenient: a missing/cold sidecar only WARNs (the
-# board's POST /api/search degrades to a keyword scan), it must never block.
+# PLATFORMS (gated on `uname`, NOT on a missing launchctl — Linux/CI have no launchctl either):
+#   - macOS   : launchd owns lifecycle (RunAtLoad + KeepAlive); this bootstraps + kickstarts each
+#               installed LaunchAgent, then probes.
+#   - Windows : delegates to mcp/cos-services.cjs (the Node process manager; no launchd).
+#   - other   : probe-only (no supervisor) — best-effort.
 #
-# The guard sidecar (guard/sidecar.py, uv-run on :8009) is the prompt-injection
-# classifier behind the guard MCP (:8004). It probes lenient like search (a uv
-# sidecar listens before its classifier is warm, and the first launch may
-# provision a venv), BUT note the SECURITY posture is the OPPOSITE of search:
-# the guard MCP FAILS CLOSED — if the sidecar is down, scan_email/classify_text
-# return an explicit UNTRUSTED verdict, they do NOT pretend content is clean.
-# This script's WARN here is only about boot timing; the safety is in the MCP.
+# SECURITY POSTURE (unchanged): the search sidecar is a pure accelerator — a cold/missing one only
+# WARNs (board /api/search degrades to a keyword scan). The guard sidecar's WARN here is only about
+# boot timing: the guard MCP FAILS CLOSED if the sidecar is down (scan_email/classify_text return an
+# explicit UNTRUSTED verdict — they never pretend content is clean). So both probe leniently.
 #
-# Always exits 0 (best-effort): a bridge hiccup must not block the app from starting.
+# Always exits 0 (best-effort): a bridge hiccup must never block the app from starting.
 set -u
-U=$(id -u)
-LA="$HOME/Library/LaunchAgents"
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 
-# Source the machine config (REPO_ROOT + the exported *_BRIDGE_PORT / *_SIDECAR_PORT
-# vars) so a port override in config/cos.env propagates to the probes below. Guarded
-# with [ -f ] so this still works if the loader is absent; the loader itself seeds the
-# standard-port defaults, so $name_PORT is always set after sourcing.
+# Machine config (REPO_ROOT, ports, NODE_BIN, LAUNCH_AGENTS_DIR, WHATSAPP_*). The loader seeds
+# defaults, so the vars below are always set after sourcing.
 if [ -f "$REPO/config/load-config.sh" ]; then
   . "$REPO/config/load-config.sh"
 fi
-# Honor a LAUNCH_AGENTS_DIR override from the loader (config/cos.env) over the default above,
-# so the short-circuit glob and the bootstrap loop both target the configured location.
-LA="${LAUNCH_AGENTS_DIR:-$LA}"
+NODE="${NODE_BIN:-node}"
+LA="${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 
-# Fresh-clone short-circuit: with NO bridges installed yet (e.g. a clone that hasn't run
-# cos-setup), bootstrapping all nine services just prints a wall of "WARN ... DOWN" lines.
-# The board UI works fine without any bridge (they're for the MCP clients), so say so once
-# and exit 0 — `npm run dev` then starts Next cleanly with no scary output.
-if ! ls "$LA"/com.chiefofstaff.mcp-*.plist >/dev/null 2>&1; then
-  echo "[mcp] bridges not set up yet — run cos-setup to wire them. The board UI works without them."
+# The canonical service list: "<name> <port|-> <kind> <probe> <gate>" lines from the manifest.
+PROBE_LIST=$("$NODE" "$REPO/mcp/service-manifest.mjs" --probe-list 2>/dev/null)
+if [ -z "$PROBE_LIST" ]; then
+  echo "[mcp] could not read the service manifest (node + mcp/service-manifest.mjs). Skipping bridge nudge."
   exit 0
 fi
 
-# The bridges + sidecars to ensure, as "<name> <port>" pairs built from the config vars
-# (falling back to the standard literal if a var is somehow unset). The name is BOTH the
-# launchd label suffix (com.chiefofstaff.mcp-<name>) and the probe label below; search +
-# guardsvc are the uv sidecars (lenient /healthz probe), the rest are HTTP bridges.
-SERVICES="
-board ${BOARD_BRIDGE_PORT:-8001}
-openwhispr ${OPENWHISPR_BRIDGE_PORT:-8002}
-calendar ${CALENDAR_BRIDGE_PORT:-8003}
-guard ${GUARD_BRIDGE_PORT:-8004}
-vault ${VAULT_BRIDGE_PORT:-8005}
-vaultjobs -
-whatsapp ${WHATSAPP_MCP_BRIDGE_PORT:-8006}
-nutrition ${NUTRITION_BRIDGE_PORT:-8007}
-search ${SEARCH_SIDECAR_PORT:-8008}
-guardsvc ${GUARD_SIDECAR_PORT:-8009}
-whatsappbridge ${WHATSAPP_GO_PORT:-8010}
-"
-
-echo "$SERVICES" | while read -r name port; do
-  [ -n "$name" ] || continue
-  label="com.chiefofstaff.mcp-$name"
-  # bootstrap = load if not already loaded (no-op + harmless error if loaded)
-  launchctl bootstrap gui/"$U" "$LA/$label.plist" 2>/dev/null
-  # kickstart = start it now if KeepAlive hasn't already
-  launchctl kickstart "gui/$U/$label" 2>/dev/null
-done
-
-sleep 1
-echo "$SERVICES" | while read -r name port; do
-  [ -n "$name" ] || continue
-  # Optional add-ons: if not installed on this machine (no plist), skip the probe silently —
-  # don't WARN about a server the user never set up. (Core servers still warn if absent.)
-  case "$name" in
-    openwhispr|whatsapp|whatsappbridge|vaultjobs|nutrition)
-      [ -f "$LA/com.chiefofstaff.mcp-$name.plist" ] || continue ;;
-  esac
-  if [ "$name" = search ] || [ "$name" = guardsvc ]; then
-    # uv sidecars (search :8008, guardsvc :8009). Slow cold start: the first launch
-    # provisions a uv venv (and search downloads a ~30MB model), so a bare
-    # port-listen check would false-positive before the engine is warm. Probe
-    # /healthz (greens only once the classifier/embedder is loaded) and stay
-    # lenient. For search, keyword search covers the gap. For guardsvc, the guard
-    # MCP fails CLOSED if the sidecar is down (untrusted-by-default), so a cold
-    # sidecar is safe — it's a WARN here, never a block. The default model is the
-    # gated Llama-Prompt-Guard-2-86M, prefetchable per the guard-setup skill; once
-    # prefetched, auto mode loads the real model (else it uses the heuristic fallback).
-    # Probe the sidecar's configured base URL (from the loader; a cos.env override of
-    # the port/URL propagates here too); fall back to the loopback literal if unset.
-    if [ "$name" = guardsvc ]; then
-      base="${GUARD_SIDECAR_URL:-http://127.0.0.1:$port}"
-    else
-      base="${SEARCH_SIDECAR_URL:-http://127.0.0.1:$port}"
-    fi
-    if curl -s --max-time 2 "$base/healthz" | grep -q '"ok":true' 2>/dev/null; then
-      echo "[mcp] $name up on :$port"
-    elif [ "$name" = guardsvc ]; then
-      echo "[mcp] WARN: guardsvc starting on :$port (first launch provisions a venv; once the gated Llama-Prompt-Guard-2 model is prefetched per the guard-setup skill, auto mode loads the real model — until then it falls back to the heuristic classifier) — guard MCP fails CLOSED meanwhile (see $REPO/mcp/logs/guardsvc.err.log)"
-    else
-      echo "[mcp] WARN: search starting on :$port (first launch provisions a venv + ~30MB model, ~30s) — keyword search works meanwhile (see $REPO/mcp/logs/search.err.log)"
-    fi
-  elif [ "$name" = whatsappbridge ]; then
-    # The Go whatsmeow bridge: a LISTENING PORT does NOT mean WhatsApp is connected — the
-    # daemon (launchd-supervised) can be up while the session is dead/expired. Probe
-    # /api/health, which reports the LIVE client.IsConnected() (authed with the bridge token
-    # from store/.bridge-token), so the warning reflects the actual WhatsApp connection.
-    tok="$WHATSAPP_MCP_DIR/whatsapp-bridge/store/.bridge-token"
-    base="${WHATSAPP_GO_URL:-http://127.0.0.1:$port}"
-    if [ -f "$tok" ] && curl -s --max-time 2 -H "Authorization: Bearer $(cat "$tok")" "$base/api/health" 2>/dev/null | grep -q '"connected":true'; then
-      echo "[mcp] whatsappbridge up on :$port (WhatsApp session connected)"
-    elif lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-      echo "[mcp] WARN: whatsappbridge on :$port but WhatsApp is NOT connected — cold start, or the linked device/session expired; re-pair via /whatsapp-mcp-setup if it persists (see $REPO/mcp/logs/whatsappbridge.out.log)"
-    else
-      echo "[mcp] WARN: whatsappbridge DOWN on :$port — see $REPO/mcp/logs/whatsappbridge.err.log"
-    fi
-  elif [ "$name" = vaultjobs ]; then
-    # The async ingest RUNNER (executes detached ingest jobs) — a sidecar with NO listening port.
-    # Liveness = the launchd job is loaded (KeepAlive restarts it on crash); confirm via launchctl.
-    if launchctl list 2>/dev/null | grep -q "com.chiefofstaff.mcp-vaultjobs"; then
-      echo "[mcp] vaultjobs runner up (async ingest executor; no port)"
-    else
-      echo "[mcp] WARN: vaultjobs runner not loaded — async ingest jobs won't execute (see $REPO/mcp/logs/vaultjobs.err.log)"
-    fi
-  elif lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "[mcp] $name bridge up on :$port"
+# --- probe helpers (used by every platform branch) -------------------------------------------------
+# httpListen: a listening bridge answers (even an HTTP error) on /mcp; connection-refused = down.
+probe_listen() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
   else
-    echo "[mcp] WARN: $name bridge DOWN on :$port — see $REPO/mcp/logs/$name.err.log"
+    curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$1/mcp"
   fi
-done
-exit 0
+}
+probe_healthz() { curl -s --max-time 2 "http://127.0.0.1:$1/healthz" 2>/dev/null | grep -q '"ok":true'; }
+
+# Run the right check for one service line + emit a status/WARN. The 6th arg `installed` is 1 when the
+# caller already confirmed the service is set up on this machine (the Darwin branch filters out
+# opted-out add-ons by plist BEFORE calling, so an installed-but-DOWN add-on must still WARN — losing
+# that WARN was a diagnostic regression vs the old script). We WARN on down when installed OR core;
+# an opted-out optional service (installed=0, gate!=core) stays quiet so we don't nag.
+probe_one() {
+  name=$1 port=$2 kind=$3 probe=$4 gate=$5 installed=${6:-0}
+  warn=0
+  { [ "$installed" = 1 ] || [ "$gate" = core ]; } && warn=1
+  case "$probe" in
+    httpListen)
+      if probe_listen "$port"; then echo "[mcp] $name up on :$port"
+      elif [ "$warn" = 1 ]; then echo "[mcp] WARN: $name DOWN on :$port — see mcp/logs/$name.err.log"; fi ;;
+    healthz)
+      # Sidecars are core → always probed; a cold uv venv listens before the engine is warm, so this
+      # is lenient (WARN, never block).
+      if probe_healthz "$port"; then echo "[mcp] $name up on :$port"
+      elif [ "$name" = guardsvc ]; then echo "[mcp] WARN: guardsvc starting on :$port (first launch provisions a venv; until the gated model is prefetched it uses the heuristic fallback) — guard MCP fails CLOSED meanwhile (see mcp/logs/guardsvc.err.log)"
+      else echo "[mcp] WARN: $name starting on :$port (first launch provisions a venv + ~30MB model, ~30s; keyword search works meanwhile — see mcp/logs/$name.err.log)"; fi ;;
+    bearerHealth)
+      tok="${WHATSAPP_MCP_DIR:-}/whatsapp-bridge/store/.bridge-token"
+      base="${WHATSAPP_GO_URL:-http://127.0.0.1:$port}"
+      if [ -f "$tok" ] && curl -s --max-time 2 -H "Authorization: Bearer $(cat "$tok")" "$base/api/health" 2>/dev/null | grep -q '"connected":true'; then
+        echo "[mcp] $name up on :$port (WhatsApp session connected)"
+      elif probe_listen "$port"; then echo "[mcp] WARN: $name on :$port but WhatsApp NOT connected — cold start or session expired; re-pair via /whatsapp-mcp-setup (see mcp/logs/$name.out.log)"
+      elif [ "$warn" = 1 ]; then echo "[mcp] WARN: $name DOWN on :$port — see mcp/logs/$name.err.log"; fi ;;
+    process)
+      if launchctl list 2>/dev/null | grep -q "com.chiefofstaff.mcp-$name"; then echo "[mcp] $name runner up (no port)"
+      elif [ "$warn" = 1 ]; then echo "[mcp] WARN: $name runner not loaded (see mcp/logs/$name.err.log)"; fi ;;
+  esac
+}
+
+OS=$(uname -s 2>/dev/null || echo unknown)
+case "$OS" in
+  MINGW* | MSYS* | CYGWIN* | Windows_NT)
+    # --- Windows: the Node process manager supervises everything (no launchd). NOTE: the normal
+    # predev path reaches Windows via mcp/ensure-bridges.cjs (which calls cos-services directly); this
+    # branch only fires if someone runs `sh ensure-bridges.sh` by hand under Git Bash. ---
+    "$NODE" "$REPO/mcp/cos-services.cjs" start
+    exit 0
+    ;;
+  Darwin)
+    # --- macOS: launchd. Fresh-clone short-circuit — no installed agents yet → say so once + exit. ---
+    if ! ls "$LA"/com.chiefofstaff.mcp-*.plist >/dev/null 2>&1; then
+      echo "[mcp] bridges not set up yet — run cos-setup to wire them. The board UI works without them."
+      exit 0
+    fi
+    U=$(id -u)
+    # bootstrap + kickstart every INSTALLED agent (a missing optional plist is skipped silently).
+    echo "$PROBE_LIST" | while IFS=' 	' read -r name port kind probe gate; do
+      [ -n "$name" ] || continue
+      label="com.chiefofstaff.mcp-$name"
+      if [ ! -f "$LA/$label.plist" ]; then
+        [ "$gate" = core ] && echo "[mcp] WARN: $name not installed ($label.plist missing) — run cos-setup"
+        continue
+      fi
+      launchctl bootstrap gui/"$U" "$LA/$label.plist" 2>/dev/null
+      launchctl kickstart "gui/$U/$label" 2>/dev/null
+    done
+    sleep 1
+    echo "$PROBE_LIST" | while IFS=' 	' read -r name port kind probe gate; do
+      [ -n "$name" ] || continue
+      [ -f "$LA/com.chiefofstaff.mcp-$name.plist" ] || continue
+      probe_one "$name" "$port" "$kind" "$probe" "$gate" 1   # installed=1: plist present, so WARN if down
+    done
+    exit 0
+    ;;
+  *)
+    # --- other (Linux/CI): no bundled supervisor — just probe what happens to be up. ---
+    echo "[mcp] no bundled supervisor for $OS — probing only (start services yourself)."
+    echo "$PROBE_LIST" | while IFS=' 	' read -r name port kind probe gate; do
+      [ -n "$name" ] || continue
+      probe_one "$name" "$port" "$kind" "$probe" "$gate"
+    done
+    exit 0
+    ;;
+esac

@@ -120,8 +120,10 @@ flowchart TB
   fronted by a launchd bridge** (a supergateway LaunchAgent, exactly like the core bridges — see
   [MCP servers](mcp-servers.md)). **Flipping the database flag does not start that process.** Nothing
   hot-loads a daemon. The bridge is **installed and loaded once, out of band**, by the add-on's
-  **setup skill** (the `mcp.setupSkill` in the manifest) — it renders the committed plist template,
-  loads it under launchd, and wires the `.mcp.json` entry.
+  **setup skill** (the `mcp.setupSkill` in the manifest) — it generates the plist from the service's
+  descriptor (`mcp/<name>-server/<name>.service.json`) via `scripts/gen-launchd.mjs` (see
+  [`mcp/CLAUDE.md`](https://github.com/philipyaz/cos/blob/main/mcp/CLAUDE.md)), loads it under
+  launchd, and wires the `.mcp.json` entry.
 
 So the honest mental model has **two clocks**: the *in-board* surface (nav + API gate) activates the
 instant you toggle the flag; the *agent* surface (the MCP bridge) activates when you run the setup

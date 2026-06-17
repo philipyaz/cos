@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "name": "vaultjobs",
+  "kind": "runner",
+  "runtime": "exec",
+  "optional": true,
+  "exec": ["${NODE_BIN}", "${REPO_ROOT}/mcp/vault-server/jobs-runner.mjs"],
+  "env": { "COS_VAULT_DIR": "${VAULT_DIR}" },
+  "secrets": ["ANTHROPIC_API_KEY"],
+  "secretWrapper": "${REPO_ROOT}/mcp/vault-server/jobs-runner-launch.sh",
+  "cwd": "${REPO_ROOT}",
+  "clients": [],
+  "probe": { "type": "process" }
+}

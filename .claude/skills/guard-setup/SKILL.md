@@ -1,6 +1,6 @@
 ---
 name: guard-setup
-description: Set up the prompt-injection Guard classifier model end-to-end — pick a named model preset (default the gated Meta Llama-Prompt-Guard-2-86M), accept the Llama license + authenticate with the current `hf` CLI, prefetch the gated model, configure COS_GUARD_MODEL/THRESHOLD/CLASSIFIER, install/update the guardsvc launchd plist from the committed template, and verify the sidecar (:8009) + guard MCP (:8004) report the real model and not the heuristic fallback. Use when setting up Guard on a new machine, switching the guard model/preset, the guard is silently stuck on the heuristic fallback, after gaining HuggingFace access to a gated model, or when GatedRepoError / a cold sidecar appears in the guard logs.
+description: Set up the prompt-injection Guard classifier model end-to-end — pick a named model preset (default the gated Meta Llama-Prompt-Guard-2-86M), accept the Llama license + authenticate with the current `hf` CLI, prefetch the gated model, configure COS_GUARD_MODEL/THRESHOLD/CLASSIFIER in config/cos.env, install/reload the guardsvc launchd plist via gen-launchd.mjs, and verify the sidecar (:8009) + guard MCP (:8004) report the real model and not the heuristic fallback. Use when setting up Guard on a new machine, switching the guard model/preset, the guard is silently stuck on the heuristic fallback, after gaining HuggingFace access to a gated model, or when GatedRepoError / a cold sidecar appears in the guard logs.
 ---
 
 # Guard model setup (prompt-injection classifier)
@@ -101,8 +101,10 @@ Alternatives if you can't / won't gate:
   token. Degraded but honest (`heuristic-fallback`).
 
 ## Configuration
-Three env vars drive selection (set in the plist `EnvironmentVariables`, or the shell when running by
-hand). Model selection and backend selection are **orthogonal**.
+Three env vars drive selection. `COS_GUARD_MODEL` and `COS_GUARD_THRESHOLD` are set in
+`config/cos.env` (the descriptor pulls them in when `gen-launchd.mjs` renders the plist);
+`COS_GUARD_CLASSIFIER` can also be set there or exported in the shell when running by hand. Model
+selection and backend selection are **orthogonal**.
 
 - **`COS_GUARD_MODEL`** — a **preset key** (`llama-prompt-guard-2-86m`, `qualifire`, `heuristic-only`)
   **OR** a raw HF head id. Precedence:
@@ -125,41 +127,28 @@ The resolved preset + source are logged once at startup:
 `"$REPO_ROOT/mcp/logs/guardsvc.out.log"` to confirm what actually loaded.
 
 ## Installing / updating the guardsvc launchd plist
-The installed plists live only in `~/Library/LaunchAgents` (not version-controlled); the repo ships a
-**committed template** at
-[`guard/deploy/com.chiefofstaff.mcp-guardsvc.plist.template`](../../../guard/deploy/com.chiefofstaff.mcp-guardsvc.plist.template).
-Copy it, substitute the absolute repo path, and set the preset:
+The installed plist lives only in `~/Library/LaunchAgents` (not version-controlled). It is generated
+from `guard/guardsvc.service.json` by `scripts/gen-launchd.mjs` (see [`mcp/CLAUDE.md`](../../../mcp/CLAUDE.md)) —
+no template, no `sed` placeholders. First set the preset (and any threshold / offline pin) in
+`config/cos.env`, then render + reload in one step:
 
 ```sh
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-sed "s#__REPO__#$REPO_ROOT#g" \
-  "$REPO_ROOT/guard/deploy/com.chiefofstaff.mcp-guardsvc.plist.template" \
-  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-guardsvc.plist"
+# In config/cos.env (default Llama preset, offline pin after prefetch):
+#   COS_GUARD_MODEL=llama-prompt-guard-2-86m
+#   # COS_GUARD_THRESHOLD omitted → uses the preset's 0.5; set it only to override.
+#   # HF_HUB_OFFLINE=1 — pin offline ONLY AFTER the one-time prefetch above (model is in
+#   #   ~/.cache/huggingface), so a flaky network can't stall startup. Drop it for heuristic-only.
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install guardsvc
 ```
 
-Then edit the installed plist's `EnvironmentVariables` so it reads (default Llama preset, offline pin
-after prefetch):
-```xml
-<key>COS_GUARD_MODEL</key><string>llama-prompt-guard-2-86m</string>
-<!-- COS_GUARD_THRESHOLD omitted → uses the preset's 0.5; set it only to override. -->
-<!-- Pin offline ONLY AFTER the one-time prefetch above (model is in ~/.cache/huggingface),
-     so a flaky network can't stall startup. Drop it for the heuristic-only preset. -->
-<key>HF_HUB_OFFLINE</key><string>1</string>
-```
-Keep the template's existing `COS_GUARD_TRUST_FILE` / `COS_GUARD_QUARANTINE_FILE` (absolute), `PATH`
-with `$BREW_PREFIX/bin` (launchd can't see an nvm/asdf shim, so the plist pins the Homebrew bin dir),
-`KeepAlive`, and `RunAtLoad`. Load + (re)start:
-```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-U=$(id -u)
-launchctl bootout   gui/$U/com.chiefofstaff.mcp-guardsvc 2>/dev/null   # ignore if not loaded
-launchctl bootstrap gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-guardsvc.plist"
-launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-guardsvc            # restart after any env change
-```
+The descriptor already carries `COS_GUARD_TRUST_FILE` / `COS_GUARD_QUARANTINE_FILE`, the `PATH` with
+`$BREW_PREFIX/bin` (launchd can't see an nvm/asdf shim), `KeepAlive`, and `RunAtLoad`; `--install`
+renders the plist and does the `launchctl bootout`→`bootstrap`→`kickstart` for you.
 
-> Switching presets later is one env change: edit `COS_GUARD_MODEL` in the installed plist and
-> `kickstart -k`. Going to a model you have NOT prefetched? Drop `HF_HUB_OFFLINE` first (or prefetch
-> it) or `auto` will silently fall back to the heuristic.
+> Switching presets later is one config change: edit `COS_GUARD_MODEL` in `config/cos.env` and re-run
+> `gen-launchd.mjs --install guardsvc`. Going to a model you have NOT prefetched? Drop `HF_HUB_OFFLINE`
+> first (or prefetch it) or `auto` will silently fall back to the heuristic.
 
 ## Heuristic-only — the zero-dependency switch (emergency fallback, NOT recommended)
 > **Prefer Guard OFF over this.** The heuristic is regex-only — it misses most multilingual and novel
@@ -172,14 +161,14 @@ board's "switch to the dependency-free heuristic-only classifier" copy/paste com
 license, no `model` extra, no network — so `ready` is always true and the board can turn Guard **ON**
 immediately.
 
-1. Point the active preset at the heuristic in the installed plist's `EnvironmentVariables`:
-   ```xml
-   <key>COS_GUARD_MODEL</key><string>heuristic-only</string>
-   <!-- Drop HF_HUB_OFFLINE for this preset (no cache to read). -->
+1. Point the active preset at the heuristic in `config/cos.env`:
+   ```sh
+   COS_GUARD_MODEL=heuristic-only
+   # Drop HF_HUB_OFFLINE for this preset (no cache to read).
    ```
    (Equivalently, force the backend with `COS_GUARD_CLASSIFIER=heuristic`; the `heuristic-only` preset
    carries `model_id=None`, which routes to the deterministic fallback either way.)
-2. `kickstart -k` (see below) and verify:
+2. Render + reload (`node "$REPO_ROOT/scripts/gen-launchd.mjs" --install guardsvc`) and verify:
    ```sh
    curl -s "$GUARD_SIDECAR_URL"/healthz
    # {"ok":true,"classifier":"heuristic-fallback","model":null,"threshold":0.5,"enabled":false}
@@ -230,7 +219,7 @@ immediately.
   license**, **model not in cache** while `HF_HUB_OFFLINE=1` is pinned, or **no network** while
   prefetch never ran. To get the real error instead of a silent degrade, force the model:
   `COS_GUARD_CLASSIFIER=promptguard` (it will **raise** with the cause). Re-run the prefetch, then
-  `kickstart -k`.
+  reload with `node "$REPO_ROOT/scripts/gen-launchd.mjs" --install guardsvc`.
 - **`HF_HUB_OFFLINE` pin** — pin it (`=1`) only AFTER prefetching the model you select; otherwise
   offline mode + empty cache forces the fallback. When changing to a not-yet-cached model, drop the
   pin (or prefetch first).

@@ -97,51 +97,16 @@ OPENWHISPR_DB="$OPENWHISPR_DB" OPENWHISPR_AUDIO_DIR="$OPENWHISPR_AUDIO_DIR" \
   §6's `list_transcripts` will report `Source: sqlite`.)
 
 ### 3. Install the launchd BRIDGE (`:8002`)
-Unlike vault/whatsapp there is **no committed plist template** — author the plist inline, exactly
-like mcp-bridge-setup's board plist but on port `8002`, server `openwhispr-server`, and env
-`OPENWHISPR_DB` + `OPENWHISPR_AUDIO_DIR` (the **real** voice store) instead of `CRM_BASE_URL`.
-Expand `$BREW_PREFIX` / `$REPO_ROOT` / `$OPENWHISPR_DB` / `$OPENWHISPR_AUDIO_DIR` from the loader
-when rendering it (launchd cannot expand `$VARS` and cannot see an nvm/asdf shim, so the paths must
-be **literal absolute** and `PATH` must start with `$BREW_PREFIX/bin`):
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.chiefofstaff.mcp-openwhispr</string>
-  <key>ProgramArguments</key><array>
-    <string>$BREW_PREFIX/bin/supergateway</string>
-    <string>--stdio</string><string>$BREW_PREFIX/bin/node $REPO_ROOT/mcp/openwhispr-server/server.mjs</string>
-    <string>--outputTransport</string><string>streamableHttp</string>
-    <string>--port</string><string>8002</string>
-    <string>--streamableHttpPath</string><string>/mcp</string>
-    <string>--cors</string>
-    <string>--logLevel</string><string>info</string>
-  </array>
-  <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>$BREW_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <!-- ABSOLUTE — the server path.resolve()s these; point at the REAL store, never fixtures. -->
-    <key>OPENWHISPR_DB</key><string>$OPENWHISPR_DB</string>
-    <key>OPENWHISPR_AUDIO_DIR</key><string>$OPENWHISPR_AUDIO_DIR</string>
-    <!-- Idle-exit OPT-IN — like the core bridges. mcp-kit's idle-exit is OFF by default (so a
-         direct stdio client never dies on idle); this supergateway bridge opts in to reap
-         supergateway's leaked idle stateless child. See mcp-bridge-setup → "Why bridges set
-         COS_MCP_IDLE_EXIT_MS". Do NOT set this in the Cowork config (it relies on the default). -->
-    <key>COS_MCP_IDLE_EXIT_MS</key><string>300000</string>
-  </dict>
-  <key>WorkingDirectory</key><string>$REPO_ROOT</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>$REPO_ROOT/mcp/logs/openwhispr.out.log</string>
-  <key>StandardErrorPath</key><string>$REPO_ROOT/mcp/logs/openwhispr.err.log</string>
-</dict></plist>
-```
-Load it the same way as the core bridges:
+The plist is generated from `mcp/openwhispr-server/openwhispr.service.json` by
+`scripts/gen-launchd.mjs` (see `mcp/CLAUDE.md`) — it renders the `:8002` supergateway bridge with
+env `OPENWHISPR_DB` + `OPENWHISPR_AUDIO_DIR` (the **real** voice store), the idle-exit opt-in, and
+`PATH` led by `$BREW_PREFIX/bin`, then bootout→bootstrap→kickstart in one step on macOS. Name
+`openwhispr` explicitly so it installs only this add-on's plist (a bare `--install` would render just
+the core services):
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"; U=$(id -u)
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 mkdir -p "$REPO_ROOT/mcp/logs"
-launchctl bootout   gui/$U/com.chiefofstaff.mcp-openwhispr 2>/dev/null || true
-launchctl bootstrap gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-openwhispr.plist"
-launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-openwhispr
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install openwhispr
 ```
 - **CHECKPOINT** — an MCP `initialize` on `:8002` returns `serverInfo.name == "openwhispr"`:
   ```sh
@@ -156,38 +121,23 @@ launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-openwhispr
 As in mcp-bridge-setup, the two clients register **differently** — getting this wrong is the usual
 failure.
 
-**Claude Code — HTTP via the bridge.** Add `openwhispr` to `$REPO_ROOT/.mcp.json` pointing at the
-`:8002` bridge from §3 (merge it alongside the core `board`/`calendar`/`guard`/`vault` entries —
-don't clobber them):
-```json
-{ "mcpServers": {
-  "openwhispr": { "type": "http", "url": "http://localhost:8002/mcp" }
-}}
+**Claude Code — HTTP via the bridge.** `.mcp.json` is **generated** (CI-checked) from the manifest,
+so don't hand-edit it — regenerate it and the `openwhispr` entry (`http://localhost:8002/mcp`, from
+the descriptor's `clients`) lands alongside the core `board`/`calendar`/`guard`/`vault` entries:
+```sh
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-mcp-json.mjs"
 ```
 
 **Claude Cowork Desktop — direct stdio.** `claude_desktop_config.json` (`$COWORK_CONFIG`) accepts
 **stdio `command` servers only** (an HTTP `url` is rejected — same validated rule as
-mcp-bridge-setup §5). Write it from config with a **backup-first node merge** that preserves the
-other servers + `preferences` and refreshes only the `openwhispr` entry from the **resolved**
-loader values — mirroring mcp-bridge-setup's Cowork merge exactly:
+mcp-bridge-setup §5). `gen-cowork-config.mjs` does a **backup-first, additive merge** — it preserves
+the other servers + `preferences` and refreshes only the named `openwhispr` entry from the descriptor
+(absolute `$NODE_BIN`, the **real** `OPENWHISPR_DB`/`OPENWHISPR_AUDIO_DIR`, never `OPENWHISPR_FIXTURES`):
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # resolves NODE_BIN/REPO_ROOT/OPENWHISPR_*/COWORK_CONFIG from cos.env
-"$NODE_BIN" - <<'NODE'
-const fs = require('node:fs'), E = process.env;
-const server = {
-  command: E.NODE_BIN,
-  args: [`${E.REPO_ROOT}/mcp/openwhispr-server/server.mjs`],
-  env: { OPENWHISPR_DB: E.OPENWHISPR_DB, OPENWHISPR_AUDIO_DIR: E.OPENWHISPR_AUDIO_DIR },  // REAL store, never OPENWHISPR_FIXTURES
-};
-const p = E.COWORK_CONFIG, cfg = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p,'utf8')) : {};
-cfg.mcpServers = { ...(cfg.mcpServers||{}), openwhispr: server };   // refresh OURS; keep other servers + preferences intact
-if (fs.existsSync(p)) fs.copyFileSync(p, p + '.bak');              // back up before write
-fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n');
-console.log('Cowork mcpServers ->', Object.keys(cfg.mcpServers).join(', '));
-NODE
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-cowork-config.mjs" openwhispr
 ```
-- **Absolute `node` path** (`$NODE_BIN`, from the loader): Claude Desktop's spawn env, like
-  launchd's, lacks Homebrew on `PATH`.
 - **Quit + reopen Claude Desktop (⌘Q)** — it reads this file only at launch; then `openwhispr`
   appears in Cowork's tools.
 - **CHECKPOINT** — both registrations present:
@@ -198,20 +148,16 @@ NODE
     && echo "Cowork config OK"
   ```
 
-### 5. Wire into `mcp/ensure-bridges.sh`
-Add openwhispr to the existing nudge loops so `npm run dev/start` brings it up with the core
-bridges. `ensure-bridges.sh` drives a `for svc in …` bootstrap/kickstart loop and a `for pair in
-"<port> <name>" …` probe loop:
-- Add **`openwhispr`** to the `for svc in board calendar guard vault …` loop (it maps to
-  `com.chiefofstaff.mcp-openwhispr`).
-- Add **`"8002 openwhispr"`** to the probe list. It falls through to the standard `lsof … LISTEN`
-  branch (not the `/healthz` branch, which is only for the search/guardsvc uv sidecars). If
-  openwhispr isn't installed on this machine, omit both — or guard the entry on the plist existing
-  (`[ -f "$LA/com.chiefofstaff.mcp-openwhispr.plist" ]`) so a machine without the add-on doesn't WARN.
+### 5. Confirm `mcp/ensure-bridges.sh` picks it up (automatic — no edit)
+`ensure-bridges.sh` is a thin consumer of the manifest: its service + probe list comes from
+`node mcp/service-manifest.mjs --probe-list`, so the committed `openwhispr.service.json` descriptor
+(`probe: httpListen`) is bootstrapped + probed with **no edit** to the script (see `mcp/CLAUDE.md`).
+A machine without the add-on installed (no plist) is skipped silently; an installed-but-down one
+WARNs.
 - **CHECKPOINT** — the script bootstraps it and reports it up:
   ```sh
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-  "$REPO_ROOT/mcp/ensure-bridges.sh" | grep -i openwhispr   # expect: "[mcp] openwhispr bridge up on :8002"
+  "$REPO_ROOT/mcp/ensure-bridges.sh" | grep -i openwhispr   # expect: "[mcp] openwhispr up on :8002"
   ```
 
 ### 6. End-to-end verify (proves it reads the REAL store)
@@ -234,9 +180,11 @@ launchctl bootout      gui/$(id -u)/com.chiefofstaff.mcp-openwhispr   # stop the
 tail -f mcp/logs/openwhispr.err.log                                   # supergateway / server log
 ```
 **Remove the add-on entirely** (machine without OpenWhispr): `launchctl bootout` the agent, delete
-`~/Library/LaunchAgents/com.chiefofstaff.mcp-openwhispr.plist`, drop the `openwhispr` line from
-`.mcp.json`, delete `cfg.mcpServers.openwhispr` from the Cowork config (rerun the §4 merge after
-removing the key), and drop its `ensure-bridges.sh` entries.
+`~/Library/LaunchAgents/com.chiefofstaff.mcp-openwhispr.plist`, and delete `cfg.mcpServers.openwhispr`
+from the Cowork config by hand (`gen-cowork-config openwhispr` is **additive** — rerunning it would
+re-add the entry, so don't). `.mcp.json` and `ensure-bridges.sh` are committed/manifest-driven, so
+leave them as-is — once the plist is gone, `ensure-bridges.sh` skips the un-installed agent silently
+and nothing answers on `:8002`.
 
 ## Gotchas (read before editing)
 - **Never leave `OPENWHISPR_FIXTURES` set in the real plist/Cowork config.** It is the

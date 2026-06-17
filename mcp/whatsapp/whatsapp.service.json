@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "name": "whatsapp",
+  "kind": "bridge",
+  "runtime": "bridge",
+  "addon": "whatsapp",
+  "portVar": "WHATSAPP_MCP_BRIDGE_PORT",
+  "stdio": ["${UV_BIN}", "run", "--directory", "${WHATSAPP_MCP_DIR}/whatsapp-mcp-server", "main.py"],
+  "env": {
+    "WHATSAPP_DB_PATH": "${WHATSAPP_MCP_DIR}/whatsapp-bridge/store/messages.db",
+    "WHATSMEOW_DB_PATH": "${WHATSAPP_MCP_DIR}/whatsapp-bridge/store/whatsapp.db",
+    "WHATSAPP_API_URL": "http://localhost:${WHATSAPP_GO_PORT}/api"
+  },
+  "cwd": "${WHATSAPP_MCP_DIR}/whatsapp-mcp-server",
+  "clients": ["claude-code", "cowork"],
+  "probe": { "type": "httpListen" }
+}

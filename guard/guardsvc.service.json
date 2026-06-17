@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "name": "guardsvc",
+  "kind": "sidecar",
+  "runtime": "uvicorn",
+  "core": true,
+  "portVar": "GUARD_SIDECAR_PORT",
+  "dir": "${REPO_ROOT}/guard",
+  "cwd": "${REPO_ROOT}/guard",
+  "app": "sidecar:app",
+  "host": "127.0.0.1",
+  "uvExtras": ["model"],
+  "env": {
+    "COS_GUARD_TRUST_FILE": "${REPO_ROOT}/guard/data/trusted-senders.json",
+    "COS_GUARD_QUARANTINE_FILE": "${REPO_ROOT}/guard/data/quarantine.json",
+    "COS_GUARD_MODEL": "${COS_GUARD_MODEL}",
+    "COS_GUARD_THRESHOLD": "${COS_GUARD_THRESHOLD}",
+    "HF_HUB_OFFLINE": "1"
+  },
+  "clients": [],
+  "inMcpJson": false,
+  "probe": { "type": "healthz" }
+}
