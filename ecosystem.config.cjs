@@ -65,6 +65,14 @@ module.exports = {
       max_restarts: 10,
       restart_delay: 2000,
     },
+    {
+      name: "mcp-jobs",
+      script: path.join(REPO, "mcp", "launchers", "bridge-jobs.cjs"),
+      cwd: REPO,
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 2000,
+    },
 
     // ── Sidecars (Python/uvicorn) ──────────────────────────────────
     {

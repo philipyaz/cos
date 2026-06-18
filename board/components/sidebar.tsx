@@ -31,6 +31,7 @@ import {
   IconRunner,
   IconTrend,
   IconSpark,
+  IconBriefcase,
 } from "@/components/icons";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
@@ -143,6 +144,8 @@ export function Sidebar({
     { href: "/athlete/pre-workout-brief", label: "Brief pre-workout", icon: <IconBolt /> },
     { href: "/athlete/weekly-review", label: "Bilan semaine", icon: <IconTrend /> },
     { href: "/athlete/correlations", label: "Correlations", icon: <IconSpark /> },
+    { href: "/jobs", label: "Jobs", icon: <IconBriefcase /> },
+    { href: "/profile", label: "Profil", icon: <IconCircleUser /> },
   ];
 
   const system: Item[] = [
