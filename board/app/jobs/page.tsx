@@ -55,9 +55,9 @@ function fmtDate(iso: string): string {
 
 function scoreBadgeColor(score: number | null): string {
   if (score === null) return "bg-ink-100 text-ink-500";
-  if (score >= 75) return "bg-emerald-100 text-emerald-800";
-  if (score >= 50) return "bg-amber-100 text-amber-800";
-  return "bg-red-100 text-red-800";
+  if (score >= 70) return "bg-green-100 text-green-700";
+  if (score >= 50) return "bg-amber-100 text-amber-700";
+  return "bg-red-100 text-red-700";
 }
 
 function statusBadgeColor(status: string): string {
