@@ -73,7 +73,6 @@ cos/                 ← the monorepo; everything lives here
 ├── mcp/                           ← local MCP bridges (sandbox-aware)
 │   ├── board-server/                 was create-case-server; full case/task lifecycle
 │   └── openwhispr-server/            new; transcripts + processed-watermark
-├── recipes/                       ← scheduled-task recipes (voice / mail / calendar)
 └── tests/                         ← golden fixtures + board lint
 ```
 

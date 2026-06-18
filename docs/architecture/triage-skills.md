@@ -17,6 +17,13 @@ board (`mail-to-board`, `whatsapp-triage`), one **housekeeper** that organizes w
 leave behind (`board-organize`), and a **catalog of recipes** that describes how each is
 scheduled.
 
+!!! tip "See also: Unanswered messages"
+    A lighter-weight operator sweep, [`unanswered-messages`](../features/unanswered-messages.md),
+    scans the same Gmail + WhatsApp channels for messages still awaiting *your* reply and pins
+    them to a dedicated board view. It follows the same guard-first, watermarked, do-not-undo
+    pattern described below — with its own non-colliding cursor (`cos/answer-checked` label +
+    `config/unanswered-messages-state.json`) so it never steals the reconcilers' threads.
+
 ## The operator pattern: no host-side cron
 
 There is deliberately **no host-side scheduler** — no launchd job, no cron, no shell loop
@@ -32,12 +39,11 @@ reconciler carries a **per-channel watermark** of the last thing it processed; a
 window simply means the next run has more to catch up on. Re-running is cheap and safe —
 a sweep that finds nothing past its watermark no-ops.
 
-!!! note "The recipes are documentation, not a daemon"
-    The [`recipes/`](https://github.com/philipyaz/cos/tree/main/board/.claude/skills/recipes)
-    directory is a *playbook* of copy-pasteable scheduled-task blocks — what each routine
-    pulls, how it routes, the suggested cadence (mail every 10–15 min, board-organize
-    every few hours). It ships no intervals and starts no processes; you set cadence by
-    hand in Cowork.
+!!! note "Scheduling is documentation, not a daemon"
+    The skills' [`README`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/README.md)
+    indexes which skills you can run as Cowork scheduled tasks — what each does, the trigger
+    to paste, and a suggested cadence (mail every 10–15 min, board-organize every few hours).
+    It ships no intervals and starts no processes; you set cadence by hand in Cowork.
 
 ```mermaid
 flowchart LR

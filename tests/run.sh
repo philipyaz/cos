@@ -234,9 +234,18 @@ echo " sandbox: ${TMP}"
 echo "============================================================"
 
 # Copy only what the checks need: board data (enough to lint) and the vault
-# (for the grep property checks). The live stores are left untouched.
+# (for the grep property checks). The live stores are left untouched. In a FRESH
+# checkout (no live board has run yet) board/data/cases.json doesn't exist —
+# board/data is gitignored — so fall back to the committed synthetic seed fixture
+# so board-lint still runs as a HARD gate against valid data (it lints structure,
+# not your real cases; the fixture exercises the same invariants).
 mkdir -p "${TMP}/board/data"
-cp "${BOARD_SRC}/data/cases.json" "${TMP}/board/data/cases.json"
+if [ -f "${BOARD_SRC}/data/cases.json" ]; then
+  cp "${BOARD_SRC}/data/cases.json" "${TMP}/board/data/cases.json"
+else
+  echo "note: no live board/data/cases.json (fresh checkout) — board-lint runs against the synthetic seed fixture."
+  cp "${SCRIPT_DIR}/fixtures/board-seed.json" "${TMP}/board/data/cases.json"
+fi
 cp -R "${VAULT_SRC}" "${TMP}/vault"
 
 # board-lint runs from the tests/ dir but points at the COPY, never the live file.
@@ -475,6 +484,33 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-reminders: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-reminders"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10a. api-unanswered (only when a board is healthy) ----------------------
+# Drives the "messages I still owe a reply to" API (board/app/api/messages[/:id] +
+# /api/unanswered-count): POST mints an M-<n> id + creates a STANDALONE message
+# flagged needsAnswer:true by default (and links one to a real case, pushing
+# case.messageIds); GET ?status=unanswered lists the flagged set newest-first while
+# no/other status returns every message; the unanswered-count badge tracks the set;
+# PATCH { answered:true } stamps answeredAt and the row leaves the list/count,
+# { answered:false } clears it (reappears), { needsAnswer:true } flags an existing
+# message; the cleanCases retention guard KEEPS an unanswered message when its case
+# is "Clean Done"-deleted (caseId cleared) while purging an answered case-only one;
+# the bad-needsAnswer / bad-answered / bad-context 400s + unknown-caseId 404.
+# Snapshots + restores board/data/cases.json (messages live there → net-zero).
+# Skipped when no board.
+echo
+echo "--- [10a] api-unanswered (live board) -----------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-unanswered.mjs"; then
+    echo "api-unanswered: PASS"
+  else
+    echo "api-unanswered: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-unanswered"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
