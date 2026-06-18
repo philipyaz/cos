@@ -507,11 +507,41 @@ export function IconTrend(props: SVGProps<SVGSVGElement>) {
 // so it stays crisp at ~18px inside the gradient badge, and a small centre dot
 // that nods to the agent/orchestrator pulse used elsewhere. Distinct from
 // IconShield (Security) on purpose: the brand should not look like a nav item.
+export function IconHeart(props: SVGProps<SVGSVGElement>) {
+  // A heart — the health dashboard.
+  return (
+    <svg {...base} {...props}>
+      <path d="M8 13.7C4 10.5 2 8.2 2 6a3 3 0 0 1 3-3c1.3 0 2.4.8 3 2 .6-1.2 1.7-2 3-2a3 3 0 0 1 3 3c0 2.2-2 4.5-6 7.7Z" />
+    </svg>
+  );
+}
+
 export function IconBrand(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} strokeWidth={1.75} {...props}>
       <path d="M11.5 4.4A5 5 0 1 0 11.5 11.6" />
       <circle cx="8" cy="8" r="1.15" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function IconRunner(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="10" cy="3" r="1.5" />
+      <path d="M5.5 7.5 8 6l2.5 1.5L12 10" />
+      <path d="M8 6v4l-2.5 4" />
+      <path d="M10 10l2.5 4" />
+    </svg>
+  );
+}
+
+export function IconBriefcase(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="2" y="7" width="20" height="14" rx="2" />
+      <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+      <path d="M2 13h20" />
     </svg>
   );
 }
