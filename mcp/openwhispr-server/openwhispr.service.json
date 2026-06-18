@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "name": "openwhispr",
+  "kind": "bridge",
+  "runtime": "bridge",
+  "addon": "openwhispr",
+  "portVar": "OPENWHISPR_BRIDGE_PORT",
+  "stdio": ["${NODE_BIN}", "${REPO_ROOT}/mcp/openwhispr-server/server.mjs"],
+  "env": {
+    "OPENWHISPR_DB": "${OPENWHISPR_DB}",
+    "OPENWHISPR_AUDIO_DIR": "${OPENWHISPR_AUDIO_DIR}"
+  },
+  "idleExit": true,
+  "clients": ["claude-code", "cowork"],
+  "probe": { "type": "httpListen" }
+}

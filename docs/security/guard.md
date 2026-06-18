@@ -667,11 +667,13 @@ They sit clear of the bridges (`:8001`–`:8003`), the search sidecar (`:8008`),
 - **launchd.** `~/Library/LaunchAgents/com.chiefofstaff.mcp-guard.plist` (bridge, `COS_GUARD_URL` set)
   and `…mcp-guardsvc.plist` (sidecar, `COS_GUARD_TRUST_FILE` + `COS_GUARD_QUARANTINE_FILE` set,
   `COS_GUARD_MODEL` selecting the active preset, `HF_HUB_OFFLINE` optionally pinned once the model is
-  prefetched) both run `KeepAlive` + `RunAtLoad`. A version-controlled **plist template** lives at
-  [`guard/deploy/com.chiefofstaff.mcp-guardsvc.plist.template`](https://github.com/philipyaz/cos/blob/main/guard/deploy/com.chiefofstaff.mcp-guardsvc.plist.template)
-  (the installed plists under `~/Library/LaunchAgents` are not committed); the
+  prefetched) both run `KeepAlive` + `RunAtLoad`. The sidecar plist is generated from its descriptor
+  [`guard/guardsvc.service.json`](https://github.com/philipyaz/cos/blob/main/guard/guardsvc.service.json)
+  by `scripts/gen-launchd.mjs` (see [`mcp/CLAUDE.md`](https://github.com/philipyaz/cos/blob/main/mcp/CLAUDE.md);
+  the installed plists under `~/Library/LaunchAgents` are not committed); the
   **[`guard-setup`](https://github.com/philipyaz/cos/blob/main/.claude/skills/guard-setup/SKILL.md)**
-  skill renders + installs it (model/preset choice, prefetch, the offline pin), and the load commands
+  skill sets `COS_GUARD_MODEL` in `config/cos.env` (model/preset choice, prefetch, the offline pin)
+  then installs the plist via `node scripts/gen-launchd.mjs --install guardsvc`, and the load commands
   also live in the **mcp-bridge-setup** skill.
 - **No model? Still safe.** With no HF token / no `model` extra, the sidecar runs the heuristic
   classifier (degraded but up); with no sidecar at all, the MCP fails closed. Either way the agent is

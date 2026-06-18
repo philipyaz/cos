@@ -417,6 +417,12 @@ cd mcp/board-server && npm install
 
 ## `.mcp.json` entry (registry name: `board`)
 
+In this repo the committed `.mcp.json` (Claude Code) is **generated** from
+`mcp/board-server/board.service.json` by `scripts/gen-mcp-json.mjs`, the macOS launchd bridge plist
+by `scripts/gen-launchd.mjs`, and the Cowork direct-stdio entry by `scripts/gen-cowork-config.mjs`
+(see [`mcp/CLAUDE.md`](../CLAUDE.md) and the `/mcp-bridge-setup` skill). The blocks below show what
+those generators produce.
+
 ### Option A — Cowork VM via supergateway (the sandboxed setup)
 
 The VM can't run stdio servers or call the API directly, so front this server with

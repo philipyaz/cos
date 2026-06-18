@@ -159,27 +159,21 @@ process from §4.
      "$WHATSAPP_MCP_DIR/whatsapp-bridge/store/.bridge-token" && echo "store OK"
   ```
 
-### 4. Install the Go bridge as a launchd SIDECAR (`:8010`)
-The bridge is an HTTP daemon (like search/guard sidecars), so it gets a LaunchAgent but **no
-`.mcp.json` entry**. Install from the committed template — same pattern as the guardsvc/vault
-templates — substituting the loader's absolute paths + the Go port (launchd cannot expand `$VARS`,
-so the rendered plist carries literal values):
+### 4. Install both LaunchAgents (Go bridge SIDECAR `:8010` + Python MCP bridge `:8006`)
+The Go bridge is an HTTP daemon (like search/guard sidecars), so it gets a LaunchAgent but **no
+`.mcp.json` entry**; the Python MCP is bridged to HTTP for Claude Code via a supergateway LaunchAgent
+on `:8006`. Both plists are generated from their descriptors
+(`mcp/whatsapp/whatsapp.service.json` + `whatsappbridge.service.json`) by `scripts/gen-launchd.mjs`
+(see `mcp/CLAUDE.md`) — which on macOS renders the plist AND `bootout→bootstrap→kickstart`s it in one
+step. Name both add-on services explicitly (they aren't core):
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"; U=$(id -u)
-sed -e "s#__REPO__#$REPO_ROOT#g" \
-    -e "s#__WHATSAPP_MCP_DIR__#$WHATSAPP_MCP_DIR#g" \
-    -e "s#__BREW_PREFIX__#$BREW_PREFIX#g" \
-    -e "s#__WHATSAPP_GO_PORT__#$WHATSAPP_GO_PORT#g" \
-  "$REPO_ROOT/mcp/whatsapp/deploy/com.chiefofstaff.mcp-whatsappbridge.plist.template" \
-  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-whatsappbridge.plist"
-launchctl bootout   gui/$U/com.chiefofstaff.mcp-whatsappbridge 2>/dev/null || true
-launchctl bootstrap gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-whatsappbridge.plist"
-launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-whatsappbridge
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install whatsapp whatsappbridge
 ```
-The template runs the built `whatsapp-bridge` binary with `WHATSAPP_BRIDGE_PORT=$WHATSAPP_GO_PORT`,
-`WorkingDirectory` = `$WHATSAPP_MCP_DIR/whatsapp-bridge` (so it finds `store/`), `RunAtLoad` +
-`KeepAlive`, a `PATH` that starts with `$BREW_PREFIX/bin`, and logs to
-`$REPO_ROOT/mcp/logs/whatsappbridge.{out,err}.log`.
+The `whatsappbridge` descriptor runs the built `whatsapp-bridge` binary with
+`WHATSAPP_BRIDGE_PORT=$WHATSAPP_GO_PORT`, `WorkingDirectory` = `$WHATSAPP_MCP_DIR/whatsapp-bridge`
+(so it finds `store/`), `RunAtLoad` + `KeepAlive`, a `PATH` that starts with `$BREW_PREFIX/bin`, and
+logs to `$REPO_ROOT/mcp/logs/whatsappbridge.{out,err}.log`.
 
 > **Probe leniently — it is bearer-token protected.** The REST API requires the `.bridge-token`
 > bearer, so an **unauthenticated** `curl` returns **401, not 200** — a bare 200 is NOT the health
@@ -195,24 +189,11 @@ The template runs the built `whatsapp-bridge` binary with `WHATSAPP_BRIDGE_PORT=
     "$WHATSAPP_GO_URL/api/chats" ; echo
   ```
 
-### 5. Install the Python MCP supergateway BRIDGE (`:8006`)
+### 5. The Python MCP supergateway BRIDGE (`:8006`)
 The stdio MCP is bridged to HTTP for Claude Code exactly like mcp-bridge-setup's servers — one
-supergateway LaunchAgent on `:8006`. Install from the committed template, substituting the loader's
-paths + both ports:
-```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"; U=$(id -u)
-sed -e "s#__REPO__#$REPO_ROOT#g" \
-    -e "s#__WHATSAPP_MCP_DIR__#$WHATSAPP_MCP_DIR#g" \
-    -e "s#__BREW_PREFIX__#$BREW_PREFIX#g" \
-    -e "s#__WHATSAPP_MCP_BRIDGE_PORT__#$WHATSAPP_MCP_BRIDGE_PORT#g" \
-    -e "s#__WHATSAPP_GO_PORT__#$WHATSAPP_GO_PORT#g" \
-  "$REPO_ROOT/mcp/whatsapp/deploy/com.chiefofstaff.mcp-whatsapp.plist.template" \
-  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-whatsapp.plist"
-launchctl bootout   gui/$U/com.chiefofstaff.mcp-whatsapp 2>/dev/null || true
-launchctl bootstrap gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-whatsapp.plist"
-launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-whatsapp
-```
-The plist's `EnvironmentVariables` carry the **three** vars the Python server reads to find its
+supergateway LaunchAgent on `:8006`, generated from `mcp/whatsapp/whatsapp.service.json` and
+**already installed by the `gen-launchd.mjs --install whatsapp whatsappbridge` run in §4**. The
+generated plist's `EnvironmentVariables` carry the **three** vars the Python server reads to find its
 stores + the Go bridge (all absolute / explicit):
 - `WHATSAPP_DB_PATH` = `$WHATSAPP_MCP_DIR/whatsapp-bridge/store/messages.db`,
 - `WHATSMEOW_DB_PATH` = `$WHATSAPP_MCP_DIR/whatsapp-bridge/store/whatsapp.db`,
@@ -236,50 +217,27 @@ The bearer token is **not** in the plist — the server reads `store/.bridge-tok
 
 ### 6. Register BOTH clients (each registers differently!)
 As in mcp-bridge-setup, the two clients register **differently** — getting this wrong is the usual
-failure.
+failure. Both entries are generated from `mcp/whatsapp/whatsapp.service.json` (see `mcp/CLAUDE.md`).
 
-**Claude Code — HTTP via the bridge.** Add `whatsapp` to `$REPO_ROOT/.mcp.json` pointing at the
-`:8006` supergateway bridge from §5:
-```json
-{ "mcpServers": {
-  "whatsapp": { "type": "http", "url": "http://localhost:8006/mcp" }
-}}
+**Claude Code — HTTP via the bridge.** `.mcp.json` is **generated + CI-checked**, so regenerate it
+(it picks up `whatsapp` → `http://localhost:8006/mcp` from the descriptor, alongside the existing
+`board`/`openwhispr`/`calendar`/`guard`/`vault` entries):
+```sh
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-mcp-json.mjs"
 ```
-(Merge it alongside the existing `board`/`openwhispr`/`calendar`/`guard`/`vault` entries — don't
-clobber them.)
 
 **Claude Cowork Desktop — direct stdio.** `claude_desktop_config.json` (`$COWORK_CONFIG`) accepts
 **stdio `command` servers only** (an HTTP `url` is rejected — same validated rule as
-mcp-bridge-setup §5). Cowork spawns the Python MCP itself via `uv`. Write it from config with a
-**backup-first node merge** that preserves the other servers + `preferences` and refreshes the
-`whatsapp` entry from the **resolved** loader values — mirroring mcp-bridge-setup's Cowork merge
-script exactly:
+mcp-bridge-setup §5). Cowork spawns the Python MCP itself via `uv`. Merge just the `whatsapp` entry
+(named = additive, backup-first to `.bak`, secrets inlined from the resolved descriptor):
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # resolves UV_BIN/WHATSAPP_MCP_DIR/ports/COWORK_CONFIG from cos.env
-"$NODE_BIN" - <<'NODE'
-const fs = require('node:fs'), E = process.env;
-const store = `${E.WHATSAPP_MCP_DIR}/whatsapp-bridge/store`;
-const goPort = E.WHATSAPP_GO_PORT || '8010';
-const server = {
-  command: E.UV_BIN,
-  args: ['run', '--directory', `${E.WHATSAPP_MCP_DIR}/whatsapp-mcp-server`, 'main.py'],
-  env: {                                            // the SAME three vars as the §5 bridge (token read from store/.bridge-token)
-    WHATSAPP_DB_PATH:  `${store}/messages.db`,
-    WHATSMEOW_DB_PATH: `${store}/whatsapp.db`,
-    WHATSAPP_API_URL:  `http://localhost:${goPort}/api`,   // pin to the Go bridge port — NOT the :8006 MCP-bridge port
-  },
-};
-const p = E.COWORK_CONFIG, cfg = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p,'utf8')) : {};
-cfg.mcpServers = { ...(cfg.mcpServers||{}), whatsapp: server };   // refresh OURS; keep other servers + preferences intact
-if (fs.existsSync(p)) fs.copyFileSync(p, p + '.bak');            // back up before write
-fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n');
-console.log('Cowork mcpServers ->', Object.keys(cfg.mcpServers).join(', '));
-NODE
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-cowork-config.mjs" whatsapp
 ```
 > The `whatsapp` Cowork entry carries the **same three vars** as the §5 bridge — `WHATSAPP_API_URL`
 > pinned to the **Go bridge** (`http://localhost:$WHATSAPP_GO_PORT/api`), never the `:8006`
-> MCP-bridge port; the token is read from `store/.bridge-token` by the server. To add ONLY this
-> server (not refresh all), keep the same preamble and assign just `cfg.mcpServers.whatsapp`.
+> MCP-bridge port; the token is read from `store/.bridge-token` by the server.
 
 - **Absolute `uv` path** (`$UV_BIN`, from the loader): Claude Desktop's spawn env, like launchd's,
   lacks Homebrew on `PATH`.
@@ -294,16 +252,13 @@ NODE
     && echo "Cowork config OK"
   ```
 
-### 7. Wire into `mcp/ensure-bridges.sh`
-Add the two processes to the existing nudge loops so `npm run dev/start` brings WhatsApp up with the
-rest. `ensure-bridges.sh` has a `for svc in …` bootstrap/kickstart loop and a `for pair in "<port>
-<name>" …` probe loop (port first):
-- Add **`whatsapp whatsappbridge`** to the `for svc in board openwhispr … guardsvc` loop (each maps
-  to `com.chiefofstaff.mcp-$svc`).
-- Add **`"8006 whatsapp"`** and **`"8010 whatsappbridge"`** to the `for pair in …` probe list. Both
-  fall through to the standard `lsof … LISTEN` branch (not the `/healthz` branch, which is only for
-  the search/guardsvc uv sidecars). A cold/unpaired Go bridge that isn't listening yet just prints a
-  `WARN … DOWN` — board-only triage still reads SQLite, so that's a nudge, not a hard failure.
+### 7. Confirm the nudge loop picks up both processes
+`ensure-bridges.sh` so `npm run dev/start` brings WhatsApp up with the rest — but you do **not** edit
+it by hand. It is a thin consumer of `node mcp/service-manifest.mjs --probe-list`, so the two
+descriptors (`whatsapp.service.json` + `whatsappbridge.service.json`) feed it automatically: the MCP
+bridge probes by `httpListen` on `:8006`, the Go sidecar by `bearerHealth` on `:8010` (a
+cold/unpaired bridge that isn't listening yet just prints a `WARN … DOWN` — board-only triage still
+reads SQLite, so that's a nudge, not a hard failure).
 - **CHECKPOINT** — the script bootstraps both and reports them up:
   ```sh
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"
@@ -356,7 +311,8 @@ both agents. The token may rotate, but the server reads it from `store/.bridge-t
 - **Why :8010, not :8080.** whatsmeow's default bridge port is `8080`, which is commonly already
   taken on a dev machine. cos pins the Go bridge to `$WHATSAPP_GO_PORT` (default **8010**) in the
   sidecar plist and the §3 pairing run, and points `WHATSAPP_API_URL` at it. If `8010` is also taken,
-  change `WHATSAPP_GO_PORT` in `cos.env` and re-render §4/§5.
+  change `WHATSAPP_GO_PORT` in `cos.env` and re-run the §4 `gen-launchd.mjs --install whatsapp
+  whatsappbridge` (both plists regenerate from their descriptors with the new port).
 - **Reads work straight from SQLite even if the Go bridge is down.** The Python MCP reads
   `messages.db` directly for all READ tools, so **board-only `/whatsapp-triage` tolerates a down Go
   bridge** (it never needs the bridge for reads). But a **fresh pairing or ANY send** needs the
@@ -378,7 +334,7 @@ both agents. The token may rotate, but the server reads it from `store/.bridge-t
   bridges; `8010` sits just past the `8008/8009` sidecars. A foreign process on either breaks the
   corresponding step — pick another free port in `cos.env` if so.
 - **launchd cannot expand `$VARS`.** As with every Cos plist, the **rendered** plists in
-  `~/Library/LaunchAgents` carry **literal absolute paths** (`sed`-substituted from the loader in
-  §4/§5) and a `PATH` that starts with `$BREW_PREFIX/bin` — launchd never inherits your login shell
-  and can't see an nvm/asdf shim, so the `uv` / `go`-built binary paths must be literal, not a
-  `command -v` shim.
+  `~/Library/LaunchAgents` carry **literal absolute paths** (resolved from the loader by
+  `gen-launchd.mjs` in §4) and a `PATH` that starts with `$BREW_PREFIX/bin` — launchd never inherits
+  your login shell and can't see an nvm/asdf shim, so the `uv` / `go`-built binary paths must be
+  literal, not a `command -v` shim.

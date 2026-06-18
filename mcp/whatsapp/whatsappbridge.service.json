@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "name": "whatsappbridge",
+  "kind": "sidecar",
+  "runtime": "exec",
+  "addon": "whatsapp",
+  "portVar": "WHATSAPP_GO_PORT",
+  "exec": ["${WHATSAPP_MCP_DIR}/whatsapp-bridge/whatsapp-bridge"],
+  "env": { "WHATSAPP_BRIDGE_PORT": "${WHATSAPP_GO_PORT}" },
+  "cwd": "${WHATSAPP_MCP_DIR}/whatsapp-bridge",
+  "clients": [],
+  "probe": { "type": "bearerHealth", "path": "/api/health" }
+}

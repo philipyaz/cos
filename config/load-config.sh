@@ -53,6 +53,12 @@ fi
 : "${VAULT_BRIDGE_PORT:=8005}"
 : "${SEARCH_SIDECAR_PORT:=8008}"
 : "${GUARD_SIDECAR_PORT:=8009}"
+# Guard classifier selection — config, not code. The default is the gated Llama-Prompt-Guard-2-86M
+# (real model); a machine without it (e.g. Windows with no CUDA/Metal) overrides COS_GUARD_MODEL to
+# "heuristic-only" in cos.env, so the model choice is a per-machine SETTING, never a per-OS code fork.
+# The guard MCP fails CLOSED regardless. THRESHOLD is the decision cutoff (0.5 is the preset default).
+: "${COS_GUARD_MODEL:=llama-prompt-guard-2-86m}"
+: "${COS_GUARD_THRESHOLD:=0.5}"
 # WhatsApp MCP add-on (external repo verygoodplugins/whatsapp-mcp; see whatsapp-mcp-setup).
 # WHATSAPP_GO_PORT is the Go whatsmeow bridge sidecar (whatsmeow's default 8080 is usually
 # taken, so cos pins 8010); WHATSAPP_MCP_BRIDGE_PORT is the supergateway bridge for Claude Code.
@@ -94,5 +100,6 @@ export BOARD_PORT BOARD_URL
 export BOARD_BRIDGE_PORT OPENWHISPR_BRIDGE_PORT CALENDAR_BRIDGE_PORT GUARD_BRIDGE_PORT VAULT_BRIDGE_PORT
 export BOARD_BRIDGE_URL OPENWHISPR_BRIDGE_URL CALENDAR_BRIDGE_URL GUARD_BRIDGE_URL VAULT_BRIDGE_URL
 export SEARCH_SIDECAR_PORT GUARD_SIDECAR_PORT SEARCH_SIDECAR_URL GUARD_SIDECAR_URL
+export COS_GUARD_MODEL COS_GUARD_THRESHOLD
 export WHATSAPP_MCP_DIR WHATSAPP_MCP_BRIDGE_PORT WHATSAPP_GO_PORT WHATSAPP_MCP_BRIDGE_URL WHATSAPP_GO_URL
 export NUTRITION_BRIDGE_PORT NUTRITION_BRIDGE_URL

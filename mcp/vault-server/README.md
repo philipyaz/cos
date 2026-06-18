@@ -161,7 +161,9 @@ calendar = `8003`, guard = `8004`, search = `8008`).
 Under launchd this server is fronted by the **`launch.sh`** wrapper (the plist's only
 `ProgramArguments` entry), which sources the `ANTHROPIC_API_KEY` from the gitignored
 `config/secrets.env` and then execs supergateway — so the key stays out of the installed
-plist. See the `mcp-bridge-setup` skill for the full install. The equivalent by hand:
+plist. The plist itself is generated from `mcp/vault-server/vault.service.json` by
+`scripts/gen-launchd.mjs` (see [`mcp/CLAUDE.md`](../CLAUDE.md)). See the `mcp-bridge-setup`
+skill for the full install. The equivalent by hand:
 
 ```bash
 # one-time: put the key in the gitignored secrets file

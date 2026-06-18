@@ -118,10 +118,12 @@ With no `env`, the server auto-detects the real macOS store. Set `"env": { "OPEN
 to point at a non-default DB, or `"env": { "OPENWHISPR_FIXTURES": "./mcp/openwhispr-server/fixtures" }`
 to run off fixtures while OpenWhispr isn't installed.
 
-> In this repo the server runs behind a launchd-managed HTTP bridge on `:8002` (see
-> `~/Library/LaunchAgents/com.chiefofstaff.mcp-openwhispr.plist`), which is where `OPENWHISPR_DB` /
-> `OPENWHISPR_AUDIO_DIR` are set for production. After changing that plist, reload with
-> `launchctl bootout … && launchctl bootstrap gui/$UID …` (see the `mcp-bridge-setup` skill).
+> In this repo the server runs behind a launchd-managed HTTP bridge on `:8002`. The plist is
+> generated from `mcp/openwhispr-server/openwhispr.service.json` by `scripts/gen-launchd.mjs`
+> (see [`mcp/CLAUDE.md`](../CLAUDE.md)), which is where `OPENWHISPR_DB` / `OPENWHISPR_AUDIO_DIR`
+> are set for production. To refresh it (re-render + reload in one step), run
+> `node "$REPO_ROOT/scripts/gen-launchd.mjs" --install openwhispr` (see the `/openwhispr-mcp-setup`
+> skill).
 
 ## How the voice recipe uses it
 

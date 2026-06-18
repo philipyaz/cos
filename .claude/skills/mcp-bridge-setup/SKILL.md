@@ -55,8 +55,9 @@ are the defaults; all are configurable via `config/cos.env` (the loader resolves
 > `$BREW_PREFIX`, `$NODE_BIN`, `$UV_BIN`, `$SUPERGATEWAY_BIN`, `$LAUNCH_AGENTS_DIR`,
 > `$COWORK_CONFIG`, `$VAULT_DIR`, and every bridge /
 > sidecar port + URL — use those instead of hardcoding paths, the Homebrew prefix, or your
-> username. (The `__REPO__` / `__VAULT_NAME__` plist-template placeholders are runtime-substituted
-> from `$REPO_ROOT` / `$VAULT_NAME`; the Anthropic key is NOT a placeholder — it stays in
+> username. (The plists are **generated** from the co-located `mcp/<name>-server/<name>.service.json`
+> descriptors by `scripts/gen-launchd.mjs`, which resolves every `${VAR}` from the loader — see
+> `mcp/CLAUDE.md`; the Anthropic key is never in a descriptor/plist — it stays in
 > `config/secrets.env`, loaded by `launch.sh`.)
 
 ## Prerequisites
@@ -81,67 +82,46 @@ source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 ANTHROPIC_API_KEY=sk-ant-… COS_VAULT_DIR="$VAULT_DIR" "$NODE_BIN" "$REPO_ROOT/mcp/vault-server/server.mjs"  # Ctrl-C; embeds the Agent SDK (outbound Anthropic API calls), session scoped to COS_VAULT_DIR
 ```
 
-### 2. One launchd LaunchAgent per server
-Create `~/Library/LaunchAgents/com.chiefofstaff.mcp-board.plist` (and a `-calendar` twin: port `8003`,
-server `calendar-server`, env `CRM_BASE_URL` like board; and a `-guard` twin: port `8004`,
-server `guard-server`, env `COS_GUARD_URL=http://127.0.0.1:$GUARD_SIDECAR_PORT`; and a `-vault`
-twin: port `8005`, server `vault-server`, env `ANTHROPIC_API_KEY` + `COS_VAULT_DIR=$VAULT_DIR`
-instead of `CRM_BASE_URL` — see ["The vault server makes outbound LLM calls"](#the-vault-server-makes-outbound-llm-calls)
-for why it carries the key and how its inner session is isolated; install from the committed
-template at `mcp/vault-server/deploy/`). **All five node bridges (board/calendar/guard/vault/
-openwhispr) MUST carry `COS_MCP_IDLE_EXIT_MS=300000`** in their `EnvironmentVariables` (shown
-below) — see ["Why bridges set COS_MCP_IDLE_EXIT_MS"](#why-bridges-set-cos_mcp_idle_exit_ms).
-The `-guard` bridge has a **second process** — its own
-`-guardsvc` **uv sidecar** on `:8009` (see ["The guard sidecar
-LaunchAgent"](#the-guard-sidecar-launchagent-8009) below), exactly as search does. Template:
+### 2. Render + install the LaunchAgent plists from the manifest
+Each service is declared once in a co-located descriptor `mcp/<name>-server/<name>.service.json`
+(+ `guard/guardsvc.service.json`, `search/search.service.json`), resolved by
+`mcp/service-manifest.mjs` against `config/load-config.sh`. `scripts/gen-launchd.mjs` renders the
+plist from that descriptor — expanding `$BREW_PREFIX` / `$REPO_ROOT` / `$BOARD_URL` / the port from
+the loader (board → `8001` + `CRM_BASE_URL`; calendar → `8003` + `CRM_BASE_URL`; guard → `8004` +
+`COS_GUARD_URL`; vault → `8005` + `ANTHROPIC_API_KEY` (via its secret-wrapper `launch.sh`) +
+`COS_VAULT_DIR=$VAULT_DIR`) — and on macOS `--install` also does the `launchctl bootout → bootstrap
+→ kickstart` reload in the **same step**. With no names it installs the **core** services
+(board calendar guard vault search guardsvc):
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.chiefofstaff.mcp-board</string>
-  <key>ProgramArguments</key><array>
-    <string>$BREW_PREFIX/bin/supergateway</string>
-    <string>--stdio</string><string>$BREW_PREFIX/bin/node $REPO_ROOT/mcp/board-server/server.mjs</string>
-    <string>--outputTransport</string><string>streamableHttp</string>
-    <string>--port</string><string>8001</string>
-    <string>--streamableHttpPath</string><string>/mcp</string>
-    <string>--cors</string>
-    <string>--logLevel</string><string>info</string>
-  </array>
-  <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>$BREW_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>CRM_BASE_URL</key><string>$BOARD_URL</string>
-    <!-- Idle-exit OPT-IN — REQUIRED on every node bridge. mcp-kit's idle-exit is OFF by
-         default (so a direct stdio client like Cowork never dies on idle); supergateway's
-         stateless bridge leaks an idle child, so each bridge opts in to reap it after 5 min
-         idle. Omit it and this bridge silently leaks children. -->
-    <key>COS_MCP_IDLE_EXIT_MS</key><string>300000</string>
-  </dict>
-  <key>WorkingDirectory</key><string>$REPO_ROOT</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>$REPO_ROOT/mcp/logs/board.out.log</string>
-  <key>StandardErrorPath</key><string>$REPO_ROOT/mcp/logs/board.err.log</string>
-</dict></plist>
+```sh
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install   # core: board calendar guard vault search guardsvc
 ```
 
-> When you render this template into the plist, expand `$BREW_PREFIX` / `$REPO_ROOT` / `$BOARD_URL`
-> from the loader. launchd cannot expand `$VARS` itself and cannot see an nvm/asdf shim, so the
-> plist must carry the literal `$BREW_PREFIX/bin/node` / `$BREW_PREFIX/bin/supergateway` paths —
-> not a `command -v node` shim — and a `PATH` that starts with `$BREW_PREFIX/bin`.
+> `--print <name>` renders one plist to stdout for review, `--out <dir>` writes copies without
+> touching `~/Library/LaunchAgents`; only `--install` touches the real LaunchAgents dir. The
+> installed plists stay gitignored + machine-specific (absolute paths) exactly as before — only
+> their SOURCE moved from per-server `*.plist.template` files to the descriptors. See `mcp/CLAUDE.md`
+> for the descriptor schema.
 
-**Critical flags / fields**
+The generator handles the details the old hand-authored plist spelled out, so they still hold:
 - `--outputTransport streamableHttp` + `--streamableHttpPath /mcp` → URL is `http://localhost:PORT/mcp`.
 - `--cors` is **required** for the HTTP clients (Claude Code over the bridge, and the Desktop
   Connector UI) — they connect from a different origin. (Cowork itself uses §5 stdio, no CORS.)
-- `PATH` **must** include `$BREW_PREFIX/bin`: launchd's default PATH lacks Homebrew, but
+- `PATH` leads with `$BREW_PREFIX/bin`: launchd's default PATH lacks Homebrew, but
   supergateway's `#!/usr/bin/env node` shebang and the `--stdio "node ..."` child both need `node`.
-- `--stdio "$BREW_PREFIX/bin/node <abs path>"` is **one** array element. Use **absolute** paths
-  for the server file and every env path (the servers `path.resolve()` them).
-- `COS_MCP_IDLE_EXIT_MS=300000` is **required** on every node bridge (board/calendar/guard/vault/
-  openwhispr). It is the bridge's **opt-in** to mcp-kit's idle-child reaper, which is **off by
-  default** — see ["Why bridges set COS_MCP_IDLE_EXIT_MS"](#why-bridges-set-cos_mcp_idle_exit_ms).
+  launchd cannot expand `$VARS` and cannot see an nvm/asdf shim, so the plist carries literal
+  `$BREW_PREFIX/bin/node` / `$BREW_PREFIX/bin/supergateway` paths — the resolver bakes these in.
+- `--stdio "$BREW_PREFIX/bin/node <abs path>"` is **one** array element. Absolute paths throughout
+  (the servers `path.resolve()` them).
+- `COS_MCP_IDLE_EXIT_MS=300000` is set on every node **bridge** (the descriptor's `idleExit:true`),
+  the bridge's **opt-in** to mcp-kit's idle-child reaper, which is **off by default** — see
+  ["Why bridges set COS_MCP_IDLE_EXIT_MS"](#why-bridges-set-cos_mcp_idle_exit_ms). It is never set
+  on the sidecars or the Cowork direct-stdio entry.
+
+The `-guard` bridge has a **second process** — its own `-guardsvc` **uv sidecar** on `:8009` (see
+["The guard sidecar LaunchAgent"](#the-guard-sidecar-launchagent-8009) below), exactly as search
+does; both are core, so the `--install` above renders them too.
 
 #### Why bridges set `COS_MCP_IDLE_EXIT_MS`
 `packages/mcp-kit/index.mjs` (the shared `start()` every node server uses) keeps the idle-exit
@@ -156,8 +136,8 @@ bridge dies. Each **bridge plist therefore opts in** with `COS_MCP_IDLE_EXIT_MS=
 them (a request in flight disarms the timer; supergateway respawns on the next call). **Do NOT put
 this var in the Cowork `claude_desktop_config.json`** — Cowork relies on the safe off-by-default.
 
-Verify every installed node bridge carries the opt-in (board/calendar/guard are authored from the
-heredoc above with no committed template, so a dropped line silently reintroduces the leak):
+Verify every installed node bridge carries the opt-in (the generator sets it from each bridge
+descriptor's `idleExit:true`, so this is a quick post-install sanity check that the render landed):
 ```sh
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 for s in board calendar guard vault openwhispr; do
@@ -166,15 +146,10 @@ for s in board calendar guard vault openwhispr; do
 done
 ```
 
-### 3. Load + auto-start
+### 3. Confirm they loaded
+The `--install` in §2 already did the `bootout → bootstrap → kickstart` reload on macOS, so the
+agents are loaded + running with `RunAtLoad`+`KeepAlive` (login boot + crash-restart). Confirm:
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-mkdir -p "$REPO_ROOT/mcp/logs"
-U=$(id -u)
-for svc in board calendar guard vault; do
-  launchctl bootout    gui/$U/com.chiefofstaff.mcp-$svc 2>/dev/null   # ignore if not loaded
-  launchctl bootstrap  gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-$svc.plist"
-done
 launchctl list | grep chiefofstaff   # PID present + exit 0 = healthy
 ```
 
@@ -229,38 +204,27 @@ expand `$VARS`:
 ```
 
 **Write it from config — don't hardcode (idempotent).** The JSON above is the *shape*; never
-hand-type machine paths or the API key into it. Resolve every value from the config files and
-merge it in with this script — it **backs up first**, preserves `preferences`/other keys, and
-refreshes all four entries from the **resolved** config, so a path/port/vault-name change in
-`config/cos.env` propagates and **re-running it fixes drift** (e.g. a missing `vault` — the most
-common gap, since it's the only one needing the key + a vault dir):
+hand-type machine paths or the API key into it. `scripts/gen-cowork-config.mjs` builds each entry
+from the same manifest the launchd/Windows supervisors read, **backs up first** (to `.bak`),
+preserves `preferences`/other keys, and inlines the `vault` secret from `config/secrets.env`. Name
+the four core servers (a named merge is additive and won't touch a third-party server you added by
+hand); re-running it fixes drift (e.g. a missing `vault` — the most common gap, since it's the only
+one needing the key + a vault dir):
 
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # resolves NODE_BIN/REPO_ROOT/VAULT_DIR/*_URL/COWORK_CONFIG from config/cos.env
-set -a; . "$REPO_ROOT/config/secrets.env"; set +a                 # the loader deliberately does NOT source secrets — ANTHROPIC_API_KEY (vault only) lives ONLY here
-"$NODE_BIN" - <<'NODE'
-const fs = require('node:fs'), E = process.env;
-if (!(E.ANTHROPIC_API_KEY||'').startsWith('sk-')) { console.error('FATAL: ANTHROPIC_API_KEY missing — see config/secrets.env'); process.exit(1); }
-const node = E.NODE_BIN, srv = s => `${E.REPO_ROOT}/mcp/${s}-server/server.mjs`;
-const servers = {                                  // core four — always refreshed; every value comes from the loader / secrets.env, nothing hardcoded
-  board:    { command: node, args: [srv('board')],    env: { CRM_BASE_URL: E.BOARD_URL } },
-  calendar: { command: node, args: [srv('calendar')], env: { CRM_BASE_URL: E.BOARD_URL } },
-  guard:    { command: node, args: [srv('guard')],    env: { COS_GUARD_URL: E.GUARD_SIDECAR_URL } },
-  vault:    { command: node, args: [srv('vault')],    env: { ANTHROPIC_API_KEY: E.ANTHROPIC_API_KEY, COS_VAULT_DIR: E.VAULT_DIR } },
-};
-const p = E.COWORK_CONFIG, cfg = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p,'utf8')) : {};
-cfg.mcpServers = { ...(cfg.mcpServers||{}), ...servers };   // refresh OURS; keep any other servers + preferences intact
-if (fs.existsSync(p)) fs.copyFileSync(p, p + '.bak');       // back up before write
-fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n');
-console.log('Cowork mcpServers ->', Object.keys(cfg.mcpServers).join(', '));
-NODE
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+# Precondition: $COWORK_CONFIG must point at the REAL Cowork config (cos-setup detects + records it;
+# default macOS path below, %APPDATA%/Claude on Windows). Confirm its dir exists before merging —
+# the generator refuses a missing dir rather than writing an orphan config Cowork never reads.
+[ -d "$(dirname "$COWORK_CONFIG")" ] || echo "FIX FIRST: set COWORK_CONFIG in config/cos.env to your real claude_desktop_config.json (dir '$(dirname "$COWORK_CONFIG")' missing — Cowork installed?)"
+node "$REPO_ROOT/scripts/gen-cowork-config.mjs" board calendar guard vault
 ```
 > Only `vault` carries `ANTHROPIC_API_KEY` (it makes outbound LLM calls — see
-> ["The vault server makes outbound LLM calls"](#the-vault-server-makes-outbound-llm-calls));
-> the other four are localhost-only and carry no secret. The key is read from
-> `config/secrets.env` at write time and **never printed** — if you ever hand-edit instead, pull
-> it from there, don't paste a literal. To add **one** server (not refresh all), keep the same
-> preamble and assign just that key into `cfg.mcpServers`.
+> ["The vault server makes outbound LLM calls"](#the-vault-server-makes-outbound-llm-calls)); the
+> generator inlines it from `config/secrets.env` (Cowork can't run the macOS secret-wrapper) — the
+> other servers are localhost-only and carry no secret. `--print` shows the generated block with the
+> key value redacted. With **no** names it's a full resync of every cos bridge (and prunes cos-owned
+> entries the manifest no longer defines); add-ons name just their own server from their own skill.
 
 - **Absolute `node` path** (`$BREW_PREFIX/bin/node`, from the loader): Claude Desktop's spawn
   env, like launchd's, lacks Homebrew on `PATH` (same gotcha as §2).
@@ -279,7 +243,13 @@ NODE
 
 #### Claude Code — HTTP via the bridge
 `REPO/.mcp.json` *does* accept a `url` (`"type":"http"`, `"streamable-http"` as an alias),
-pointing at the supergateway bridges from §2–4:
+pointing at the supergateway bridges from §2–3. It is **committed + CI-checked** and **generated**
+from the manifest — don't hand-edit it; just regenerate (a no-op if already in sync):
+```sh
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-mcp-json.mjs"   # writes REPO/.mcp.json from the manifest (CI verifies it matches)
+```
+The generated entries look like (one per `claude-code` bridge, port-ascending):
 ```json
 { "mcpServers": {
   "board":      { "type": "http", "url": "http://localhost:8001/mcp" },
@@ -288,8 +258,9 @@ pointing at the supergateway bridges from §2–4:
   "vault":      { "type": "http", "url": "http://localhost:8005/mcp" }
 }}
 ```
-> The optional `openwhispr` (`:8002`) and `whatsapp` (`:8006`) entries are added by their own
-> setup skills (`/openwhispr-mcp-setup`, `/whatsapp-mcp-setup`), merged alongside these four.
+> The optional `openwhispr` (`:8002`) and `whatsapp` (`:8006`) entries land in `.mcp.json` once their
+> own setup skills (`/openwhispr-mcp-setup`, `/whatsapp-mcp-setup`) install the descriptor and
+> regenerate — the generator picks up every bridge in the manifest, so nothing is merged by hand.
 
 #### Claude Desktop — HTTP alternatives (only if you prefer the bridge / can't use stdio)
 - **Custom Connector UI** — Settings → Connectors → Add custom connector →
@@ -300,48 +271,23 @@ pointing at the supergateway bridges from §2–4:
   generic config-file workaround for HTTP servers, but it currently chokes on supergateway
   with `Unexpected content type: null`. Prefer the direct stdio above (it's simpler anyway).
 
-### 6. Couple the bridges to the app (one-way)
-Make starting the app guarantee the bridges are up. Create `mcp/ensure-bridges.sh`
-(then `chmod +x mcp/ensure-bridges.sh`):
-
-```sh
-#!/bin/sh
-# Ensure the MCP HTTP bridges are loaded + running. Called before the app starts.
-# One-way on purpose: NEVER stops them — Cowork needs the bridges even when the app
-# is down. launchd still owns lifecycle.
-# Always exits 0 (best-effort) so a bridge hiccup can't block the app.
-# (The optional openwhispr/whatsapp add-ons append themselves to BOTH loops below from
-#  their own setup skills — keying off whether their plist exists — so a machine without
-#  them never WARNs about :8002/:8006.)
-set -u
-U=$(id -u); LA="$HOME/Library/LaunchAgents"
-REPO=$(cd "$(dirname "$0")/.." && pwd)
-for svc in board calendar guard vault; do
-  label="com.chiefofstaff.mcp-$svc"
-  launchctl bootstrap gui/"$U" "$LA/$label.plist" 2>/dev/null   # load if not loaded
-  launchctl kickstart "gui/$U/$label" 2>/dev/null               # start if not running
-done
-sleep 1
-for pair in "8001 board" "8003 calendar" "8004 guard" "8005 vault"; do
-  port=${pair%% *}; name=${pair#* }
-  lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 \
-    && echo "[mcp] $name bridge up on :$port" \
-    || echo "[mcp] WARN: $name bridge DOWN on :$port — see $REPO/mcp/logs/$name.err.log"
-done
-exit 0
-```
-
-Chain it into `board/package.json` so the app brings the bridges up first:
+### 6. The app brings the bridges up (already wired — no edit)
+`mcp/ensure-bridges.sh` + `mcp/ensure-bridges.mjs` are **committed**; you don't author them. And
+`board/package.json` already chains them via `predev`/`prestart` so starting the app guarantees the
+bridges are up first (cross-platform, no `sh` in the npm script):
 ```json
-"dev":   "../mcp/ensure-bridges.sh && next dev",
-"start": "../mcp/ensure-bridges.sh && next start"
+"predev":   "node ../mcp/ensure-bridges.mjs",
+"prestart": "node ../mcp/ensure-bridges.mjs"
 ```
+`ensure-bridges.mjs` is the platform dispatcher: on Windows it runs `mcp/cos-services.mjs start`;
+everywhere else it runs `mcp/ensure-bridges.sh`. That shell script is a **thin consumer of the
+service manifest** — it iterates `node mcp/service-manifest.mjs --probe-list` (NOT a hardcoded
+service list), and on macOS bootstraps + kickstarts each installed LaunchAgent then probes it.
 
-**Keep it one-way** — do not tear the bridges down on app exit: Cowork needs them even
-when the dev app is down. launchd stays the real
-supervisor (boot + crash-restart); this step only guarantees "they're up right now"
-whenever the app starts. (No root launcher exists; if you start the app another way, call
-`mcp/ensure-bridges.sh` there too.)
+**One-way on purpose** — it NEVER stops a bridge (Cowork needs them even when the dev app is down),
+launchd stays the real supervisor (boot + crash-restart), and it always exits 0 so a bridge hiccup
+can't block `next dev`. An optional add-on with no installed plist is skipped silently (no WARN
+about `:8002`/`:8006`). If you start the app another way, run `sh mcp/ensure-bridges.sh` there too.
 
 The same `ensure-bridges.sh` also nudges the two **uv sidecars** — **search** (`:8008`) and
 **guard** (`:8009`): it bootstraps + kickstarts `com.chiefofstaff.mcp-search` and
@@ -383,16 +329,12 @@ machine-local file — never in `~/Library/LaunchAgents`, never committed. One-t
 ```bash
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 cp "$REPO_ROOT/config/secrets.env.example" "$REPO_ROOT/config/secrets.env"   # then edit in your sk-ant-… key
-# render + install the plist (no secret in it). The template's __REPO__ / __VAULT_NAME__
-# placeholders are runtime-substituted from $REPO_ROOT / $VAULT_NAME (the API key has no
-# placeholder — it lives in config/secrets.env):
-sed -e "s#__REPO__#$REPO_ROOT#g" -e "s#__VAULT_NAME__#$VAULT_NAME#g" \
-  "$REPO_ROOT/mcp/vault-server/deploy/com.chiefofstaff.mcp-vault.plist.template" \
-  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vault.plist"
-U=$(id -u)
-launchctl bootout   gui/$U/com.chiefofstaff.mcp-vault 2>/dev/null || true
-launchctl bootstrap gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-vault.plist"
-launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-vault
+# render + install the plist (no secret in it). The vault plist is generated from
+# mcp/vault-server/vault.service.json by scripts/gen-launchd.mjs — its ProgramArguments runs the
+# secret-wrapper launch.sh (which sources config/secrets.env), and $REPO_ROOT / $VAULT_DIR resolve
+# from the loader; the API key has no placeholder — it lives only in config/secrets.env. --install
+# also reloads via launchctl. (This is included in the core `gen-launchd.mjs --install` in §2.)
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install vault
 ```
 
 **Rotate** the key by editing `config/secrets.env` and `launchctl kickstart -k …/com.chiefofstaff.mcp-vault` —
@@ -414,41 +356,17 @@ a stdio MCP server — so it does **not** go in `.mcp.json` (same as Gmail/Calen
 keyword scan whenever the sidecar is down, so this LaunchAgent is **best-effort, never required**
 (see `docs/reference/search.md` for the full contract). launchd supervises it the same way as the bridges.
 
-Create `$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-search.plist` (no supergateway — `uv`
-self-provisions the venv on first launch and runs uvicorn directly):
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.chiefofstaff.mcp-search</string>
-  <key>ProgramArguments</key><array>
-    <string>$BREW_PREFIX/bin/uv</string>
-    <string>run</string>
-    <string>--directory</string><string>$REPO_ROOT/search</string>
-    <string>uvicorn</string><string>sidecar:app</string>
-    <string>--host</string><string>127.0.0.1</string>
-    <string>--port</string><string>8008</string>
-  </array>
-  <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>$BREW_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <!-- ABSOLUTE — the board writes process.cwd()/data/cases.json with cwd=board/,
-         so a relative default would diverge when the board is started from repo root. -->
-    <key>COS_BOARD_DATA</key><string>$REPO_ROOT/board/data/cases.json</string>
-    <!-- After the one-time prefetch below, pin offline so a flaky network can't
-         stall startup — the model is already in ~/.cache/huggingface. -->
-    <key>HF_HUB_OFFLINE</key><string>1</string>
-  </dict>
-  <key>WorkingDirectory</key><string>$REPO_ROOT/search</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>$REPO_ROOT/mcp/logs/search.out.log</string>
-  <key>StandardErrorPath</key><string>$REPO_ROOT/mcp/logs/search.err.log</string>
-</dict></plist>
+The search plist is generated from `search/search.service.json` by `scripts/gen-launchd.mjs` (no
+supergateway — `uv` self-provisions the venv on first launch and runs uvicorn directly): the
+descriptor declares port `8008`, `--directory "$REPO_ROOT/search"`, and the env `COS_BOARD_DATA`
+(absolute — the board writes `process.cwd()/data/cases.json` with cwd `board/`) + `HF_HUB_OFFLINE=1`
+(pins offline once the model is cached, after the one-time prefetch below). `search` is core, so the
+default `gen-launchd.mjs --install` in §2 already installs + reloads it; to (re)do just this one:
+```sh
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install search
+curl -s "$SEARCH_SIDECAR_URL/healthz"   # {"ok":true,...} once the model is warm
 ```
-> Expand `$BREW_PREFIX` / `$REPO_ROOT` from the loader when rendering this into the plist —
-> launchd cannot expand `$VARS` and cannot see an nvm/asdf shim, so the `uv` path must be the
-> literal `$BREW_PREFIX/bin/uv` and `PATH` must start with `$BREW_PREFIX/bin`.
 
 **One-time model prefetch** (run once, while online, *before* setting `HF_HUB_OFFLINE=1`):
 ```sh
@@ -467,16 +385,8 @@ the deterministic `COS_SEARCH_EMBEDDER=hash` embedder, which needs no model.)
   cwd-divergence bug (board cwd is `board/`, not the repo root).
 - The embedder is **warmed at FastAPI startup**, so `/healthz` only returns `{"ok":true}` once
   the model is loaded — which is exactly what `ensure-bridges.sh` probes (no false "up").
-- `KeepAlive` + `RunAtLoad` mirror the bridges: it starts at login and restarts on crash.
-
-Load it the same way as the bridges:
-```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-U=$(id -u)
-launchctl bootout   gui/$U/com.chiefofstaff.mcp-search 2>/dev/null
-launchctl bootstrap gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-search.plist"
-curl -s "$SEARCH_SIDECAR_URL/healthz"   # {"ok":true,...} once the model is warm
-```
+- `KeepAlive` + `RunAtLoad` mirror the bridges (the descriptor renders them): it starts at login
+  and restarts on crash.
 
 > **Port `:8008`** sits clear of the bridges (`:8001`/`:8002`) and the board (`:3000`). If a
 > *foreign* process already holds `:8008`, the board's `POST /api/search` gets a non-JSON /
@@ -492,38 +402,12 @@ it's an HTTP backend the *bridge* calls, not an MCP server). Unlike search, the 
 **security control**, so the MCP **fails CLOSED** when the sidecar is down (an unreachable scan
 returns an `UNAVAILABLE → untrusted` verdict, never a silent "clean").
 
-Create `$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-guardsvc.plist` — same shape as the search
-plist with three differences: port `8009`, `--directory "$REPO_ROOT/guard"`, and env
-`COS_GUARD_TRUST_FILE` instead of `COS_BOARD_DATA` (and **no** `HF_HUB_OFFLINE` pin — see below):
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.chiefofstaff.mcp-guardsvc</string>
-  <key>ProgramArguments</key><array>
-    <string>$BREW_PREFIX/bin/uv</string>
-    <string>run</string>
-    <string>--directory</string><string>$REPO_ROOT/guard</string>
-    <string>uvicorn</string><string>sidecar:app</string>
-    <string>--host</string><string>127.0.0.1</string>
-    <string>--port</string><string>8009</string>
-  </array>
-  <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>$BREW_PREFIX/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <!-- ABSOLUTE — the sidecar's ONLY writable state is this sender-trust whitelist. -->
-    <key>COS_GUARD_TRUST_FILE</key><string>$REPO_ROOT/guard/data/trusted-senders.json</string>
-  </dict>
-  <key>WorkingDirectory</key><string>$REPO_ROOT/guard</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>$REPO_ROOT/mcp/logs/guardsvc.out.log</string>
-  <key>StandardErrorPath</key><string>$REPO_ROOT/mcp/logs/guardsvc.err.log</string>
-</dict></plist>
-```
-> Expand `$BREW_PREFIX` / `$REPO_ROOT` from the loader when rendering this into the plist —
-> launchd cannot expand `$VARS` and cannot see an nvm/asdf shim, so the `uv` path must be the
-> literal `$BREW_PREFIX/bin/uv` and `PATH` must start with `$BREW_PREFIX/bin`.
+The guardsvc plist is generated from `guard/guardsvc.service.json` by `scripts/gen-launchd.mjs` —
+same shape as the search sidecar with three differences: port `8009`, `--directory "$REPO_ROOT/guard"`,
+and env `COS_GUARD_TRUST_FILE` (absolute — the sidecar's only writable state, the sender-trust
+whitelist) instead of `COS_BOARD_DATA` (and **no** `HF_HUB_OFFLINE` pin — see below). `guardsvc` is
+core, so the default `gen-launchd.mjs --install` in §2 already installs + reloads it; to (re)do just
+this one: `node "$REPO_ROOT/scripts/gen-launchd.mjs" --install guardsvc`.
 
 **The classifier model is GATED.** With only the default deps (`fastapi`+`uvicorn`) the sidecar
 runs in **`auto`** mode and falls back to a **deterministic heuristic** classifier — so it works
@@ -536,21 +420,18 @@ source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 # accept the Llama license at huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M, then:
 huggingface-cli login
 (cd "$REPO_ROOT/guard" && "$UV_BIN" sync --extra model)   # installs torch + transformers
-# (optional) prefetch the model, then add HF_HUB_OFFLINE=1 to the plist env so later starts are offline
-launchctl kickstart -k gui/$(id -u)/com.chiefofstaff.mcp-guardsvc
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install guardsvc   # re-render + reload the sidecar
 curl -s "$GUARD_SIDECAR_URL/healthz"                   # classifier flips to promptguard:meta-llama/...
 ```
 
-Load it the same way as the bridges/search sidecar (`launchctl bootout` then `bootstrap`), and
-verify: `curl -s "$GUARD_SIDECAR_URL/healthz"` → `{"ok":true,"classifier":...}` once warm.
 `ensure-bridges.sh` nudges it alongside search and probes `/healthz` **leniently** (a cold
 sidecar listens before it's ready → WARN, not fail; the fail-closed MCP keeps you safe meanwhile).
 See `docs/security/guard.md` for the full contract and the board **`/security`** whitelist UI it backs.
 
 > For the **end-to-end model setup** — picking a named model preset, accepting the gated Llama
-> license + authenticating with the current `hf` CLI, prefetching the model, the
-> `COS_GUARD_MODEL`/`THRESHOLD`/`CLASSIFIER` precedence, the committed plist template, and verifying
-> the real model loaded (not the heuristic) — follow the **guard-setup** skill.
+> license + authenticating with the current `hf` CLI, prefetching the model, setting
+> `COS_GUARD_MODEL`/`COS_GUARD_THRESHOLD` in `config/cos.env`, and verifying the real model loaded
+> (not the heuristic) — follow the **guard-setup** skill.
 
 ## Manage
 ```sh
@@ -558,9 +439,12 @@ launchctl kickstart -k gui/$(id -u)/com.chiefofstaff.mcp-board   # restart one
 launchctl bootout      gui/$(id -u)/com.chiefofstaff.mcp-board   # stop one
 tail -f mcp/logs/board.err.log                                    # logs
 ```
-Add a *bridge* server: new plist (next free port), entries in both config files, the
-`ensure-bridges.sh` loop, then re-bootstrap. (The search sidecar above is an HTTP daemon, not
-a bridge — its plist + `ensure-bridges.sh` loop entry, but **no** `.mcp.json` entry.)
+Add a *bridge* server: the port in `config/load-config.sh`, one descriptor
+`mcp/<name>-server/<name>.service.json`, then the generators — `gen-launchd.mjs --install <name>`,
+`gen-mcp-json.mjs`, `gen-cowork-config.mjs <name>`. No second port map, no `ensure-bridges.sh` edit
+(it reads the manifest). See the **"Add a new MCP — the checklist"** in `mcp/CLAUDE.md`. (The search
+sidecar above is an HTTP daemon, not a bridge — its descriptor has `clients:[]`, so **no** `.mcp.json`
+or Cowork entry.)
 
 > **openwhispr add-on (`/openwhispr-mcp-setup`).** The optional voice server, `openwhispr` on
 > **`:8002`**, surfaces the external OpenWhispr desktop app's local transcript store. It's wired
@@ -573,8 +457,9 @@ a bridge — its plist + `ensure-bridges.sh` loop entry, but **no** `.mcp.json` 
 > **external** repo and is a worked example of wiring **both** a bridge AND a sidecar at once: the
 > Python MCP as a supergateway bridge on **`:8006`** (in `.mcp.json` + Cowork stdio, exactly like
 > the core four above) and the Go whatsmeow bridge as a launchd **sidecar** on **`:8010`** (like
-> search/guardsvc — NOT in `.mcp.json`). Its committed plist templates are under
-> `mcp/whatsapp/deploy/`. It needs a one-time **QR pairing**; follow **`/whatsapp-mcp-setup`** for
+> search/guardsvc — NOT in `.mcp.json`). Its plists are generated from the descriptors under
+> `mcp/whatsapp/` by `scripts/gen-launchd.mjs` (see `mcp/CLAUDE.md`). It needs a one-time **QR
+> pairing**; follow **`/whatsapp-mcp-setup`** for
 > the full runbook. Heads-up: the upstream Python server reads `WHATSAPP_BRIDGE_PORT` only for the
 > **Go** bridge, so cos names its supergateway port `WHATSAPP_MCP_BRIDGE_PORT` to keep the two
 > distinct.

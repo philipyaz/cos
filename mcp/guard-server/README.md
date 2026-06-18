@@ -162,7 +162,12 @@ cd mcp/guard-server && npm install
 ## `.mcp.json` entry (registry name: `guard`)
 
 The bridge port for this server is **`8004`** (board = `8001`, openwhispr = `8002`,
-calendar = `8003`, search = `8008`); the **sidecar** is `8009`.
+calendar = `8003`, search = `8008`); the **sidecar** is `8009`. In this repo the committed
+`.mcp.json` (Claude Code) is **generated** from `mcp/guard-server/guard.service.json` by
+`scripts/gen-mcp-json.mjs`, the macOS launchd bridge plist by `scripts/gen-launchd.mjs`, and the
+Cowork direct-stdio entry by `scripts/gen-cowork-config.mjs` (the guardsvc **sidecar** plist
+likewise from `guard/guardsvc.service.json`); see [`mcp/CLAUDE.md`](../CLAUDE.md) and the
+`/mcp-bridge-setup` / `/guard-setup` skills. The blocks below show what those generators produce.
 
 ### Option A — HTTP via supergateway (the bridged setup)
 

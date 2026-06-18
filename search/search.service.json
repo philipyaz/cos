@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "search",
+  "kind": "sidecar",
+  "runtime": "uvicorn",
+  "core": true,
+  "portVar": "SEARCH_SIDECAR_PORT",
+  "dir": "${REPO_ROOT}/search",
+  "cwd": "${REPO_ROOT}/search",
+  "app": "sidecar:app",
+  "host": "127.0.0.1",
+  "uvExtras": [],
+  "env": {
+    "COS_BOARD_DATA": "${REPO_ROOT}/board/data/cases.json",
+    "HF_HUB_OFFLINE": "1"
+  },
+  "clients": [],
+  "inMcpJson": false,
+  "probe": { "type": "healthz" }
+}

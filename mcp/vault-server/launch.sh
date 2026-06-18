@@ -17,6 +17,13 @@ set -eu
 # REPO = repo root (this script lives at mcp/vault-server/launch.sh → up two dirs).
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 
+# Machine config (single source of truth for the port + supergateway binary) so a VAULT_BRIDGE_PORT
+# override in config/cos.env reaches the actual listener — not just the manifest probe + .mcp.json.
+# load-config.sh guards every command and never sources secrets, so it is safe under `set -eu`.
+if [ -f "$REPO/config/load-config.sh" ]; then
+  . "$REPO/config/load-config.sh"
+fi
+
 # Load machine-local secrets (ANTHROPIC_API_KEY; may also carry COS_VAULT_* overrides).
 # `set -a` exports everything the file assigns so the SDK child process inherits it.
 if [ -f "$REPO/config/secrets.env" ]; then
@@ -25,12 +32,13 @@ if [ -f "$REPO/config/secrets.env" ]; then
   set +a
 fi
 
-# Front the stdio server with supergateway as Streamable HTTP on :8005 (same args the plist
-# used to carry inline). COS_VAULT_DIR + PATH come from the plist's EnvironmentVariables.
+# Front the stdio server with supergateway as Streamable HTTP on the vault bridge port (default
+# 8005, overridable via VAULT_BRIDGE_PORT in cos.env). COS_VAULT_DIR + PATH come from the plist's
+# EnvironmentVariables; SUPERGATEWAY_BIN + VAULT_BRIDGE_PORT come from load-config.sh above.
 exec "${SUPERGATEWAY_BIN:-supergateway}" \
   --stdio "node $REPO/mcp/vault-server/server.mjs" \
   --outputTransport streamableHttp \
-  --port 8005 \
+  --port "${VAULT_BRIDGE_PORT:-8005}" \
   --streamableHttpPath /mcp \
   --cors \
   --logLevel info
