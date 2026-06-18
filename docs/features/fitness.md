@@ -37,7 +37,7 @@ Like [nutrition](nutrition.md) and the [calendar](calendar.md), fitness is **not
 - **`db.healthEntries[]`** — the Apple Watch time-series (the owned **array**), written through the
   **same serialized `mutate()` chokepoint** as cases and events.
 - **`db.coachingArtifacts[]`** — the persisted AI coaching outputs (training plans, weekly reviews,
-  pre-workout briefs, correlation reports), a **second owned array** (v12 — see
+  pre-workout briefs, correlation reports), a **second owned array** (v13 — see
   [Coaching artifacts are persisted & externally-creatable](#coaching-artifacts-are-persisted-externally-creatable)).
 - **`db.athleteProfile`** — the training profile, a **singleton object** (not an array, so —
   exactly like nutrition's `db.nutritionGoal` — it is intentionally **not** in the add-on's
@@ -46,8 +46,8 @@ Like [nutrition](nutrition.md) and the [calendar](calendar.md), fitness is **not
 So the add-on inherits the board's machinery for free: the monotonic **`version`** counter +
 **SSE live-refresh** (a watch push or an MCP read lands on the read-only view without a reload),
 the timestamped **daily backup** (the data rides `cases.json`, so it is snapshotted whole), and the
-**actor attribution** baseline. The schema bump to **v11** (`db.healthEntries` + `db.athleteProfile`)
-and then **v12** (`db.coachingArtifacts`) is **purely additive** — old files read unchanged, each new
+**actor attribution** baseline. The schema bump to **v12** (`db.healthEntries` + `db.athleteProfile`)
+and then **v13** (`db.coachingArtifacts`) is **purely additive** — old files read unchanged, each new
 array defaults to `[]`, the profile is simply absent until you set one, and a board with the add-on
 disabled is indistinguishable from a pre-add-on board. (See [Add-ons](../architecture/addons.md) for
 why this is the whole point.)

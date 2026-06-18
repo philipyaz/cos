@@ -39,7 +39,7 @@ names onto these and stores unmapped names verbatim.
 ## MCP tools
 
 18 tools — 7 health-data tools, 4 athlete-profile / readiness / correlation tools, plus 7
-stateful **coaching-artifact** tools (v12). The
+stateful **coaching-artifact** tools (v13). The
 coaching surfaces (training plan, weekly review, pre-workout brief, sleep/performance
 correlations) are persisted on the board's core store (`db.coachingArtifacts`) and upserted
 by `(kind, periodKey)`. The `save_*` tools are token-gated writes; the `list_*` / `get_*`
@@ -93,27 +93,29 @@ npm install
 
 ### 3. Wire the bridge (macOS launchd + supergateway)
 
-Substitute the placeholders in the committed plist template and install it
-(same pattern as nutrition-server — `ensure-bridges.sh` then bootstraps it on
-`npm run dev`):
+The launchd bridge is rendered from the co-located descriptor
+`mcp/fitness-server/fitness.service.json` by `scripts/gen-launchd.mjs` (it
+resolves the descriptor against `config/load-config.sh`, writes the plist with
+literal paths/port, and does bootout → bootstrap → kickstart in one step). There
+is no committed `*.plist.template` to `sed` — same manifest flow as every other
+service (see [`mcp/CLAUDE.md`](../CLAUDE.md)). The descriptor declares
+`secretWrapper: launch.sh`, so the wrapper sources `FITNESS_PUSH_TOKEN` from
+`config/secrets.env` at spawn — the token is never baked into the plist:
 
 ```bash
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-sed -e "s#__BREW_PREFIX__#$BREW_PREFIX#g" \
-    -e "s#__REPO__#$REPO_ROOT#g" \
-    -e "s#__FITNESS_BRIDGE_PORT__#${FITNESS_BRIDGE_PORT:-8011}#g" \
-    -e "s#__FITNESS_PUSH_TOKEN__#${FITNESS_PUSH_TOKEN}#g" \
-  mcp/fitness-server/deploy/com.chiefofstaff.mcp-fitness.plist.template \
-  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-fitness.plist"
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install fitness
 ```
 
-### 4. Register in `.mcp.json`
+### 4. Register in `.mcp.json` (generated)
 
-```json
-"fitness": {
-  "type": "http",
-  "url": "http://localhost:8011/mcp"
-}
+`.mcp.json` is a generated artifact of the manifest — don't hand-edit it.
+Regenerate (and CI-verify) the `fitness` http entry from the descriptor:
+
+```bash
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-mcp-json.mjs"          # write; --check verifies in CI
+# yields:  "fitness": { "type": "http", "url": "http://localhost:8011/mcp" }
 ```
 
 ### 5. Test

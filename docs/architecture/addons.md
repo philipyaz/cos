@@ -191,7 +191,7 @@ the same four-layer slice:
 | `id` | `nutrition` | `fitness` |
 | Owned **arrays** (`dataArrays`) | `foodLogs`, `pantryItems`, `mealPlanEntries`, `weights` | `healthEntries`, `coachingArtifacts` |
 | Singleton (not in `dataArrays`) | `db.nutritionGoal` | `db.athleteProfile` |
-| Schema versions | v9 (the three diary arrays) + v10 (weight-loss) | v11 (`healthEntries` + `athleteProfile`) + v12 (`coachingArtifacts`) |
+| Schema versions | v9 (the three diary arrays) + v10 (weight-loss) | v12 (`healthEntries` + `athleteProfile`) + v13 (`coachingArtifacts`) |
 | API prefixes | `/api/nutrition` | `/api/fitness` |
 | MCP server / bridge port | `nutrition` / `:8007` | `fitness` / `:8011` |
 | The "intelligence" | calorie estimation — in the **operator skill** (the agent) | coaching generation — in the **agent**, persisted via the MCP/`POST` (the board runs only deterministic stats) |

@@ -323,7 +323,7 @@ const INGEST_HEALTH_TO_VAULT_TOOL = {
   },
 };
 
-// ── Coaching-artifact tools (v12) ─────────────────────────────────────────────
+// ── Coaching-artifact tools (v13) ─────────────────────────────────────────────
 // The FOUR stateful AI coaching surfaces — training plan, weekly review, pre-workout
 // brief, and sleep/performance correlations — are persisted on the board's core store
 // (db.coachingArtifacts) and upserted by (kind, periodKey). The save_* tools are THIN
@@ -706,7 +706,7 @@ async function handleGetCorrelations(args) {
   return text(JSON.stringify(data, null, 2));
 }
 
-// ── Coaching-artifact handlers (v12) — thin POST/GET/DELETE wrappers ──────────
+// ── Coaching-artifact handlers (v13) — thin POST/GET/DELETE wrappers ──────────
 
 // Build a coaching POST body and persist it. source:"agent" (the token-gated external
 // agent); periodKey is the kind's upsert key. The board validates + upserts.

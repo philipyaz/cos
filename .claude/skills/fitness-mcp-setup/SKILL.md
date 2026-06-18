@@ -53,7 +53,7 @@ optional openwhispr / whatsapp / nutrition add-ons):
 profile + computed signals** — `get_athlete_profile`, `set_athlete_profile` (the goal/level/
 availability/sports/equipment singleton; set is token-gated, the board validates the enums),
 `get_form_score` (board-computed daily readiness 0-100), `get_correlations` (board-computed sleep-vs-
-performance correlation over N days); **coaching artifacts** (v12) — `save_training_plan`,
+performance correlation over N days); **coaching artifacts** (v13) — `save_training_plan`,
 `save_weekly_review`, `save_pre_workout_brief`, `save_correlation_report` (the four `save_*` writers,
 one per kind), `list_coaching_artifacts`, `get_coaching_artifact`, `delete_coaching_artifact`. The
 writes — the 2 health writes + `set_athlete_profile` + the 4 `save_*` + `delete_coaching_artifact`
@@ -119,19 +119,23 @@ CRM_BASE_URL="$BOARD_URL" "$NODE_BIN" "$REPO_ROOT/mcp/fitness-server/server.mjs"
   round-trips against the board.)
 
 ### 3. Ensure the `.mcp.json` fitness http entry (Claude Code)
-The repo already ships the `fitness` http entry in `$REPO_ROOT/.mcp.json`. Confirm it points at the
-`:8011` bridge — do **not** clobber the other servers:
+`.mcp.json` is a **generated** artifact of the service manifest (rendered from
+`mcp/fitness-server/fitness.service.json` by `scripts/gen-mcp-json.mjs`, CI-verified with `--check`)
+— **never hand-edit it**. The repo already ships the `fitness` http entry pointing at the `:8011`
+bridge:
 ```json
 { "mcpServers": {
   "fitness": { "type": "http", "url": "http://localhost:8011/mcp" }
 }}
 ```
-- **CHECKPOINT** — the entry is present alongside the core servers:
+- **CHECKPOINT** — the entry is present and in sync with the manifest:
   ```sh
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"
   grep -q '"fitness"' "$REPO_ROOT/.mcp.json" && echo ".mcp.json fitness entry OK"
+  node "$REPO_ROOT/scripts/gen-mcp-json.mjs" --check && echo ".mcp.json in sync with the manifest"
   ```
-  If it is somehow missing, add the one entry above (merged into the existing `mcpServers`).
+  If it is somehow missing or drifted, regenerate it from the manifest (do not edit by hand):
+  `node "$REPO_ROOT/scripts/gen-mcp-json.mjs"` (see `mcp/CLAUDE.md`).
 
 ### 4. Seed the ingest secret (`FITNESS_PUSH_TOKEN`)
 The two write tools authenticate to the board with a shared secret. Seed it in `config/secrets.env`
@@ -159,36 +163,29 @@ grep -q '^FITNESS_PUSH_TOKEN=replace-with-a-random-token' "$SEC" \
   ```
 
 ### 5. Install the launchd BRIDGE (`:8011`)
-Install from the **committed template**
-`mcp/fitness-server/deploy/com.chiefofstaff.mcp-fitness.plist.template` — same pattern as the
-nutrition/guardsvc/vault templates — substituting the loader's absolute paths, the bridge port, AND
-the secret (launchd cannot expand `$VARS`, so the rendered plist carries literal values). Source
-`secrets.env` first so `$FITNESS_PUSH_TOKEN` is in scope:
+The plist is **generated from the co-located descriptor** `mcp/fitness-server/fitness.service.json` by
+`scripts/gen-launchd.mjs` (see `mcp/CLAUDE.md`) — there is **no committed `*.plist.template` to `sed`**.
+The generator resolves the descriptor against the loader's absolute paths + bridge port (launchd can't
+expand `$VARS`, so the rendered plist carries literal values) and, on macOS, renders + bootout →
+bootstrap → kickstart in one step:
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"; U=$(id -u)
-set -a; . "$REPO_ROOT/config/secrets.env"; set +a   # export FITNESS_PUSH_TOKEN for the sed below
-mkdir -p "$REPO_ROOT/mcp/logs"
-sed -e "s#__BREW_PREFIX__#$BREW_PREFIX#g" \
-    -e "s#__REPO__#$REPO_ROOT#g" \
-    -e "s#__FITNESS_BRIDGE_PORT__#${FITNESS_BRIDGE_PORT:-8011}#g" \
-    -e "s#__FITNESS_PUSH_TOKEN__#${FITNESS_PUSH_TOKEN}#g" \
-  "$REPO_ROOT/mcp/fitness-server/deploy/com.chiefofstaff.mcp-fitness.plist.template" \
-  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-fitness.plist"
-launchctl bootout   gui/$U/com.chiefofstaff.mcp-fitness 2>/dev/null || true
-launchctl bootstrap gui/$U "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-fitness.plist"
-launchctl kickstart -k gui/$U/com.chiefofstaff.mcp-fitness
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install fitness
 ```
-The template runs supergateway DIRECTLY around the node child (no launch wrapper — like
-nutrition/board/calendar, UNLIKE vault, because this server makes no LLM calls). Its env is:
+Unlike nutrition/board/calendar (which run supergateway directly), the fitness descriptor declares
+`secretWrapper: mcp/fitness-server/launch.sh` — **the same secret-wrapper pattern as vault** — because
+this bridge carries the `FITNESS_PUSH_TOKEN` secret. The rendered plist runs `launch.sh`, which sources
+`config/secrets.env` then execs supergateway, so the **token is never baked into the plist** (it is
+read at runtime). The generated plist's env (from the descriptor) is:
 - `PATH` starting with `$BREW_PREFIX/bin` (launchd can't see an nvm/asdf shim),
-- `CRM_BASE_URL=http://localhost:3000` (the board; pinned so it doesn't depend on the launchd cwd),
-- `FITNESS_PUSH_TOKEN=…` — the substituted-in ingest secret (the one machine-local credential),
-- `COS_MCP_IDLE_EXIT_MS=300000` — the idle-exit **OPT-IN**, set **ONLY here** (the bridge), never in
+- `CRM_BASE_URL=${BOARD_URL}` (the board; from `env` in the descriptor, pinned so it doesn't depend on the launchd cwd),
+- `FITNESS_PUSH_TOKEN` — sourced at spawn by `launch.sh` from `config/secrets.env` (`secrets:[…]` in the descriptor), NOT a literal in the plist,
+- `COS_MCP_IDLE_EXIT_MS=300000` — the idle-exit **OPT-IN** (`idleExit:true`), on the bridge only, never in
   the direct-stdio Cowork config (see Gotchas).
 
-> The rendered plist now contains the literal token. It lives in `~/Library/LaunchAgents` (NOT
-> version-controlled) — that's fine; just don't paste the rendered plist anywhere public, and
-> re-render it (this step) after rotating the token.
+> Seed the token in `config/secrets.env` (§4) **before** this step — the wrapper reads it from there
+> at spawn. After rotating the token, just `launchctl kickstart -k …` (Manage) so the wrapper re-reads
+> it; there is no plist to re-render for a token change.
 
 - **CHECKPOINT** — an MCP `initialize` on `:8011` returns `serverInfo.name == "fitness"`:
   ```sh
@@ -203,34 +200,22 @@ nutrition/board/calendar, UNLIKE vault, because this server makes no LLM calls).
 `.mcp.json` (§3) covers **Claude Code**. **Claude Cowork Desktop** registers **differently**:
 `claude_desktop_config.json` (`$COWORK_CONFIG`) accepts **stdio `command` servers only** (an HTTP
 `url` is rejected — the same validated rule as mcp-bridge-setup). Cowork spawns the node server
-itself. Write it with a **backup-first node merge** that preserves the other servers + `preferences`
-and refreshes only the `fitness` entry from the **resolved** loader values + the secret — mirroring
-mcp-bridge-setup's Cowork merge exactly:
+itself. The Cowork entry is **generated from the same descriptor** by `scripts/gen-cowork-config.mjs`
+— a **backup-first** merge that preserves the other servers + `preferences` and refreshes only the
+`fitness` entry from the resolved loader values. Because the descriptor declares
+`secrets:["FITNESS_PUSH_TOKEN"]`, the generator reads `config/secrets.env` and **inlines** the token
+into the Cowork `env` (Cowork can't run the launchd secret-wrapper), and it omits `idleExit` on the
+Cowork entry automatically:
 ```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # resolves NODE_BIN/REPO_ROOT/BOARD_URL/COWORK_CONFIG
-set -a; . "$REPO_ROOT/config/secrets.env"; set +a                  # FITNESS_PUSH_TOKEN into env for the merge
-"$NODE_BIN" - <<'NODE'
-const fs = require('node:fs'), E = process.env;
-const server = {
-  command: E.NODE_BIN,
-  args: [`${E.REPO_ROOT}/mcp/fitness-server/server.mjs`],
-  env: {
-    CRM_BASE_URL: E.BOARD_URL || 'http://localhost:3000',  // the board
-    FITNESS_PUSH_TOKEN: E.FITNESS_PUSH_TOKEN || '',          // the ingest secret; NO idle-exit here
-  },
-};
-const p = E.COWORK_CONFIG, cfg = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p,'utf8')) : {};
-cfg.mcpServers = { ...(cfg.mcpServers||{}), fitness: server };   // refresh OURS; keep other servers + preferences intact
-if (fs.existsSync(p)) fs.copyFileSync(p, p + '.bak');            // back up before write
-fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n');
-console.log('Cowork mcpServers ->', Object.keys(cfg.mcpServers).join(', '));
-NODE
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+node "$REPO_ROOT/scripts/gen-cowork-config.mjs" fitness
 ```
 - **Absolute `node` path** (`$NODE_BIN`, from the loader): Claude Desktop's spawn env, like
-  launchd's, lacks Homebrew on `PATH`.
+  launchd's, lacks Homebrew on `PATH` — the generator writes it.
 - **The secret rides in the Cowork `env`** (Cowork has no `config/secrets.env` access at spawn) — so
-  the write tools work from Cowork too. **Do NOT set `COS_MCP_IDLE_EXIT_MS` in the Cowork entry** —
-  Cowork holds one long-lived stdio child; the idle-exit opt-in belongs only in the §5 bridge plist.
+  the write tools work from Cowork too. The generator **never** sets `COS_MCP_IDLE_EXIT_MS` on the
+  Cowork entry — Cowork holds one long-lived stdio child; the idle-exit opt-in belongs only in the §5
+  bridge plist.
 - **Quit + reopen Claude Desktop (⌘Q)** — it reads this file only at launch; then `fitness`
   appears in Cowork's tools.
 - **CHECKPOINT** — both registrations present:
@@ -298,11 +283,13 @@ board, §4).
   operation; this one only proves the plumbing.
 
 ### 9. (Optional) confirm `mcp/ensure-bridges.sh` brings it up
-`fitness` is **already wired** into `mcp/ensure-bridges.sh` as an **OPTIONAL** bridge (`"fitness
-${FITNESS_BRIDGE_PORT:-8011}"` in the service list; in the
-`openwhispr|whatsapp|whatsappbridge|vaultjobs|nutrition|fitness` skip-if-no-plist case), so `npm run
-dev/start` brings it up with the rest **only when the plist exists** — a machine without the add-on
-is skipped silently (no `WARN … DOWN` about `:8011`). No edit needed; just confirm:
+`mcp/ensure-bridges.sh` is a **thin consumer** of the service manifest: it reads
+`node mcp/service-manifest.mjs --probe-list` rather than a hardcoded list, so `fitness` appears
+automatically from its co-located descriptor `mcp/fitness-server/fitness.service.json` — **no
+service-list entry and no skip-`case` to maintain**. Because the descriptor carries `addon:"fitness"`,
+the probe treats the bridge as **OPTIONAL** and skips it silently on a board that never installed it
+(no `WARN … DOWN` about `:8011`), while `npm run dev/start` brings it up with the rest once the plist
+exists. No edit needed; just confirm:
 ```sh
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 "$REPO_ROOT/mcp/ensure-bridges.sh" | grep -i fitness   # expect: "[mcp] fitness bridge up on :8011"
@@ -315,8 +302,10 @@ launchctl bootout      gui/$(id -u)/com.chiefofstaff.mcp-fitness   # stop the br
 tail -f mcp/logs/fitness.err.log                                   # supergateway / server log
 ```
 **Rotate the token:** edit `FITNESS_PUSH_TOKEN` in `config/secrets.env`, **restart the board** (so it
-re-reads the new value), then **re-render the plist** (§5) and **re-merge Cowork** (§6) so both
-clients carry the new token, and re-pair your iPhone shortcut with the same value.
+re-reads the new value), then `launchctl kickstart -k …/com.chiefofstaff.mcp-fitness` — the launchd
+bridge's `launch.sh` wrapper re-reads `secrets.env` on (re)start, so there is **no plist to
+re-render**. The **Cowork** entry inlines a copy of the token, so re-run **`gen-cowork-config.mjs
+fitness`** (§6) to refresh it, and re-pair your iPhone shortcut with the same value.
 
 **Disable the add-on (keep the plumbing):** flip it off — the nav + pages hide and writes 404 again,
 but the bridge stays loaded and the data stays on disk + readable:
@@ -332,7 +321,7 @@ install; it does **NOT** delete data (see the data-purge note below):
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"; U=$(id -u)
 # 1. Flag the add-on OFF (writes 404, nav hides) — do this first so the surface is dormant:
 curl -s -X PATCH "$BOARD_URL/api/addons/fitness" -H 'Content-Type: application/json' -d '{"enabled":false}' >/dev/null 2>&1 || true
-# 2. Stop + remove the launchd bridge (the rendered plist carried the token — remove it):
+# 2. Stop + remove the launchd bridge (the secret stays in secrets.env; nothing was baked into the plist):
 launchctl bootout gui/$U/com.chiefofstaff.mcp-fitness 2>/dev/null || true
 rm -f "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-fitness.plist"
 # 3. Drop the Cowork entry (backup-first node merge; preserves the other servers + preferences):
@@ -346,21 +335,18 @@ if (fs.existsSync(p)) {
   console.log('Cowork mcpServers ->', Object.keys(cfg.mcpServers||{}).join(', '));
 }
 NODE
-# 4. Drop the .mcp.json entry (backup-first; keep the other servers):
-"$NODE_BIN" - <<'NODE'
-const fs = require('node:fs'), E = process.env, p = `${E.REPO_ROOT}/.mcp.json`;
-const cfg = JSON.parse(fs.readFileSync(p,'utf8'));
-if (cfg.mcpServers) delete cfg.mcpServers.fitness;
-fs.copyFileSync(p, p + '.bak');
-fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n');
-console.log('.mcp.json mcpServers ->', Object.keys(cfg.mcpServers).join(', '));
-NODE
-echo "Uninstalled the fitness bridge + both registrations. ⌘Q + reopen Cowork to drop it from the tool list."
+# 4. Leave .mcp.json ALONE — it is a GENERATED, CI-checked artifact (rendered from the descriptor).
+#    Hand-deleting the fitness entry would drift it from the manifest and fail `gen-mcp-json.mjs --check`.
+#    A stray http entry pointing at a dead :8011 is harmless (Claude Code just shows it unreachable).
+echo "Uninstalled the fitness bridge + the Cowork entry. ⌘Q + reopen Cowork to drop it from the tool list."
 ```
-> The `FITNESS_PUSH_TOKEN` line stays in `config/secrets.env` (harmless; re-enabling reuses it). The
-> repo SHIPS the `.mcp.json` fitness entry and the `ensure-bridges.sh` line; removing them from a
-> tracked file leaves a local diff. For a per-machine opt-out, leaving the plist uninstalled is
-> enough — `ensure-bridges.sh` skips fitness silently when no plist exists, so a stray `.mcp.json`
+> The `FITNESS_PUSH_TOKEN` line stays in `config/secrets.env` (harmless; re-enabling reuses it).
+> `.mcp.json` is a **generated artifact** of the manifest (rendered from
+> `mcp/fitness-server/fitness.service.json` by `gen-mcp-json.mjs`, CI-checked) — do **not** hand-delete
+> the fitness entry on a tracked file (it would fail `--check`). There is **no `ensure-bridges.sh`
+> line** to remove either — the probe is fully manifest-derived. For a per-machine opt-out, leaving
+> the plist uninstalled is enough — the probe skips fitness silently (its descriptor's `addon:` field),
+> so a stray `.mcp.json`
 > entry pointing at a dead `:8011` is harmless (Claude Code just shows the server as unreachable).
 
 > **SEPARATE — purge the data (DESTRUCTIVE, explicit, opt-in).** Uninstall leaves the
@@ -407,12 +393,15 @@ echo "Uninstalled the fitness bridge + both registrations. ⌘Q + reopen Cowork 
 - **Port `8011` must be free** (`lsof -nP -iTCP:8011 -sTCP:LISTEN`). It sits after the search/guardsvc
   sidecars (`:8008`/`:8009`) and the WhatsApp Go bridge (`:8010`). A foreign process on it breaks §5
   — change `FITNESS_BRIDGE_PORT` in `cos.env` and re-render §3/§5.
-- **launchd cannot expand `$VARS`.** As with every Cos plist, the **rendered** plist in
-  `~/Library/LaunchAgents` carries **literal absolute paths** + the **literal token** (`sed`-
-  substituted from the loader + `secrets.env` in §5) and a `PATH` that starts with `$BREW_PREFIX/bin`
-  — launchd never inherits your login shell and can't see an nvm/asdf shim. The template invokes
-  supergateway by its **absolute** `$BREW_PREFIX/bin/supergateway` path; the inner `--stdio "node
-  …/server.mjs"` child resolves `node` via that `$BREW_PREFIX/bin`-leading `PATH`.
+- **launchd cannot expand `$VARS`, and the secret is NOT in the plist.** As with every Cos plist, the
+  **rendered** plist in `~/Library/LaunchAgents` carries **literal absolute paths** + a `PATH` that
+  starts with `$BREW_PREFIX/bin` (launchd never inherits your login shell and can't see an nvm/asdf
+  shim). But — like vault — the `FITNESS_PUSH_TOKEN` is **never written into the plist**: the plist
+  runs the `launch.sh` **secret-wrapper** (the descriptor's `secretWrapper`), which sources
+  `config/secrets.env` at spawn and then execs supergateway by its **absolute**
+  `$BREW_PREFIX/bin/supergateway` path; the inner `--stdio "node …/server.mjs"` child resolves `node`
+  via that `$BREW_PREFIX/bin`-leading `PATH`. So rotating the token is a `secrets.env` edit +
+  `kickstart`, with nothing secret ever committed or rendered into `~/Library/LaunchAgents`.
 - **The node/simdjson + pm2 gotchas in mcp-bridge-setup apply here too** — same Node, same
   supergateway, same launchd supervisor. If the bridge dies with a `libsimdjson` dyld error after a
   `brew install`, `brew reinstall node`. Don't reintroduce pm2 — launchd owns the lifecycle (the pm2

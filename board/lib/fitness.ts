@@ -276,7 +276,7 @@ export async function setProfile(
   });
 }
 
-// ── Coaching artifacts (v12) — gated writes / ungated reads ─────────────────────
+// ── Coaching artifacts (v13) — gated writes / ungated reads ─────────────────────
 // The "fitness" add-on's FOUR AI coaching surfaces are STATEFUL: persisted in ONE
 // polymorphic array (db.coachingArtifacts), upserted by (kind, periodKey). Writes funnel
 // through mutate() with assertAddonEnabled FIRST (a disabled add-on → NotFoundError → 404);

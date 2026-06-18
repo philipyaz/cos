@@ -124,15 +124,31 @@ that embeds an LLM, and it is the exception, not the template). Every WRITE tool
 `Not found.` tool error. Adding a new `mcp/<x>-server` makes it a **root npm workspace member**:
 run `npm install` at the repo root and **commit `package-lock.json`**, or CI's `npm ci` fails.
 
-### 6. Install path — committed plist template + env var + optional bridge entry
+### 6. Install path — ONE descriptor + a port in the loader (manifest-driven, both OSes)
 
-- Commit `mcp/<name>-server/deploy/com.chiefofstaff.mcp-<name>.plist.template` (copy nutrition's).
-- Add `<X>_BRIDGE_PORT="<port>"` to **`config/cos.env.example`** (pick the next free port).
-- The add-on's bridge is already an **OPTIONAL, silently-skipped** entry in `mcp/ensure-bridges.sh`
-  — add your name to its registry line **and** the optional-skip `case` so an un-installed board
-  warns nothing.
-- **Do NOT smuggle in pm2** or any new process manager. The bridge is a launchd LaunchAgent like
-  every other; that is the only mechanism.
+Supervision is **manifest-driven** (see [`mcp/CLAUDE.md`](../../../mcp/CLAUDE.md)): you define the
+service **once** as a co-located descriptor and the generators render every platform from it. **No**
+committed plist template, **no** `ensure-bridges.sh` edit, **no** second port map.
+
+- Add the port to **`config/load-config.sh`** ONLY: a default `: "${<NAME>_BRIDGE_PORT:=80NN}"`, the
+  derived `: "${<NAME>_BRIDGE_URL:=http://localhost:$<NAME>_BRIDGE_PORT}"`, and **both** names on the
+  `export` line. Then mirror it into **`config/cos.env.example`** for documentation. This is the
+  canonical port on every OS.
+- Drop **ONE** descriptor `mcp/<name>-server/<name>.service.json` (`schemaVersion:1`,
+  `kind/runtime:"bridge"`, `addon:"<id>"`, `portVar:"<NAME>_BRIDGE_PORT"`, `stdio:["${NODE_BIN}",
+  "${REPO_ROOT}/mcp/<name>-server/server.mjs"]`, `env:{CRM_BASE_URL:"${BOARD_URL}"}`,
+  `clients:["claude-code","cowork"]`, `probe:{type:"httpListen"}`, `idleExit:true`). Copy
+  `mcp/nutrition-server/nutrition.service.json` beat for beat. The `addon:"<id>"` field is what makes
+  the probe treat the bridge as **OPTIONAL** and skip it silently on a board that never installed it —
+  there is no hand-maintained registry line or skip-`case` anymore.
+- **If your write tools need a machine-local secret** (e.g. an ingest token, as fitness does), add
+  `secrets:["<TOKEN>"]` + `secretWrapper:"${REPO_ROOT}/mcp/<name>-server/launch.sh"` to the descriptor
+  and ship a `launch.sh` (copy `mcp/fitness-server/launch.sh` or `mcp/vault-server/launch.sh`) that
+  sources `config/secrets.env` then execs supergateway — so the secret never lands in the rendered
+  plist or `.mcp.json`. Most add-ons need no secret (copy nutrition, which has none).
+- **Do NOT smuggle in pm2** or any new process manager, and **never hand-edit `.mcp.json`** (it is a
+  generated, CI-checked artifact). The bridge is a launchd LaunchAgent rendered by `gen-launchd.mjs`;
+  that is the only mechanism.
 
 ### 7. Skills — one setup skill + one operator skill
 
@@ -189,8 +205,10 @@ When your add-on **reads** another add-on's data (e.g. a coach folding in the fo
 - [ ] Nav from manifest only; **core sidebar array untouched**.
 - [ ] MCP = thin `mcp-kit` fetch wrapper; `{ actor: "agent" }` on writes; `npm install` at root +
       `package-lock.json` committed.
-- [ ] Committed plist template; `<X>_BRIDGE_PORT` in `cos.env.example`; optional entry in
-      `ensure-bridges.sh`; **no pm2**.
+- [ ] **ONE** co-located descriptor `mcp/<name>-server/<name>.service.json` (`schemaVersion:1`,
+      `addon:"<id>"`, `portVar`); `<X>_BRIDGE_PORT` (+ derived `_URL`) added to `config/load-config.sh`
+      and documented in `config/cos.env.example`; **no committed plist template, no `ensure-bridges.sh`
+      edit, no pm2**; `.mcp.json` regenerated via `gen-mcp-json.mjs` (never hand-edited).
 - [ ] `/<x>-mcp-setup` + operator skill.
 - [ ] `docs/features/<x>.md` in `mkdocs.yml`; `mkdocs build --strict` clean.
 - [ ] `api-<x>-gate.mjs` + CRUD + unit tests, all in `run.sh`.
@@ -231,9 +249,10 @@ Each of these was a real mistake in the feature this skill reviews. Don't repeat
   discarded the rest of the re-sent history, so a single missed sync lost those days **permanently**
   (and the UTC `today` misclassified late-evening points). → Don't filter the caller's data to one
   day; rely on dedup-by-id and compute day boundaries in the user's timezone.
-- **Missing install path + smuggled pm2.** No committed plist / no `<X>_BRIDGE_PORT`, and a new
-  **pm2** dependency sneaked in. → Committed launchd template + env var + optional ensure-bridges
-  entry; **pm2 is dropped from this PR.**
+- **Missing install path + smuggled pm2.** No service descriptor / no `<X>_BRIDGE_PORT`, and a new
+  **pm2** dependency sneaked in. → ONE co-located descriptor (`<name>.service.json`) + the
+  `<X>_BRIDGE_PORT` in `load-config.sh`; install via the generators (the probe picks it up
+  automatically from `addon:`); **pm2 is dropped from this PR.**
 - **Missing docs / tests.** No `docs/features/<x>.md`, no gate test. → Both are required, wired
   into `mkdocs.yml` / `run.sh`.
 - **French in an English codebase.** Stored vocabulary, prompts, enums, and UI labels in French.

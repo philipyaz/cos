@@ -117,7 +117,7 @@ export function getFormScore(date: string): Promise<FormScoreResponse> {
   return request(`/api/fitness/form-score?${qs.toString()}`);
 }
 
-// ── Coaching artifacts (v12) ────────────────────────────────────────────────────
+// ── Coaching artifacts (v13) ────────────────────────────────────────────────────
 // The four AI coaching surfaces (training plan / weekly review / pre-workout brief /
 // correlations) are persisted on db.coachingArtifacts as ONE polymorphic array. The list +
 // fetch reads here are UNGATED (the history feed stays viewable when the add-on is disabled);

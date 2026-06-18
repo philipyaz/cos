@@ -116,9 +116,9 @@ const FITNESS_ADDON: AddonManifest = {
     { href: "/fitness/correlations", label: "Correlations", icon: "IconSpark" },
   ],
   apiPrefixes: ["/api/fitness"],
-  // Owned db ARRAYS only. db.athleteProfile (the v11 training-profile singleton) is a bare
+  // Owned db ARRAYS only. db.athleteProfile (the v12 training-profile singleton) is a bare
   // object, not an array, so it is deliberately omitted here (mirrors db.nutritionGoal). The
-  // v12 db.coachingArtifacts array holds the FOUR stateful AI coaching surfaces (training
+  // v13 db.coachingArtifacts array holds the FOUR stateful AI coaching surfaces (training
   // plan / weekly review / pre-workout brief / correlations), upserted by (kind, periodKey).
   dataArrays: ["healthEntries", "coachingArtifacts"],
   dependsOn: [{ id: "nutrition", required: false }],
@@ -143,7 +143,7 @@ const FITNESS_ADDON: AddonManifest = {
       "set_athlete_profile",
       "get_form_score",
       "get_correlations",
-      // v12 stateful coaching artifacts (token-gated writes; ungated reads).
+      // v13 stateful coaching artifacts (token-gated writes; ungated reads).
       "save_training_plan",
       "save_weekly_review",
       "save_pre_workout_brief",
