@@ -27,6 +27,22 @@ interface JobEntry {
   status: "new" | "reviewed" | "applied" | "rejected";
 }
 
+interface SavedSearch {
+  id: string;
+  query: string;
+  location: string;
+  active: boolean;
+  createdAt: string;
+}
+
+interface ScanResult {
+  scanned: number;
+  new_jobs: number;
+  above_threshold: number;
+  searches_run: number;
+  profile_available: boolean;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string): string {
@@ -111,6 +127,11 @@ export default function JobsPage() {
   const [scrapeResult, setScrapeResult] = useState<string | null>(null);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
 
+  // Saved searches state
+  const [searches, setSearches] = useState<SavedSearch[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+
   const reload = useCallback(async () => {
     setLoading(true);
     const minScore =
@@ -123,9 +144,20 @@ export default function JobsPage() {
     setLoading(false);
   }, [filterStatus, filterMinScore]);
 
+  const loadSearches = useCallback(async () => {
+    try {
+      const res = await fetch("/api/jobs/searches");
+      if (res.ok) {
+        const data = await res.json();
+        setSearches(data.searches ?? []);
+      }
+    } catch { /* silent */ }
+  }, []);
+
   useEffect(() => {
     reload();
-  }, [reload]);
+    loadSearches();
+  }, [reload, loadSearches]);
 
   const handleScrape = async () => {
     if (!scrapeQuery.trim()) return;
@@ -156,6 +188,52 @@ export default function JobsPage() {
       setScrapeResult(`Erreur: ${e instanceof Error ? e.message : "unknown"}`);
     }
     setScraping(false);
+    reload();
+  };
+
+  const handleSaveSearch = async () => {
+    if (!scrapeQuery.trim()) return;
+    try {
+      const res = await fetch("/api/jobs/searches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: scrapeQuery, location: scrapeLocation }),
+      });
+      if (res.ok || res.status === 409) {
+        loadSearches();
+      }
+    } catch { /* silent */ }
+  };
+
+  const handleToggleSearch = async (id: string, active: boolean) => {
+    await fetch("/api/jobs/searches", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, active }),
+    });
+    loadSearches();
+  };
+
+  const handleDeleteSearch = async (id: string) => {
+    await fetch("/api/jobs/searches", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, delete: true }),
+    });
+    loadSearches();
+  };
+
+  const handleDailyScan = async () => {
+    setScanning(true);
+    setScanResult(null);
+    try {
+      const res = await fetch("/api/jobs/daily-scan");
+      if (res.ok) {
+        const data: ScanResult = await res.json();
+        setScanResult(data);
+      }
+    } catch { /* silent */ }
+    setScanning(false);
     reload();
   };
 
@@ -217,11 +295,91 @@ export default function JobsPage() {
               >
                 {scraping ? "Scraping..." : "Scraper les offres"}
               </button>
+              <button
+                onClick={handleSaveSearch}
+                disabled={!scrapeQuery.trim()}
+                className="rounded-lg border border-violet-300 text-violet-700 px-4 py-2 text-sm font-medium hover:bg-violet-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                Sauvegarder cette recherche
+              </button>
             </div>
             {scrapeResult && (
               <pre className="text-xs text-ink-600 bg-ink-50 rounded-lg p-3 whitespace-pre-wrap">
                 {scrapeResult}
               </pre>
+            )}
+          </section>
+
+          {/* ── Saved searches ──────────────────────────────────────── */}
+          <section className="rounded-xl border border-ink-100 bg-white p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-ink-900">
+                Recherches sauvegardees
+                <span className="ml-2 text-xs font-normal text-ink-400">
+                  ({searches.filter((s) => s.active).length} active{searches.filter((s) => s.active).length !== 1 ? "s" : ""})
+                </span>
+              </h2>
+              <button
+                onClick={handleDailyScan}
+                disabled={scanning || searches.filter((s) => s.active).length === 0}
+                className="rounded-lg bg-violet-600 text-white px-4 py-2 text-sm font-medium hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                {scanning ? "Scan en cours..." : "Scanner les recherches sauvegardees"}
+              </button>
+            </div>
+
+            {searches.length === 0 ? (
+              <p className="text-xs text-ink-400">
+                Aucune recherche sauvegardee. Faites une recherche ci-dessus puis cliquez &quot;Sauvegarder cette recherche&quot;.
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {searches.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-ink-50 transition"
+                  >
+                    <button
+                      onClick={() => handleToggleSearch(s.id, !s.active)}
+                      className={`shrink-0 w-8 h-5 rounded-full relative transition ${
+                        s.active ? "bg-violet-500" : "bg-ink-200"
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                          s.active ? "left-3.5" : "left-0.5"
+                        }`}
+                      />
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm text-ink-900">{s.query}</span>
+                      <span className="text-xs text-ink-400 ml-2">{s.location}</span>
+                    </div>
+                    <span className="text-[10px] text-ink-400">{fmtDate(s.createdAt)}</span>
+                    <button
+                      onClick={() => handleDeleteSearch(s.id)}
+                      className="shrink-0 text-xs text-red-500 hover:text-red-700 transition"
+                    >
+                      Supprimer
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {scanResult && (
+              <div className="rounded-lg bg-violet-50 p-3 text-xs text-violet-900 space-y-1">
+                <div className="font-semibold">Scan termine</div>
+                <div>Recherches executees : {scanResult.searches_run}</div>
+                <div>Offres scannees : {scanResult.scanned}</div>
+                <div>Nouvelles offres : {scanResult.new_jobs}</div>
+                <div>Matches (score &ge; 50) : {scanResult.above_threshold}</div>
+                {!scanResult.profile_available && (
+                  <div className="text-amber-700 mt-1">
+                    Aucun profil candidat — importez votre CV via /profile pour activer l&apos;auto-analyse.
+                  </div>
+                )}
+              </div>
             )}
           </section>
 
@@ -315,7 +473,7 @@ function JobCard({
         <span
           className={`shrink-0 w-12 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${scoreBadgeColor(job.match_score)}`}
         >
-          {job.match_score !== null ? job.match_score : "—"}
+          {job.match_score !== null ? job.match_score : "\u2014"}
         </span>
 
         {/* Title + company */}
@@ -325,7 +483,7 @@ function JobCard({
           </div>
           <div className="text-xs text-ink-500 truncate">
             {job.company}
-            {job.location ? ` — ${job.location}` : ""}
+            {job.location ? ` \u2014 ${job.location}` : ""}
           </div>
         </div>
 

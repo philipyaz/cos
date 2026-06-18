@@ -74,6 +74,16 @@ module.exports = {
       restart_delay: 2000,
     },
 
+    // ── Scheduled tasks ───────────────────────────────────────────────
+    {
+      name: "job-scanner",
+      script: path.join(REPO, "mcp", "launchers", "job-scanner.cjs"),
+      cwd: REPO,
+      autorestart: true,
+      max_restarts: 5,
+      restart_delay: 60000,
+    },
+
     // ── Sidecars (Python/uvicorn) ──────────────────────────────────
     {
       name: "search-sidecar",
