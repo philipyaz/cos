@@ -126,6 +126,8 @@ export default function JobsPage() {
   const [scrapeLocation, setScrapeLocation] = useState("Zurich");
   const [scrapeResult, setScrapeResult] = useState<string | null>(null);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [analyzingAll, setAnalyzingAll] = useState(false);
+  const [analyzeAllResult, setAnalyzeAllResult] = useState<{ analyzed: number; skipped: number } | null>(null);
 
   // Saved searches state
   const [searches, setSearches] = useState<SavedSearch[]>([]);
@@ -254,6 +256,28 @@ export default function JobsPage() {
       // silent — reload will show current state
     }
     setAnalyzingId(null);
+  };
+
+  const handleAnalyzeAll = async () => {
+    setAnalyzingAll(true);
+    setAnalyzeAllResult(null);
+    try {
+      const res = await fetch("/api/jobs/analyze-all", { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setAnalyzeAllResult(data);
+      }
+    } catch { /* silent */ }
+    setAnalyzingAll(false);
+    await reload();
+    // Sort by match_score descending after analyze-all
+    setJobs((prev) =>
+      [...prev].sort((a, b) => {
+        const sa = a.match_score ?? -1;
+        const sb = b.match_score ?? -1;
+        return sb - sa;
+      })
+    );
   };
 
   const handleStatusChange = async (jobId: string, newStatus: string) => {
@@ -411,7 +435,19 @@ export default function JobsPage() {
             <span className="text-xs text-ink-400">
               {jobs.length} offre{jobs.length !== 1 ? "s" : ""}
             </span>
+            <button
+              onClick={handleAnalyzeAll}
+              disabled={analyzingAll || jobs.length === 0}
+              className="ml-auto rounded-lg bg-violet-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              {analyzingAll ? "Analyse en cours..." : "Analyser toutes les offres"}
+            </button>
           </div>
+          {analyzeAllResult && (
+            <div className="rounded-lg bg-violet-50 p-3 text-xs text-violet-900">
+              Analyse terminee : {analyzeAllResult.analyzed} analysee{analyzeAllResult.analyzed !== 1 ? "s" : ""}, {analyzeAllResult.skipped} deja analysee{analyzeAllResult.skipped !== 1 ? "s" : ""}.
+            </div>
+          )}
 
           {/* ── Job list ────────────────────────────────────────────── */}
           {loading ? (
