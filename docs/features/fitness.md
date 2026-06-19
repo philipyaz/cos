@@ -21,7 +21,7 @@ skill:
 The division of labour mirrors the rest of Cos — and follows the
 [founding philosophy](https://github.com/philipyaz/cos/blob/main/CLAUDE.md):
 **the board is a state machine; the agent is the intelligence.** The **human reads** the views at a
-glance; data **writes in** from the watch (via a token-gated push); and the one piece of genuine
+glance; data **writes in** from the watch (via the add-on-gated push); and the one piece of genuine
 intelligence — turning raw biometrics into a plan, a review, a brief — lives in the **external agent**
 (e.g. the `fitness-coach` skill), **not on the board**. The board **never calls an LLM**: the agent
 generates a coaching artifact in its own context and **persists it back** through the fitness MCP's
@@ -58,22 +58,17 @@ enums) and
 [`board/lib/fitness.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/fitness.ts) (the data
 API — the module that retired `health-store.ts`).
 
-## HAE ingestion — the `x-fitness-token` push model
+## HAE ingestion — the push model
 
 Health data does not get typed in; it **arrives off your wrist**. The
 [**Health Auto Export**](https://www.healthexport.app/) (HAE) iOS app exports your HealthKit data
 on a schedule and `POST`s it to **`/api/fitness/push`**
 ([`board/app/api/fitness/push/route.ts`](https://github.com/philipyaz/cos/blob/main/board/app/api/fitness/push/route.ts)).
 
-This is the **one route that is NOT actor-attributed**. Where every other board write resolves a
-`human` / `agent` actor, the push authenticates with a **shared-secret header** instead — a
-different auth shape for a machine-to-machine ingest:
-
-- The request must carry **`x-fitness-token`** matching **`FITNESS_PUSH_TOKEN`** from the server env
-  (lives in `config/secrets.env`).
-- A missing token on the server → **`503`** ("not configured"); a wrong/absent header → **`401`**.
-- The add-on gate still applies: `pushEntries` calls `assertAddonEnabled(db, "fitness")` **inside
-  `mutate()`**, so a **disabled** add-on → **`404`** even with a valid token.
+Like every other fitness write, the push is **gated by the add-on toggle**: `pushEntries` calls
+`assertAddonEnabled(db, "fitness")` **inside `mutate()`**, so a **disabled** add-on → **`404`**,
+while an enabled one accepts the batch. The write is attributed to the agent via the `x-actor`
+header, exactly like the rest of the add-on's writes.
 
 The route **normalizes three HAE shapes** into one canonical entry list before storing — workouts
 (`{ data: { workouts: [...] } }`), metrics (`{ data: { metrics: [{ name, units, data }] } }`), or
@@ -132,21 +127,20 @@ mirrored `HEALTH_TYPES` list with a lockstep comment.
 ## The data API — `/api/fitness/*`
 
 The fitness routes follow the board idioms (`force-dynamic`; reads ungated; `storeErrorToResponse`
-mapping `NotFoundError → 404`), with the **token gate on writes** (push/delete) standing in for the
-usual actor gate:
+mapping `NotFoundError → 404`), with the **add-on gate on writes** (push/delete):
 
 | Method + route | What it does | Auth |
 |---|---|---|
-| `POST /api/fitness/push` | ingest a HAE batch (workouts/metrics/native), dedup by id, purge > 90 days | **`x-fitness-token`** + add-on gate |
+| `POST /api/fitness/push` | ingest a HAE batch (workouts/metrics/native), dedup by id, purge > 90 days | add-on gate |
 | `GET /api/fitness/data?type=&from=&to=&limit=` | list raw entries (newest-first; `limit<=0` = all) | ungated |
-| `DELETE /api/fitness/data` | delete entries by `ids` and/or date range | **`x-fitness-token`** + add-on gate |
+| `DELETE /api/fitness/data` | delete entries by `ids` and/or date range | add-on gate |
 | `GET /api/fitness/summary?date=\|from=&to=` | the aggregated [summary envelope](#the-summarize-contract) | ungated |
 | `GET /api/fitness/daily-summary?date=` | one day of health **folded with nutrition** (see below) | ungated |
 | `GET /api/fitness/trends?days=&type=` | per-day series over the last N days | ungated |
 | `GET /api/fitness/report?days=` | a human-readable **Markdown** report (for vault ingestion) | ungated |
 | `GET /api/fitness/coaching?kind=&from=&to=&limit=` | list persisted [coaching artifacts](#coaching-artifacts-are-persisted-externally-creatable) | ungated |
-| `POST /api/fitness/coaching` | upsert one coaching artifact by `(kind, periodKey)` | **`x-fitness-token`** + add-on gate |
-| `GET\|PATCH\|DELETE /api/fitness/coaching/<id>` | read / patch / delete one artifact | reads ungated; writes **`x-fitness-token`** + gate |
+| `POST /api/fitness/coaching` | upsert one coaching artifact by `(kind, periodKey)` | add-on gate |
+| `GET\|PATCH\|DELETE /api/fitness/coaching/<id>` | read / patch / delete one artifact | reads ungated; writes add-on gate |
 
 ### The `summarize()` contract
 
@@ -232,7 +226,7 @@ board only **validates** the artifact's shape (raw bodies are never trusted), **
     board's Anthropic key via a hardened `callClaude` (`board/lib/fitness-ai.ts`) and returned ephemeral
     JSON. **Those routes (and `fitness-ai.ts`) are gone.** A component is a state machine; it does not
     embed an LLM. Generation moved out to the agent; the board exposes only the **CRUD seam**
-    ([`/api/fitness/coaching`](#the-crud-seam-apifitnesscoaching-token-gated-writes-open-reads)) that
+    ([`/api/fitness/coaching`](#the-crud-seam-apifitnesscoaching-add-on-gated-writes-open-reads)) that
     accepts and persists the agent's artifact. (The **vault MCP** remains the one component in the repo
     that legitimately runs LLM calls — it embeds the Claude Agent SDK.)
 
@@ -274,7 +268,7 @@ The four coaching surfaces are **stateful artifacts** on **one polymorphic array
 `db.coachingArtifacts[]`. (An earlier design had the board generate three of them with a server-side
 Claude call and throw the JSON away — no history, and an external agent could not produce one without
 the board's key. That is gone: the board never calls an LLM, so all four kinds are simply persisted,
-and the three generative kinds are created by a **token-gated agent** that generated them in its own
+and the three generative kinds are created by the **external agent** that generated them in its own
 context. Correlations the board still computes itself — deterministic stats, not generation.)
 
 ### One record, four kinds — `CoachingArtifact`
@@ -312,25 +306,24 @@ The enums (`VALID_COACHING_ARTIFACT_KIND`, `VALID_ARTIFACT_SOURCE`) are single-s
 is never persisted unvalidated** — the board does not trust a raw body) and derive the `periodKey` live in
 [`board/lib/fitness-artifacts.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/fitness-artifacts.ts).
 
-### The CRUD seam — `/api/fitness/coaching` (token-gated writes / open reads)
+### The CRUD seam — `/api/fitness/coaching` (add-on-gated writes / open reads)
 
-A new route family follows the add-on contract exactly — **reads ungated, writes token-gated then
-add-on-gated**:
+A new route family follows the add-on contract exactly — **reads ungated, writes add-on-gated**:
 
 | Method + route | What it does | Auth |
 |---|---|---|
 | `GET /api/fitness/coaching?kind=&from=&to=&limit=` | list artifacts (newest-first; `from`/`to` against `createdAt`) | ungated |
-| `POST /api/fitness/coaching` | upsert one artifact by `(kind, periodKey)` | **`x-fitness-token`** + add-on gate |
+| `POST /api/fitness/coaching` | upsert one artifact by `(kind, periodKey)` | add-on gate |
 | `GET /api/fitness/coaching/<id>` | one artifact by id | ungated |
-| `PATCH /api/fitness/coaching/<id>` | patch an artifact (payload / source / generatedAt) | **`x-fitness-token`** + add-on gate |
-| `DELETE /api/fitness/coaching/<id>` | delete an artifact | **`x-fitness-token`** + add-on gate |
+| `PATCH /api/fitness/coaching/<id>` | patch an artifact (payload / source / generatedAt) | add-on gate |
+| `DELETE /api/fitness/coaching/<id>` | delete an artifact | add-on gate |
 
-The **token gate sits at the edge** of every write (before validation or the store lock), exactly
-like the HAE push — a missing server token → `503`, a wrong/absent header → `401` — and the add-on
-gate (`assertAddonEnabled(db, "fitness")`) runs **inside `mutate()`** so a disabled add-on → `404`.
-That edge token is precisely what lets **the agent (Claude Cowork) create artifacts without any
-Anthropic key on the board**: the agent generates the plan/review/brief in its own context and
-`POST`s it with `x-fitness-token`; the board persists it without ever calling Claude. (When the actor
+These coaching writes are **add-on-gated**: the add-on gate
+(`assertAddonEnabled(db, "fitness")`) runs **inside `mutate()`**, so a disabled add-on → `404`, while
+an enabled one accepts the write. This is
+precisely what lets **the agent (Claude Cowork) create artifacts without any Anthropic key on the
+board**: the agent generates the plan/review/brief in its own context, is attributed via `x-actor`,
+and `POST`s it; the board persists it without ever calling Claude. (When the actor
 resolves to `agent`, the route forces `source: "agent"`; `source: "board"` is reserved for the
 correlations compute the board runs itself.)
 
@@ -351,8 +344,8 @@ reload.
 The [fitness MCP server](https://github.com/philipyaz/cos/blob/main/mcp/fitness-server/server.mjs)
 gains seven thin wrappers over the new routes (total **14**) — four `save_*` writers (one per kind),
 plus list / get / delete — so an agent can persist and browse artifacts entirely through the MCP. The
-four `save_*` tools and `delete_coaching_artifact` are **token-gated writes**; `list_coaching_artifacts`
-and `get_coaching_artifact` are ungated reads. See
+four `save_*` tools and `delete_coaching_artifact` are **add-on-gated writes**;
+`list_coaching_artifacts` and `get_coaching_artifact` are ungated reads. See
 [the MCP tool table below](#the-fitness-mcp-the-agents-read-verbs).
 
 ## The soft Nutrition dependency
@@ -378,29 +371,29 @@ A new **stdio MCP server** (registry name **`fitness`**, bridge port **`8011`**,
 is the agent's twin of the dashboard — a **thin `fetch` wrapper** over the `/api/fitness/*` routes on
 `CRM_BASE_URL` (default `http://localhost:3000`), built on `packages/mcp-kit`. It holds **no
 business logic** (the report Markdown is composed by `/api/fitness/report`, not the MCP), makes **no
-LLM calls**, and — unlike the nutrition MCP — authenticates its **writes with `x-fitness-token`**
-(not `actor: "agent"`), because the push/delete routes use the shared-secret auth shape.
+LLM calls**, and — exactly like the nutrition MCP — attributes its **writes to the agent** via the
+`x-actor: "agent"` header, with every write gated by the add-on toggle.
 
 | Tool | Maps to | Notes |
 |---|---|---|
-| `push_health_data` | `POST /push` | ingest entries; token-gated write |
+| `push_health_data` | `POST /push` | ingest entries; add-on-gated write |
 | `list_health_data` | `GET /data` | raw entries by type / range |
 | `get_health_summary` | `GET /summary` | the [summarize envelope](#the-summarize-contract) |
 | `get_daily_summary` | `GET /daily-summary` | one day, health folded with nutrition |
 | `get_health_trends` | `GET /trends` | per-day series over N days |
-| `delete_health_data` | `DELETE /data` | delete by ids/range; token-gated write |
+| `delete_health_data` | `DELETE /data` | delete by ids/range; add-on-gated write |
 | `ingest_health_to_vault` | `GET /report` | fetch the Markdown report and forward it to the vault |
-| `save_training_plan` | `POST /coaching` | persist a `training_plan` artifact; token-gated write |
-| `save_weekly_review` | `POST /coaching` | persist a `weekly_review` artifact; token-gated write |
-| `save_pre_workout_brief` | `POST /coaching` | persist a `pre_workout_brief` artifact; token-gated write |
-| `save_correlation_report` | `POST /coaching` | persist a `correlations` artifact; token-gated write |
+| `save_training_plan` | `POST /coaching` | persist a `training_plan` artifact; add-on-gated write |
+| `save_weekly_review` | `POST /coaching` | persist a `weekly_review` artifact; add-on-gated write |
+| `save_pre_workout_brief` | `POST /coaching` | persist a `pre_workout_brief` artifact; add-on-gated write |
+| `save_correlation_report` | `POST /coaching` | persist a `correlations` artifact; add-on-gated write |
 | `list_coaching_artifacts` | `GET /coaching` | list artifacts by kind / range |
 | `get_coaching_artifact` | `GET /coaching/<id>` | one artifact by id |
-| `delete_coaching_artifact` | `DELETE /coaching/<id>` | delete an artifact; token-gated write |
+| `delete_coaching_artifact` | `DELETE /coaching/<id>` | delete an artifact; add-on-gated write |
 
 The four `save_*` tools let an agent (Claude Cowork) persist a generated plan / review / brief /
-report **without the board's Anthropic key** — the token gate is the only credential needed. A write
-on a **disabled** add-on returns the board's `404`, surfaced as a `Not found.` tool error.
+report **without the board's Anthropic key** — the add-on gate is the only guard. A write on a
+**disabled** add-on returns the board's `404`, surfaced as a `Not found.` tool error.
 
 ## The read-only views
 
@@ -421,15 +414,13 @@ catalog link stays reachable so you can turn it back on. Disabling never deletes
 
 The add-on's bridge is wired by the **`fitness-mcp-setup`** skill (the `mcp.setupSkill` in the
 manifest) — it renders + loads the launchd bridge plist on `:8011` and wires the `.mcp.json` entry,
-exactly like the nutrition bridge. The push token (`FITNESS_PUSH_TOKEN`) lives in
-`config/secrets.env`; point Health Auto Export at `/api/fitness/push` with that token in the
-`x-fitness-token` header.
+exactly like the nutrition bridge. Point Health Auto Export at `/api/fitness/push` to ingest off your
+phone — the write lands whenever the add-on is enabled.
 
 ## Parity rule
 
-Fitness obeys the board's founding tenet — **one store, one write path** — with one deliberate
-exception worth naming: the **HAE push is machine auth, not human/agent attribution**. Everything
-else holds: the entries fold into `cases.json`, every mutation flows through the single atomic,
-version-guarded `mutate()` with the add-on gate inside it, the read-only views and the agent's tools
-resolve to the same `/api/fitness/*` routes, and disabling the add-on freezes writes while leaving
-every byte readable — all gated by one flag.
+Fitness obeys the board's founding tenet — **one store, one write path**. The entries fold into
+`cases.json`, every mutation flows through the single atomic, version-guarded `mutate()` with the
+add-on gate inside it, the read-only views and the agent's tools resolve to the same
+`/api/fitness/*` routes, and disabling the add-on freezes writes while leaving every byte readable —
+all gated by one flag.

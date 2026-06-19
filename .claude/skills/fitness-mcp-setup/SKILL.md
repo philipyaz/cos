@@ -1,9 +1,9 @@
 ---
 name: fitness-mcp-setup
-description: Stand up the `fitness` MCP for the "Fitness" add-on on a new machine and wire it into both Claude clients — an in-repo thin fetch-wrapper over the board's /api/fitness/* routes (like the nutrition/calendar servers), with ONE machine-local secret (FITNESS_PUSH_TOKEN) it attaches as the `x-fitness-token` header on its write tools. It is exposed to Claude Code via a supergateway + launchd BRIDGE on $FITNESS_BRIDGE_PORT/:8011 and to Claude Cowork Desktop as a direct stdio command, and the add-on must be ENABLED (Settings.addons.fitness.enabled) for its writes to land + its /fitness + /fitness/health nav to appear. Use when setting up the fitness add-on on a new machine, when Cowork or Code can't see the `fitness` server, when the fitness bridge (:8011) is down, when push_health_data / delete_health_data write but the board 404s or 401s them, or when enabling/disabling the Fitness add-on.
+description: Stand up the `fitness` MCP for the "Fitness" add-on on a new machine and wire it into both Claude clients — an in-repo thin fetch-wrapper over the board's /api/fitness/* routes (like the nutrition/calendar servers). Its writes are add-on-gated (attributed to the agent via `x-actor`) and its reads are open. It is exposed to Claude Code via a supergateway + launchd BRIDGE on $FITNESS_BRIDGE_PORT/:8011 and to Claude Cowork Desktop as a direct stdio command, and the add-on must be ENABLED (Settings.addons.fitness.enabled) for its writes to land + its /fitness + /fitness/health nav to appear. Use when setting up the fitness add-on on a new machine, when Cowork or Code can't see the `fitness` server, when the fitness bridge (:8011) is down, when any write 404s (add-on disabled), or when enabling/disabling the Fitness add-on.
 ---
 
-# Fitness MCP setup (thin fetch-wrapper bridge :8011, one ingest secret)
+# Fitness MCP setup (thin fetch-wrapper bridge :8011)
 
 ## Why this exists / architecture
 `fitness` is the **second built-in add-on** ("Fitness" — Apple Watch health ingestion +
@@ -14,11 +14,10 @@ board's `/api/fitness/*` HTTP routes on `CRM_BASE_URL`. It makes **no LLM calls*
 intelligence (training plans, weekly reviews, pre-workout briefs) lives on the board's `/api/fitness/*`
 routes (server-side Claude calls) and in the operator skill (`/fitness-coach`), not here.
 
-The **one difference from nutrition**: this server carries a single machine-local **secret**,
-`FITNESS_PUSH_TOKEN`. The board's ingest endpoint (`POST /api/fitness/push`) is **token-gated** via
-the `x-fitness-token` header — the same token the iPhone Health Auto Export shortcut sends — and the
-MCP's **write** tools (`push_health_data` / `delete_health_data`) attach it automatically. **Reads
-are ungated**, so an unset token only disables the two writes.
+Like nutrition, **every write is add-on-gated** — attributed to the agent via the `x-actor` header
+and blocked only when the add-on is disabled. The Apple-Watch ingest endpoint
+(`POST /api/fitness/push`) is the same: the MCP's `push_health_data` lands a batch of canonical
+entries, gated by the add-on toggle exactly like every other write.
 
 It is a **single Node stdio process** and registers into Cos the same two ways the core servers do:
 
@@ -29,7 +28,7 @@ It is a **single Node stdio process** and registers into Cos the same two ways t
 
 ```
 Claude Code   ──HTTP──> localhost:8011/mcp ──supergateway(launchd)──> node fitness-server (stdio)
-                                                                          │ fetch (+ x-fitness-token on writes)
+                                                                          │ fetch (x-actor:agent)
                                                                           └──HTTP──> board /api/fitness/* (:3000)
 Cowork Desktop ──spawns stdio directly──────────────────────────────────> node fitness-server   (§5)
 ```
@@ -45,29 +44,27 @@ This add-on's one process (alongside mcp-bridge-setup's four core servers + two 
 optional openwhispr / whatsapp / nutrition add-ons):
 | process | what runs | env | bridge port | launchd label | in `.mcp.json`? |
 |---|---|---|---|---|---|
-| fitness (MCP bridge) | `node mcp/fitness-server/server.mjs` via supergateway | `CRM_BASE_URL` + `FITNESS_PUSH_TOKEN` | 8011 | `com.chiefofstaff.mcp-fitness` | **yes** (`http://localhost:8011/mcp`) |
+| fitness (MCP bridge) | `node mcp/fitness-server/server.mjs` via supergateway | `CRM_BASE_URL` (the board) | 8011 | `com.chiefofstaff.mcp-fitness` | **yes** (`http://localhost:8011/mcp`) |
 
 **Tools (18):** ingest — `push_health_data` (canonical entries), `delete_health_data`; reads —
 `list_health_data`, `get_health_summary`, `get_daily_summary` (health + nutrition for one day),
 `get_health_trends`, `ingest_health_to_vault` (composes a report for the vault MCP); **athlete
 profile + computed signals** — `get_athlete_profile`, `set_athlete_profile` (the goal/level/
-availability/sports/equipment singleton; set is token-gated, the board validates the enums),
+availability/sports/equipment singleton; the board validates the enums),
 `get_form_score` (board-computed daily readiness 0-100), `get_correlations` (board-computed sleep-vs-
 performance correlation over N days); **coaching artifacts** (v13) — `save_training_plan`,
 `save_weekly_review`, `save_pre_workout_brief`, `save_correlation_report` (the four `save_*` writers,
-one per kind), `list_coaching_artifacts`, `get_coaching_artifact`, `delete_coaching_artifact`. The
-writes — the 2 health writes + `set_athlete_profile` + the 4 `save_*` + `delete_coaching_artifact`
-(8 in all) — attach `x-fitness-token` and are gated; the 10 reads are ungated. The `save_*` /
-`set_athlete_profile` writes let Cowork persist a profile + a generated plan / review / brief /
-report **without the board's Anthropic key** (the token gate is the only credential). See
+one per kind), `list_coaching_artifacts`, `get_coaching_artifact`, `delete_coaching_artifact`. **Gating:
+all 8 writes are add-on-gated** (blocked 404 when the add-on is disabled, attributed to the agent via
+`x-actor`); the 10 reads are ungated. So the `save_*` / `set_athlete_profile` writes let Cowork persist
+a profile + a generated plan / review / brief / report **without the board's Anthropic key**. See
 `mcp/fitness-server/README.md` for the full contract.
 
 > Machine config comes from the loader (run the preamble in §1): it exports `$REPO_ROOT`,
 > `$BREW_PREFIX`, `$NODE_BIN`, `$SUPERGATEWAY_BIN`, `$LAUNCH_AGENTS_DIR`, `$COWORK_CONFIG`,
 > `$BOARD_URL`, and the **fitness keys** — `$FITNESS_BRIDGE_PORT` (=`8011`) /
 > `$FITNESS_BRIDGE_URL` (=`http://localhost:8011`) — use those instead of hardcoding paths, the
-> Homebrew prefix, your username, or the port. The **secret** (`FITNESS_PUSH_TOKEN`) is read from
-> `config/secrets.env` (§4), not `cos.env`.
+> Homebrew prefix, your username, or the port.
 
 ## Prerequisites
 - **Node + npm** (Homebrew) and the server's deps: `(cd mcp/fitness-server && npm i)`. The server
@@ -77,8 +74,6 @@ report **without the board's Anthropic key** (the token gate is the only credent
 - **The board** reachable at `CRM_BASE_URL` (default `http://localhost:3000`). The server is a pure
   wrapper over the board's `/api/fitness/*` routes — there is no other backend, no external app, no
   pairing, no login. (Unlike whatsapp/openwhispr, there is **nothing external** to install.)
-- A **`FITNESS_PUSH_TOKEN`** in `config/secrets.env` (§4). Any random string — it's machine-local and
-  never committed.
 
 Run the loader preamble as the first line of every shell block below — it exports `$REPO_ROOT`,
 `$NODE_BIN`, `$BREW_PREFIX`, `$SUPERGATEWAY_BIN`, `$LAUNCH_AGENTS_DIR`, `$COWORK_CONFIG`,
@@ -137,32 +132,7 @@ bridge:
   If it is somehow missing or drifted, regenerate it from the manifest (do not edit by hand):
   `node "$REPO_ROOT/scripts/gen-mcp-json.mjs"` (see `mcp/CLAUDE.md`).
 
-### 4. Seed the ingest secret (`FITNESS_PUSH_TOKEN`)
-The two write tools authenticate to the board with a shared secret. Seed it in `config/secrets.env`
-(gitignored) — any random string. The same value is what the iPhone Health Auto Export shortcut
-sends as `x-fitness-token`, so reuse it there too:
-```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-SEC="$REPO_ROOT/config/secrets.env"
-[ -f "$SEC" ] || cp "$REPO_ROOT/config/secrets.env.example" "$SEC"
-grep -q '^FITNESS_PUSH_TOKEN=' "$SEC" || printf 'FITNESS_PUSH_TOKEN=%s\n' "$(openssl rand -hex 20)" >> "$SEC"
-# If it's still the placeholder, replace it with a real random token:
-grep -q '^FITNESS_PUSH_TOKEN=replace-with-a-random-token' "$SEC" \
-  && { TOK=$(openssl rand -hex 20); sed -i '' "s/^FITNESS_PUSH_TOKEN=.*/FITNESS_PUSH_TOKEN=$TOK/" "$SEC"; } || true
-```
-> The board side reads the SAME token: the ingest route validates `x-fitness-token` against
-> `FITNESS_PUSH_TOKEN` from the environment the **board** process sees (it sources `config/secrets.env`
-> on boot). If you set/rotate the token here, **restart the board** so it picks up the new value, or
-> the bridge's writes will 401.
-- **CHECKPOINT** — a real (non-placeholder) token is present:
-  ```sh
-  source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-  grep -q '^FITNESS_PUSH_TOKEN=' "$REPO_ROOT/config/secrets.env" \
-    && ! grep -q '^FITNESS_PUSH_TOKEN=replace-with-a-random-token' "$REPO_ROOT/config/secrets.env" \
-    && echo "FITNESS_PUSH_TOKEN seeded"
-  ```
-
-### 5. Install the launchd BRIDGE (`:8011`)
+### 4. Install the launchd BRIDGE (`:8011`)
 The plist is **generated from the co-located descriptor** `mcp/fitness-server/fitness.service.json` by
 `scripts/gen-launchd.mjs` (see `mcp/CLAUDE.md`) — there is **no committed `*.plist.template` to `sed`**.
 The generator resolves the descriptor against the loader's absolute paths + bridge port (launchd can't
@@ -172,20 +142,13 @@ bootstrap → kickstart in one step:
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 node "$REPO_ROOT/scripts/gen-launchd.mjs" --install fitness
 ```
-Unlike nutrition/board/calendar (which run supergateway directly), the fitness descriptor declares
-`secretWrapper: mcp/fitness-server/launch.sh` — **the same secret-wrapper pattern as vault** — because
-this bridge carries the `FITNESS_PUSH_TOKEN` secret. The rendered plist runs `launch.sh`, which sources
-`config/secrets.env` then execs supergateway, so the **token is never baked into the plist** (it is
-read at runtime). The generated plist's env (from the descriptor) is:
+The bridge runs supergateway DIRECTLY around the node child (no launch wrapper — like
+board/calendar/nutrition, because this server needs **no secret**). The generated plist's env (from
+the descriptor) is:
 - `PATH` starting with `$BREW_PREFIX/bin` (launchd can't see an nvm/asdf shim),
 - `CRM_BASE_URL=${BOARD_URL}` (the board; from `env` in the descriptor, pinned so it doesn't depend on the launchd cwd),
-- `FITNESS_PUSH_TOKEN` — sourced at spawn by `launch.sh` from `config/secrets.env` (`secrets:[…]` in the descriptor), NOT a literal in the plist,
 - `COS_MCP_IDLE_EXIT_MS=300000` — the idle-exit **OPT-IN** (`idleExit:true`), on the bridge only, never in
   the direct-stdio Cowork config (see Gotchas).
-
-> Seed the token in `config/secrets.env` (§4) **before** this step — the wrapper reads it from there
-> at spawn. After rotating the token, just `launchctl kickstart -k …` (Manage) so the wrapper re-reads
-> it; there is no plist to re-render for a token change.
 
 - **CHECKPOINT** — an MCP `initialize` on `:8011` returns `serverInfo.name == "fitness"`:
   ```sh
@@ -196,26 +159,21 @@ read at runtime). The generated plist's env (from the descriptor) is:
     | grep -o '"name":"fitness"' && echo "fitness bridge OK"
   ```
 
-### 6. Register Cowork (direct stdio)
+### 5. Register Cowork (direct stdio)
 `.mcp.json` (§3) covers **Claude Code**. **Claude Cowork Desktop** registers **differently**:
 `claude_desktop_config.json` (`$COWORK_CONFIG`) accepts **stdio `command` servers only** (an HTTP
 `url` is rejected — the same validated rule as mcp-bridge-setup). Cowork spawns the node server
 itself. The Cowork entry is **generated from the same descriptor** by `scripts/gen-cowork-config.mjs`
 — a **backup-first** merge that preserves the other servers + `preferences` and refreshes only the
-`fitness` entry from the resolved loader values. Because the descriptor declares
-`secrets:["FITNESS_PUSH_TOKEN"]`, the generator reads `config/secrets.env` and **inlines** the token
-into the Cowork `env` (Cowork can't run the launchd secret-wrapper), and it omits `idleExit` on the
-Cowork entry automatically:
+`fitness` entry from the resolved loader values, omitting `idleExit` on the Cowork entry automatically:
 ```sh
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 node "$REPO_ROOT/scripts/gen-cowork-config.mjs" fitness
 ```
 - **Absolute `node` path** (`$NODE_BIN`, from the loader): Claude Desktop's spawn env, like
   launchd's, lacks Homebrew on `PATH` — the generator writes it.
-- **The secret rides in the Cowork `env`** (Cowork has no `config/secrets.env` access at spawn) — so
-  the write tools work from Cowork too. The generator **never** sets `COS_MCP_IDLE_EXIT_MS` on the
-  Cowork entry — Cowork holds one long-lived stdio child; the idle-exit opt-in belongs only in the §5
-  bridge plist.
+- **No `COS_MCP_IDLE_EXIT_MS` on the Cowork entry** — the generator never sets it; Cowork holds one
+  long-lived stdio child, so the idle-exit opt-in belongs only in the §4 bridge plist.
 - **Quit + reopen Claude Desktop (⌘Q)** — it reads this file only at launch; then `fitness`
   appears in Cowork's tools.
 - **CHECKPOINT** — both registrations present:
@@ -226,7 +184,7 @@ node "$REPO_ROOT/scripts/gen-cowork-config.mjs" fitness
     && echo "Cowork config OK"
   ```
 
-### 7. ENABLE the add-on (the gate — writes 404 until you do this)
+### 6. ENABLE the add-on (the gate — writes 404 until you do this)
 The plumbing is up, but the add-on ships **DISABLED**: until you enable it, every WRITE 404s and the
 `/fitness` + `/fitness/*` nav + pages are hidden. Flip it on — either the **`/addons` UI toggle** (with
 the board app running) or the API (the toggle the UI calls):
@@ -250,16 +208,15 @@ so the sidebar's **Add-ons** nav group + the `/fitness` overview + `/fitness/hea
   curl -s "$BOARD_URL/api/addons" | grep -o '"id":"fitness"[^}]*"enabled":true' && echo "add-on enabled"
   ```
 
-### 8. End-to-end verify (a tool call round-trips through the board)
-Confirm the whole add-on works from the MCP surface, not just the ports — and that the gate + token
-are live:
+### 7. End-to-end verify (a tool call round-trips through the board)
+Confirm the whole add-on works from the MCP surface, not just the ports — and that the gate is live:
 ```sh
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-# (a) a GATED, TOKEN-AUTHED write round-trips now the add-on is enabled — push one canonical entry:
+# (a) a GATED write round-trips now the add-on is enabled — push one canonical entry:
 curl -s -X POST "$FITNESS_BRIDGE_URL/mcp" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"push_health_data","arguments":{"entries":[{"id":"setup-smoke-1","ts":"2026-06-16","type":"steps","data":{"value":8000}}]}}}' \
-  | grep -o '"accepted"' && echo "write round-trips (add-on enabled + token OK)"
+  | grep -o '"accepted"' && echo "write round-trips (add-on enabled)"
 # (b) an UNGATED read works regardless — list_health_data:
 curl -s -X POST "$FITNESS_BRIDGE_URL/mcp" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
@@ -271,10 +228,8 @@ curl -s -X POST "$FITNESS_BRIDGE_URL/mcp" \
   -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"delete_health_data","arguments":{"ids":["setup-smoke-1"]}}}' \
   | grep -o '"deleted"' && echo "delete round-trips (cleanup done)"
 ```
-If you call (a) BEFORE §7 you'll see `Not found — the fitness add-on may be disabled.` — that's the
-gate working, not a failure; enable the add-on and retry. A `401 / Unauthorized — check
-FITNESS_PUSH_TOKEN` means the bridge's token doesn't match the board's (rotate both + restart the
-board, §4).
+If you call (a) BEFORE §6 you'll see `Not found — the fitness add-on may be disabled.` — that's the
+gate working, not a failure; enable the add-on and retry.
 - **CHECKPOINT** — `push_health_data` returns an `accepted` count, `list_health_data` echoes the
   entry, `delete_health_data` returns `deleted`, and both clients see `fitness` after a ⌘Q reopen. The
   day-to-day driving (ingesting from the iPhone, reading summaries/trends, setting the athlete
@@ -282,7 +237,7 @@ board, §4).
   calendar, ingesting to the vault) is then owned by **`/fitness-coach`** — that skill owns the
   operation; this one only proves the plumbing.
 
-### 9. (Optional) confirm `mcp/ensure-bridges.sh` brings it up
+### 8. (Optional) confirm `mcp/ensure-bridges.sh` brings it up
 `mcp/ensure-bridges.sh` is a **thin consumer** of the service manifest: it reads
 `node mcp/service-manifest.mjs --probe-list` rather than a hardcoded list, so `fitness` appears
 automatically from its co-located descriptor `mcp/fitness-server/fitness.service.json` — **no
@@ -301,12 +256,6 @@ launchctl kickstart -k gui/$(id -u)/com.chiefofstaff.mcp-fitness   # restart the
 launchctl bootout      gui/$(id -u)/com.chiefofstaff.mcp-fitness   # stop the bridge
 tail -f mcp/logs/fitness.err.log                                   # supergateway / server log
 ```
-**Rotate the token:** edit `FITNESS_PUSH_TOKEN` in `config/secrets.env`, **restart the board** (so it
-re-reads the new value), then `launchctl kickstart -k …/com.chiefofstaff.mcp-fitness` — the launchd
-bridge's `launch.sh` wrapper re-reads `secrets.env` on (re)start, so there is **no plist to
-re-render**. The **Cowork** entry inlines a copy of the token, so re-run **`gen-cowork-config.mjs
-fitness`** (§6) to refresh it, and re-pair your iPhone shortcut with the same value.
-
 **Disable the add-on (keep the plumbing):** flip it off — the nav + pages hide and writes 404 again,
 but the bridge stays loaded and the data stays on disk + readable:
 ```sh
@@ -314,14 +263,14 @@ source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 curl -s -X PATCH "$BOARD_URL/api/addons/fitness" -H 'Content-Type: application/json' -d '{"enabled":false}' ; echo
 ```
 
-## --uninstall (remove the add-on plumbing — the inverse of §3–§7)
+## --uninstall (remove the add-on plumbing — the inverse of §3–§6)
 Tear the bridge + registrations down (a machine that won't run fitness). This is the inverse of the
 install; it does **NOT** delete data (see the data-purge note below):
 ```sh
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"; U=$(id -u)
 # 1. Flag the add-on OFF (writes 404, nav hides) — do this first so the surface is dormant:
 curl -s -X PATCH "$BOARD_URL/api/addons/fitness" -H 'Content-Type: application/json' -d '{"enabled":false}' >/dev/null 2>&1 || true
-# 2. Stop + remove the launchd bridge (the secret stays in secrets.env; nothing was baked into the plist):
+# 2. Stop + remove the launchd bridge:
 launchctl bootout gui/$U/com.chiefofstaff.mcp-fitness 2>/dev/null || true
 rm -f "$LAUNCH_AGENTS_DIR/com.chiefofstaff.mcp-fitness.plist"
 # 3. Drop the Cowork entry (backup-first node merge; preserves the other servers + preferences):
@@ -340,7 +289,6 @@ NODE
 #    A stray http entry pointing at a dead :8011 is harmless (Claude Code just shows it unreachable).
 echo "Uninstalled the fitness bridge + the Cowork entry. ⌘Q + reopen Cowork to drop it from the tool list."
 ```
-> The `FITNESS_PUSH_TOKEN` line stays in `config/secrets.env` (harmless; re-enabling reuses it).
 > `.mcp.json` is a **generated artifact** of the manifest (rendered from
 > `mcp/fitness-server/fitness.service.json` by `gen-mcp-json.mjs`, CI-checked) — do **not** hand-delete
 > the fitness entry on a tracked file (it would fail `--check`). There is **no `ensure-bridges.sh`
@@ -364,11 +312,7 @@ echo "Uninstalled the fitness bridge + the Cowork entry. ⌘Q + reopen Cowork to
   `mutate()` lock). A disabled add-on 404s every WRITE (surfaced as `Not found — the fitness add-on
   may be disabled.`) and hides/404s the `/fitness` + `/fitness/*` pages, but GET reads stay open and
   the **`/addons` catalog link stays reachable**. So "push_health_data keeps failing with Not found."
-  is almost always *the add-on is off* (§7), not a bridge fault — check `/api/addons`.
-- **The token is the SECOND auth layer — distinct from the add-on gate.** A `401` (not `404`) means
-  the bridge's `FITNESS_PUSH_TOKEN` doesn't match what the board sees. Both must carry the SAME value:
-  the bridge gets it via §5 (plist) / §6 (Cowork env); the board reads it from `config/secrets.env`
-  at boot. After any rotation, **restart the board** and re-render both client wirings (§4 manage).
+  is almost always *the add-on is off* (§6), not a bridge fault — check `/api/addons`.
 - **The COACHING intelligence is NOT in the MCP — the `save_*` tools PERSIST, they don't generate.**
   The 18 tools push/read health data, read/set the athlete profile, read the board-computed form
   score + correlations, compose a vault report, and **persist/list/delete already-built
@@ -376,32 +320,30 @@ echo "Uninstalled the fitness bridge + the Cowork entry. ⌘Q + reopen Cowork to
   `save_pre_workout_brief` / `save_correlation_report`) take a structured artifact the CALLER built
   (the board's `/api/fitness/*` Claude routes, or Cowork generating it itself) and store it on
   `db.coachingArtifacts` — they make **no LLM call**. So an agent can author + persist an artifact
-  via `save_*` (no board Anthropic key needed — just the token), but no MCP tool "thinks up" a plan;
-  the generation lives in the board routes + the operator skill (`/fitness-coach`).
+  via `save_*` (no board Anthropic key needed — `save_*` is add-on-gated only), but no
+  MCP tool "thinks up" a plan; the generation lives in the board routes + the operator skill
+  (`/fitness-coach`).
 - **`COS_MCP_IDLE_EXIT_MS` lives ONLY in the bridge plist, never in the Cowork config.** mcp-kit's
-  idle-exit is OFF by default so Cowork's long-lived stdio child never dies on idle; the §5
+  idle-exit is OFF by default so Cowork's long-lived stdio child never dies on idle; the §4
   supergateway bridge opts in (`300000`) to reap supergateway's leaked idle stateless child. Setting
   it in the Cowork entry manifests as the dreaded "server transport closed unexpectedly". Same rule
   as every other bridge.
-- **No sidecar, no external repo, ONE secret.** Unlike whatsapp (Go + Python, external checkout, QR
-  pairing) and openwhispr (external app store), fitness is the **nutrition archetype plus a token**:
-  an in-repo Node `fetch` wrapper that needs the board on `CRM_BASE_URL` and `FITNESS_PUSH_TOKEN` for
-  its writes. There is nothing to clone, build, or pair.
+- **No sidecar, no external repo, no secret.** Unlike whatsapp (Go + Python, external checkout, QR
+  pairing) and openwhispr (external app store), fitness is the **nutrition archetype**: an in-repo
+  Node `fetch` wrapper that needs only the board on `CRM_BASE_URL`. There is nothing to clone, build,
+  or pair.
 - **The board must be reachable on `CRM_BASE_URL`.** Every tool is a `fetch` to `/api/fitness/*`. If
   the board app isn't up on `:3000` (or wherever `CRM_BASE_URL` points), tool calls fail with a
   connection error — start the board (`cd board && npm run dev`).
 - **Port `8011` must be free** (`lsof -nP -iTCP:8011 -sTCP:LISTEN`). It sits after the search/guardsvc
-  sidecars (`:8008`/`:8009`) and the WhatsApp Go bridge (`:8010`). A foreign process on it breaks §5
-  — change `FITNESS_BRIDGE_PORT` in `cos.env` and re-render §3/§5.
-- **launchd cannot expand `$VARS`, and the secret is NOT in the plist.** As with every Cos plist, the
-  **rendered** plist in `~/Library/LaunchAgents` carries **literal absolute paths** + a `PATH` that
-  starts with `$BREW_PREFIX/bin` (launchd never inherits your login shell and can't see an nvm/asdf
-  shim). But — like vault — the `FITNESS_PUSH_TOKEN` is **never written into the plist**: the plist
-  runs the `launch.sh` **secret-wrapper** (the descriptor's `secretWrapper`), which sources
-  `config/secrets.env` at spawn and then execs supergateway by its **absolute**
-  `$BREW_PREFIX/bin/supergateway` path; the inner `--stdio "node …/server.mjs"` child resolves `node`
-  via that `$BREW_PREFIX/bin`-leading `PATH`. So rotating the token is a `secrets.env` edit +
-  `kickstart`, with nothing secret ever committed or rendered into `~/Library/LaunchAgents`.
+  sidecars (`:8008`/`:8009`) and the WhatsApp Go bridge (`:8010`). A foreign process on it breaks §4
+  — change `FITNESS_BRIDGE_PORT` in `cos.env` and re-render §3/§4.
+- **launchd cannot expand `$VARS`.** As with every Cos plist, the **rendered** plist in
+  `~/Library/LaunchAgents` carries **literal absolute paths** + a `PATH` that starts with
+  `$BREW_PREFIX/bin` (launchd never inherits your login shell and can't see an nvm/asdf shim). The
+  generated plist invokes supergateway by its **absolute** `$BREW_PREFIX/bin/supergateway` path; the
+  inner `--stdio "node …/server.mjs"` child resolves `node` via that `$BREW_PREFIX/bin`-leading
+  `PATH`, which is why the `PATH` is load-bearing.
 - **The node/simdjson + pm2 gotchas in mcp-bridge-setup apply here too** — same Node, same
   supergateway, same launchd supervisor. If the bridge dies with a `libsimdjson` dyld error after a
   `brew install`, `brew reinstall node`. Don't reintroduce pm2 — launchd owns the lifecycle (the pm2

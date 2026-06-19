@@ -36,12 +36,10 @@ Generate action **hands off to you**, it does not call a server-side model. So
 **never** tell the user to "click Generate and wait" — *you* generate, *you*
 `save_training_plan`, and the result appears on the feed.
 
-> **Gate + token (same as fitness-coach).** `save_training_plan` is a **gated write**
+> **Gate (same as fitness-coach).** `save_training_plan` is an **add-on-gated write**
 > — it 404s ("Not found — the fitness add-on may be disabled.") when the Fitness
 > add-on is off (tell the user to flip it on at **/addons**; you don't enable it
-> yourself) and **401s** ("Unauthorized — check FITNESS_PUSH_TOKEN") when the token
-> is unset/mismatched (a `/fitness-mcp-setup` issue, not retryable). All the READ
-> tools below are ungated — read freely.
+> yourself). All the READ tools below are ungated — read freely.
 
 > **STEP 0 — the mode switch.** Read `config/auto-sync.json` → `{ "autoSync": <bool> }`
 > (default **ON / auto** if missing) and state the mode once. Saving one plan is a
@@ -213,10 +211,9 @@ as follow-ups. Carry the **not-medical-advice** framing.
   enums.
 - **Adapt to recovery** — read HRV / sleep / resting HR / form score into a
   `recovery_status` and let it drive the week's intensity; injury-prevention baked in.
-- **Gate + token + mode** — `save_training_plan` 404s if the add-on is off (flip on
-  at /addons), 401s on a bad `FITNESS_PUSH_TOKEN` (`/fitness-mcp-setup`). Saving one
-  plan is low-stakes in any mode; confirm only the **bulk** calendar push in approval
-  mode.
+- **Gate + mode** — `save_training_plan` 404s if the add-on is off (flip on at
+  /addons). Saving one plan is low-stakes in any mode; confirm only the **bulk**
+  calendar push in approval mode.
 - **Calendar is cross-add-on + optional** — only on request; one `create_event` per
   training day; bulk, so confirm in approval mode.
 - **NOT MEDICAL ADVICE** — informational estimate; defer injuries / pain / symptoms /

@@ -22,23 +22,10 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/fitness/coaching — create-or-replace a coaching artifact (upsert by kind+periodKey).
-// TOKEN-gated (x-fitness-token vs FITNESS_PUSH_TOKEN) at the EDGE, BEFORE validation/mutate, so
-// an external agent (Cowork) can write WITHOUT the board's Anthropic key. The add-on gate lives
-// inside saveCoachingArtifact (assertAddonEnabled in mutate → a disabled add-on yields 404).
+// Add-on-gated: the sole gate is the add-on enabled check inside saveCoachingArtifact
+// (assertAddonEnabled in mutate → a disabled add-on yields 404), so an external agent (Cowork)
+// writes WITHOUT the board's Anthropic key, attributed via x-actor.
 export async function POST(req: NextRequest) {
-  // ── Auth (token gate — verbatim push-route shape) ──
-  const token = (process.env.FITNESS_PUSH_TOKEN || "").trim();
-  if (!token) {
-    return NextResponse.json(
-      { error: "Health push is not configured on the server." },
-      { status: 503 }
-    );
-  }
-  const provided = req.headers.get("x-fitness-token")?.trim();
-  if (provided !== token) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
   // ── Parse + validate body ──
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object") {
@@ -50,7 +37,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: v.error }, { status: 400 });
   }
 
-  // An agent write is always source:"agent" (the token gate authenticates an external agent);
+  // An agent write is always source:"agent" (the x-actor header marks an external agent);
   // a non-agent caller keeps the validated source.
   const actor = resolveActor(req, body);
   if (actor === "agent") v.value.source = "agent";

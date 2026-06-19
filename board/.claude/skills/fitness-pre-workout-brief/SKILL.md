@@ -42,9 +42,8 @@ is **your** judgement, then you `save_pre_workout_brief` it.
 > found — the fitness add-on may be disabled.") when the Fitness add-on is disabled; the
 > READS (`get_form_score`, `get_daily_summary`, `list_health_data`, `get_athlete_profile`,
 > `list_coaching_artifacts`) always work. If the save comes back **404**, the add-on is off —
-> tell the user to enable it from the board's **/addons** catalog (toggle on), then retry. A
-> **401** (not 404) is a token problem (`FITNESS_PUSH_TOKEN`), a setup issue for
-> `/fitness-mcp-setup`, not something a retry fixes. You don't enable the add-on yourself.
+> tell the user to enable it from the board's **/addons** catalog (toggle on), then retry.
+> You don't enable the add-on yourself.
 
 > **NOT MEDICAL ADVICE — say it.** A brief is an **informational estimate, not medical
 > advice.** A "go easy / rest" read on low HRV or poor sleep is a **conservative training
@@ -211,8 +210,7 @@ through. Note that the brief is saved and visible on the **/fitness/pre-workout-
   to you. Never tell the user to "click Generate" — **you** author the brief and `save_*` it.
 - **The add-on must be ENABLED for the save.** A disabled add-on 404s the write ("Not found —
   the fitness add-on may be disabled.") while reads stay open — tell the user to flip it on at
-  **/addons**; you don't enable it. A **401** is a token problem (`FITNESS_PUSH_TOKEN`),
-  `/fitness-mcp-setup`.
+  **/addons**; you don't enable it.
 - **Mode (STEP 0):** a brief is **one low-stakes write** — just do it in either mode; no
   pending/propose queue, no confirmation needed.
 - **Ingest today's overnight data first** (last night's sleep + this morning's HRV /

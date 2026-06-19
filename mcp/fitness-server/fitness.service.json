@@ -7,8 +7,6 @@
   "portVar": "FITNESS_BRIDGE_PORT",
   "stdio": ["${NODE_BIN}", "${REPO_ROOT}/mcp/fitness-server/server.mjs"],
   "env": { "CRM_BASE_URL": "${BOARD_URL}" },
-  "secrets": ["FITNESS_PUSH_TOKEN"],
-  "secretWrapper": "${REPO_ROOT}/mcp/fitness-server/launch.sh",
   "idleExit": true,
   "clients": ["claude-code", "cowork"],
   "probe": { "type": "httpListen" }

@@ -137,13 +137,13 @@ const FITNESS_ADDON: AddonManifest = {
       "delete_health_data",
       "get_health_trends",
       "ingest_health_to_vault",
-      // Athlete profile singleton (token-gated set; ungated get) + the two board-computed
+      // Athlete profile singleton (add-on-gated set; ungated get) + the two board-computed
       // signals the coach interprets (form score, sleep/performance correlations; ungated).
       "get_athlete_profile",
       "set_athlete_profile",
       "get_form_score",
       "get_correlations",
-      // v13 stateful coaching artifacts (token-gated writes; ungated reads).
+      // v13 stateful coaching artifacts (add-on-gated writes; ungated reads).
       "save_training_plan",
       "save_weekly_review",
       "save_pre_workout_brief",

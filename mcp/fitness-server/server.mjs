@@ -9,19 +9,13 @@
 //   workout, sleep_night, sleep_nap, hrv, resting_hr, steps, vo2max.
 // (Plus any unmapped Health Auto Export metric names, stored verbatim by the push route.)
 //
-// The push endpoint (POST /api/fitness/push) is token-gated via the x-fitness-token
-// header — the token lives in config/secrets.env as FITNESS_PUSH_TOKEN. The MCP tools
-// that READ data are ungated; the WRITE tools (push/delete) attach the token automatically.
-//
-// makeBoardApi from mcp-kit is NOT used here: it attributes writes with actor:"agent"
-// (header + body) for the board's activity log, whereas the fitness writes authenticate
-// with the x-fitness-token shared secret instead — a different auth shape — so this thin
-// healthApi keeps the token-header behaviour.
+// Auth model: every write is attributed to the agent via the x-actor:"agent" header (the
+// board's resolveActor reads it), exactly like the other add-on MCPs. Writes are gated by the
+// board's add-on enabled toggle alone — a disabled add-on 404s every write.
 //
 // Retention: the board auto-purges entries older than 90 days on every push.
 //
 // Config: CRM_BASE_URL (default http://localhost:3000)
-//         FITNESS_PUSH_TOKEN (required for the write tools)
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -32,7 +26,6 @@ import {
 import { err, text, str, start, baseUrl } from "../../packages/mcp-kit/index.mjs";
 
 const CRM_BASE_URL = baseUrl("CRM_BASE_URL", "http://localhost:3000");
-const FITNESS_PUSH_TOKEN = (process.env.FITNESS_PUSH_TOKEN || "").trim();
 
 // ── Canonical health-entry types (in lockstep with board/lib/types.ts
 //    VALID_HEALTH_ENTRY_TYPE; the push route maps Health Auto Export metric
@@ -49,9 +42,10 @@ async function healthApi(method, path, payload) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(payload);
   }
-  // Attach the shared-secret auth token on writes (push/delete).
-  if (method !== "GET" && FITNESS_PUSH_TOKEN) {
-    headers["x-fitness-token"] = FITNESS_PUSH_TOKEN;
+  // Writes are attributed to the agent via x-actor (the board's resolveActor reads it) and
+  // gated by the board's add-on enabled toggle (a disabled add-on 404s every write).
+  if (method !== "GET") {
+    headers["x-actor"] = "agent";
   }
 
   let res, data;
@@ -66,7 +60,7 @@ async function healthApi(method, path, payload) {
   } catch (e) {
     return { errorResult: err(`Could not reach the board at ${CRM_BASE_URL}: ${e.message}`) };
   }
-  if (res.status === 401) return { errorResult: err(data.error ?? "Unauthorized — check FITNESS_PUSH_TOKEN.") };
+  if (res.status === 401) return { errorResult: err(data.error ?? "Unauthorized.") };
   if (res.status === 404) return { errorResult: err(data.error ?? "Not found — the fitness add-on may be disabled.") };
   if (!res.ok) return { errorResult: err(`Board returned ${res.status}: ${data.error ?? "unknown error"}`) };
   return { data };
@@ -231,7 +225,7 @@ const GET_ATHLETE_PROFILE_TOOL = {
 const SET_ATHLETE_PROFILE_TOOL = {
   name: "set_athlete_profile",
   description:
-    "Create-or-replace the athlete training-profile singleton (token-gated write; add-on-gated). " +
+    "Create-or-replace the athlete training-profile singleton (add-on-gated write). " +
     "There is exactly ONE profile — a second call REPLACES it (createdAt is preserved). The board " +
     "validates against its English enums and silently drops any sports/equipment values outside the " +
     "allowed vocabulary, so only pass allowed values. Returns { profile, version }.",
@@ -327,9 +321,9 @@ const INGEST_HEALTH_TO_VAULT_TOOL = {
 // The FOUR stateful AI coaching surfaces — training plan, weekly review, pre-workout
 // brief, and sleep/performance correlations — are persisted on the board's core store
 // (db.coachingArtifacts) and upserted by (kind, periodKey). The save_* tools are THIN
-// fetch wrappers over POST /api/fitness/coaching (the x-fitness-token is auto-attached
-// by healthApi). An EXTERNAL agent (Cowork) creates these WITHOUT the board's Anthropic
-// key. ZERO business logic here — the board validates + upserts.
+// fetch wrappers over POST /api/fitness/coaching (writes are attributed via x-actor and
+// gated by the add-on toggle). An EXTERNAL agent (Cowork) creates these WITHOUT the board's
+// Anthropic key. ZERO business logic here — the board validates + upserts.
 
 const COACHING_KINDS = ["training_plan", "weekly_review", "pre_workout_brief", "correlations"];
 
@@ -526,7 +520,7 @@ const GET_COACHING_ARTIFACT_TOOL = {
 
 const DELETE_COACHING_ARTIFACT_TOOL = {
   name: "delete_coaching_artifact",
-  description: "Delete one coaching artifact by id (token-gated).",
+  description: "Delete one coaching artifact by id (add-on-gated).",
   inputSchema: {
     type: "object",
     properties: {
@@ -563,9 +557,6 @@ async function handlePushHealthData(args) {
   const entries = args.entries;
   if (!Array.isArray(entries) || entries.length === 0) {
     return err("'entries' must be a non-empty array.");
-  }
-  if (!FITNESS_PUSH_TOKEN) {
-    return err("FITNESS_PUSH_TOKEN is not configured — set it in config/secrets.env.");
   }
   for (const e of entries) {
     if (!e.id || !e.ts || !e.type || !e.data) {
@@ -607,9 +598,6 @@ async function handleGetHealthSummary(args) {
 }
 
 async function handleDeleteHealthData(args) {
-  if (!FITNESS_PUSH_TOKEN) {
-    return err("FITNESS_PUSH_TOKEN is not configured — set it in config/secrets.env.");
-  }
   const hasIds = Array.isArray(args.ids) && args.ids.length > 0;
   const hasRange = args.from || args.to;
   if (!hasIds && !hasRange) {
@@ -708,8 +696,8 @@ async function handleGetCorrelations(args) {
 
 // ── Coaching-artifact handlers (v13) — thin POST/GET/DELETE wrappers ──────────
 
-// Build a coaching POST body and persist it. source:"agent" (the token-gated external
-// agent); periodKey is the kind's upsert key. The board validates + upserts.
+// Build a coaching POST body and persist it. source:"agent" (the external agent);
+// periodKey is the kind's upsert key. The board validates + upserts.
 async function saveCoachingArtifact(kind, payload, periodKey) {
   const { data, errorResult } = await healthApi("POST", "/api/fitness/coaching", {
     kind,

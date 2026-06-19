@@ -46,16 +46,10 @@ a brief, correlations, or to set their goal/level/sports, hand off to the right 
 > add-on is off — tell the user to enable it from the board's **/addons** catalog (toggle on),
 > then retry. You don't enable it yourself; it's a deliberate, human, one-time switch.
 
-> **Token — writes need `FITNESS_PUSH_TOKEN`.** The write tools authenticate to the board with
-> a shared secret the bridge carries. A `401 / Unauthorized — check FITNESS_PUSH_TOKEN`
-> (distinct from the 404 gate) means the token is unset or mismatched — that's a setup issue
-> (`/fitness-mcp-setup`), not something you can fix by retrying.
-
-> **Attribution.** The MCP stamps health writes via the `x-fitness-token` secret (not the usual
-> `actor: agent` body), but the board's activity log still records them. There is **no pending /
-> propose queue** for health — these tools write **directly**. So "approval" here means a
-> **conversational** check-in (STEP 0), not the board's propose/approve flow. Don't claim a
-> pending queue exists.
+> **Attribution.** The MCP stamps health writes as the **agent** (the `x-actor: agent`
+> header), and the board's activity log records them. There is **no pending / propose queue**
+> for health — these tools write **directly**. So "approval" here means a **conversational**
+> check-in (STEP 0), not the board's propose/approve flow. Don't claim a pending queue exists.
 
 > **NOT MEDICAL ADVICE — say it whenever you interpret.** You only **log what the user (or their
 > export) provides** — but the moment you *read back* and interpret a number (a low HRV, poor
@@ -115,8 +109,8 @@ awake, in hours) in `data.metadata`. **Workouts are the one exception**: they ca
 canonical types feed the summaries / trends / dashboard / coach** — so map onto them.
 
 > **Most ingestion is automatic.** The iPhone's **Health Auto Export** shortcut posts raw HAE
-> payloads straight to the board's ingest endpoint (with the `x-fitness-token` header); the
-> board maps them onto this taxonomy. `push_health_data` is for **already-canonical** entries — a
+> payloads straight to the board's ingest endpoint; the board maps them onto this taxonomy.
+> `push_health_data` is for **already-canonical** entries — a
 > manual log, a correction, a backfill. Prefer letting the shortcut do the bulk; reach for the
 > tool for one-off / fix-up writes.
 
@@ -187,7 +181,7 @@ Four read tools, each for a different question. None need confirmation.
 When an entry is wrong or duplicated, remove it with **`delete_health_data`**. It takes either
 **`{ ids: [...] }`** (specific entries) or **`{ from, to }`** (a date range) — and it
 **hard-removes** (no soft-archive; irreversible, unlike the board's soft `archive_case`). Deletes
-are token-authed + gated like pushes.
+are add-on-gated like pushes.
 
 - **To fix wrong VALUES**, you usually don't delete — **re-push the same id** with the corrected
   data (JOB 1 dedup-by-id overwrites in place). Reach for `delete_health_data` to remove a row
@@ -231,8 +225,7 @@ vault"*. The compose step is an ungated read; the vault write is governed by the
   archive.
 - **The add-on must be ENABLED for writes.** A disabled add-on 404s every write ("Not found — the
   fitness add-on may be disabled.") while reads stay open — tell the user to flip it on at
-  **/addons**; you don't enable it yourself. A **401** (not 404) is a token problem
-  (`FITNESS_PUSH_TOKEN`), a setup issue for `/fitness-mcp-setup`.
+  **/addons**; you don't enable it yourself.
 - **Mode (STEP 0):** auto → just do it; approval → confirm **bulk** writes (a big backfill) and
   **destructive** ones (`delete_health_data`, a date-range delete) **in chat** before firing. A
   single write is low-stakes either way. **There is no pending/propose queue** — confirmation is

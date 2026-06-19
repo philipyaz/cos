@@ -545,7 +545,7 @@ export interface AthleteProfile {
 // review, a daily pre-workout brief, and a sleep/performance correlation report — were
 // generated on demand and thrown away. v12 makes them STATEFUL: persisted on the core
 // store in ONE polymorphic array (db.coachingArtifacts), creatable by an EXTERNAL agent
-// (Claude Cowork) over a token-gated HTTP POST + MCP WITHOUT the board's Anthropic key,
+// (Claude Cowork) over the add-on-gated HTTP POST + MCP WITHOUT the board's Anthropic key,
 // and navigable as history in the UI. Owned by the "fitness" add-on, gated by
 // Settings.addons.fitness (a disabled add-on's data stays on disk + readable, only its
 // WRITES are refused — see lib/addons.ts). The four kinds share ONE record, distinguished
@@ -559,7 +559,7 @@ export const VALID_COACHING_ARTIFACT_KIND: CoachingArtifactKind[] = [
   "training_plan", "weekly_review", "pre_workout_brief", "correlations",
 ];
 
-// Who authored an artifact: "agent" (Claude Cowork over the token gate), "human" (a manual
+// Who authored an artifact: "agent" (Claude Cowork over the add-on gate), "human" (a manual
 // UI/API write), or "board" (the board's own on-demand generate routes persisting their output).
 export type ArtifactSource = "agent" | "human" | "board";
 export const VALID_ARTIFACT_SOURCE: ArtifactSource[] = ["agent", "human", "board"];

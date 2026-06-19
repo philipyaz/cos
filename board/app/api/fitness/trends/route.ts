@@ -4,7 +4,7 @@ import { trends } from "@/lib/fitness";
 export const dynamic = "force-dynamic";
 
 // GET /api/fitness/trends?days=&type= — daily trends over the last N days.
-// Reads are ungated (no token needed).
+// Reads are ungated.
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const daysStr = sp.get("days")?.trim();

@@ -13,15 +13,15 @@
 //   3. GET /api/fitness/daily-summary?date=… → surfaces the same: sleep.night.totalSleep_h,
 //        metrics.hrv, and the workout
 //
-// The push route is token-gated. FITNESS_PUSH_TOKEN must be set (the test board exports it;
-// see tests/run.sh). When unset the test SKIPs gracefully (exit 0) — it cannot push.
+// The push route, like every other fitness write, is gated ONLY by the add-on enabled toggle
+// (a disabled add-on 404s writes); it sends no auth header.
 //
 // Snapshots board/data/cases.json and restores it in a `finally` (net-zero — healthEntries +
 // settings.addons live there). Requires a running board:
 //   cd board && npm run dev
-//   FITNESS_PUSH_TOKEN=… node tests/api-fitness-push.mjs   # CRM_BASE_URL defaults to :3000
+//   node tests/api-fitness-push.mjs   # CRM_BASE_URL defaults to :3000
 //
-// Env: CRM_BASE_URL, COS_BOARD_DATA, FITNESS_PUSH_TOKEN.
+// Env: CRM_BASE_URL, COS_BOARD_DATA.
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,7 +30,6 @@ const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DATA_FILE =
   process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
-const FITNESS_TOKEN = (process.env.FITNESS_PUSH_TOKEN || "").trim();
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -116,13 +115,8 @@ const haeWorkouts = () => ({
 
 async function main() {
   console.log(`api-fitness-push · board=${BASE}`);
-  if (!FITNESS_TOKEN) {
-    console.log("  SKIP: FITNESS_PUSH_TOKEN unset — the push route is token-gated, cannot round-trip.");
-    process.exit(0);
-  }
 
   const snapshot = await fs.readFile(DATA_FILE, "utf8");
-  const H = { "x-fitness-token": FITNESS_TOKEN };
 
   try {
     // Enable the add-on so the push writes land.
@@ -130,12 +124,12 @@ async function main() {
     check(enable.status === 200, `PATCH enable fitness → 200 (got ${enable.status})`);
 
     // ── 1. PUSH the HAE metrics (sleep + HRV) and the workout ───────────────
-    const pushMetrics = await POST("/api/fitness/push", haeMetrics(), H);
+    const pushMetrics = await POST("/api/fitness/push", haeMetrics());
     check(pushMetrics.status === 201, `POST /api/fitness/push (metrics) → 201 (got ${pushMetrics.status})`);
     // sleep_analysis → 1 sleep_night entry; HRV (2 points, same day) → 1 hrv entry. = 2 accepted.
     check(pushMetrics.body.accepted >= 2, `metrics push accepted ≥ 2 entries (got ${pushMetrics.body.accepted})`);
 
-    const pushWorkout = await POST("/api/fitness/push", haeWorkouts(), H);
+    const pushWorkout = await POST("/api/fitness/push", haeWorkouts());
     check(pushWorkout.status === 201, `POST /api/fitness/push (workout) → 201 (got ${pushWorkout.status})`);
     check(pushWorkout.body.accepted === 1, `workout push accepted 1 entry (got ${pushWorkout.body.accepted})`);
 

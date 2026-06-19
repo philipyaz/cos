@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 // (for vault ingestion) from the canonical summarize() OUTPUT SHAPE. This is the
 // MCP-facing surface: the fitness MCP's ingest_health_to_vault tool fetches this and
 // forwards it verbatim — all report COMPOSITION lives here, not in the MCP. Reads are
-// ungated (no token needed).
+// ungated.
 //
 // summarize() shape consumed here:
 //   sleep?:{count,avg_hours,avg_deep_hours,avg_rem_hours}

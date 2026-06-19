@@ -14,7 +14,7 @@ query/trend/vault-ingest tools to Claude.
 
 ```
 iPhone (Shortcut / Health Auto Export)
-    │ POST /api/fitness/push + x-fitness-token header
+    │ POST /api/fitness/push
     ▼
 Board API (:3000)  ──►  cases.json (db.healthEntries, 90-day retention)
     ▲
@@ -42,44 +42,43 @@ names onto these and stores unmapped names verbatim.
 stateful **coaching-artifact** tools (v13). The
 coaching surfaces (training plan, weekly review, pre-workout brief, sleep/performance
 correlations) are persisted on the board's core store (`db.coachingArtifacts`) and upserted
-by `(kind, periodKey)`. The `save_*` tools are token-gated writes; the `list_*` / `get_*`
-reads are ungated. An external agent (Claude Cowork) can create artifacts **without** the
-board's Anthropic key — the `x-fitness-token` is the only credential.
+by `(kind, periodKey)`. The `save_*` tools are **add-on-gated** writes (a disabled add-on 404s
+them); the `list_*` / `get_*` reads are ungated. An external agent (Claude Cowork) creates
+artifacts **without** the board's Anthropic key.
+
+Gating: every **write** is **add-on-gated** (blocked with 404 when the add-on is disabled, attributed
+to the agent via `x-actor` and open otherwise); every read is ungated.
 
 | Tool | Description |
 |------|-------------|
-| `push_health_data` | Push a batch of HealthKit entries (token-gated) |
+| `push_health_data` | Push a batch of HealthKit entries (add-on gated) |
 | `list_health_data` | List entries with optional type/date filters |
 | `get_health_summary` | Aggregated summary for a date or range |
 | `get_daily_summary` | Full daily health + nutrition summary (workouts, sleep, metrics, food, calorie balance) for one date |
-| `delete_health_data` | Delete by IDs or date range (token-gated) |
+| `delete_health_data` | Delete by IDs or date range (add-on gated) |
 | `get_health_trends` | Daily trends over last N days |
 | `ingest_health_to_vault` | Fetch the board's composed health report (`GET /api/fitness/report`) for vault ingestion |
 | `get_athlete_profile` | Read the athlete training-profile singleton (ungated) |
-| `set_athlete_profile` | Create-or-replace the athlete profile (token-gated; board validates the enums) |
+| `set_athlete_profile` | Create-or-replace the athlete profile (add-on gated; board validates the enums) |
 | `get_form_score` | Board-computed daily readiness ("form") score 0-100 with breakdown (ungated) |
 | `get_correlations` | Board-computed sleep-vs-performance correlation + regression over N days; persists to history (ungated) |
-| `save_training_plan` | Persist a weekly training plan (upsert by week; token-gated) |
-| `save_weekly_review` | Persist a weekly review (upsert by week; token-gated) |
-| `save_pre_workout_brief` | Persist a daily pre-workout readiness brief (upsert by date; token-gated) |
-| `save_correlation_report` | Persist a sleep/performance correlation report (upsert by `<from>_<to>`; token-gated) |
+| `save_training_plan` | Persist a weekly training plan (upsert by week; add-on gated) |
+| `save_weekly_review` | Persist a weekly review (upsert by week; add-on gated) |
+| `save_pre_workout_brief` | Persist a daily pre-workout readiness brief (upsert by date; add-on gated) |
+| `save_correlation_report` | Persist a sleep/performance correlation report (upsert by `<from>_<to>`; add-on gated) |
 | `list_coaching_artifacts` | List persisted coaching artifacts, newest-first (ungated; filter by kind/date) |
 | `get_coaching_artifact` | Fetch one coaching artifact by id (ungated) |
-| `delete_coaching_artifact` | Delete one coaching artifact by id (token-gated) |
+| `delete_coaching_artifact` | Delete one coaching artifact by id (add-on gated) |
 
 ## Setup
 
 Run the `/fitness-mcp-setup` skill for the full runbook. In brief:
 
-### 1. Generate a push token
+### 1. Confirm the bridge port
 
-Pick any random string (e.g. `openssl rand -hex 20`). The **token** is a secret, so
-it goes in `config/secrets.env`; the **port** is public config in `config/cos.env`:
+The bridge port is public config in `config/cos.env` (default `8011`):
 
 ```bash
-# config/secrets.env
-FITNESS_PUSH_TOKEN="your-random-token-here"
-
 # config/cos.env
 FITNESS_BRIDGE_PORT="8011"
 ```
@@ -98,9 +97,9 @@ The launchd bridge is rendered from the co-located descriptor
 resolves the descriptor against `config/load-config.sh`, writes the plist with
 literal paths/port, and does bootout → bootstrap → kickstart in one step). There
 is no committed `*.plist.template` to `sed` — same manifest flow as every other
-service (see [`mcp/CLAUDE.md`](../CLAUDE.md)). The descriptor declares
-`secretWrapper: launch.sh`, so the wrapper sources `FITNESS_PUSH_TOKEN` from
-`config/secrets.env` at spawn — the token is never baked into the plist:
+service (see [`mcp/CLAUDE.md`](../CLAUDE.md)). The bridge runs supergateway
+directly around the node child (no launch wrapper — like the nutrition server,
+because it needs no secret):
 
 ```bash
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
@@ -122,7 +121,7 @@ node "$REPO_ROOT/scripts/gen-mcp-json.mjs"          # write; --check verifies in
 
 ```bash
 cd mcp/fitness-server
-FITNESS_PUSH_TOKEN="your-token" node test-client.mjs
+node test-client.mjs
 ```
 
 ## iPhone Shortcut setup
@@ -198,7 +197,6 @@ data to the board.
    - Method: POST
    - Headers:
      - `Content-Type`: `application/json`
-     - `x-fitness-token`: `your-token-here`
    - Request Body: the JSON from step 2
 
 ### Tips

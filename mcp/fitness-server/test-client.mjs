@@ -1,28 +1,22 @@
 // End-to-end check: spawn server.mjs over stdio, list tools, then drive the
 // health-data lifecycle against a running board.
 // Requires the board dev server running (CRM_BASE_URL, default http://localhost:3000)
-// and FITNESS_PUSH_TOKEN set in the environment.
+// and the fitness add-on enabled (its writes 404 otherwise).
 //
 // Lifecycle exercised:
 //   push_health_data → list_health_data → get_health_summary → get_health_trends
 //   → delete_health_data → list (confirm deleted) → ingest_health_to_vault
 //
-// Plus a negative (missing token) check.
+// Plus a negative (empty-entries) check.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const CRM_BASE_URL = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const FITNESS_PUSH_TOKEN = process.env.FITNESS_PUSH_TOKEN || "";
-
-if (!FITNESS_PUSH_TOKEN) {
-  console.error("Set FITNESS_PUSH_TOKEN in env before running this test.");
-  process.exit(1);
-}
 
 const transport = new StdioClientTransport({
   command: "node",
   args: ["server.mjs"],
-  env: { ...process.env, CRM_BASE_URL, FITNESS_PUSH_TOKEN },
+  env: { ...process.env, CRM_BASE_URL },
 });
 const client = new Client({ name: "fitness-test-client", version: "1.0.0" }, { capabilities: {} });
 await client.connect(transport);

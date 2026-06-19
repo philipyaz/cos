@@ -6,7 +6,7 @@ import { storeErrorToResponse } from "@/lib/route-helpers";
 export const dynamic = "force-dynamic";
 
 // GET /api/fitness/data?type=&from=&to=&limit= — list health entries.
-// Reads are ungated (no token needed).
+// Reads are ungated (viewable when the add-on is disabled).
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const type = sp.get("type")?.trim() || undefined;
@@ -23,20 +23,9 @@ export async function GET(req: NextRequest) {
 }
 
 // DELETE /api/fitness/data — delete entries by IDs and/or date range.
-// Token-gated like push.
+// Add-on-gated: the add-on enabled gate inside deleteEntries (assertAddonEnabled in mutate →
+// 404 when disabled) is the sole guard.
 export async function DELETE(req: NextRequest) {
-  const token = (process.env.FITNESS_PUSH_TOKEN || "").trim();
-  if (!token) {
-    return NextResponse.json(
-      { error: "Health push is not configured on the server." },
-      { status: 503 }
-    );
-  }
-  const provided = req.headers.get("x-fitness-token")?.trim();
-  if (provided !== token) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Body must be a JSON object." }, { status: 400 });

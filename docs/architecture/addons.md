@@ -197,14 +197,10 @@ the same four-layer slice:
 | The "intelligence" | calorie estimation — in the **operator skill** (the agent) | coaching generation — in the **agent**, persisted via the MCP/`POST` (the board runs only deterministic stats) |
 | `dependsOn` | — | **soft** edge → `nutrition` |
 
-The two diverge on two instructive points, both inside the framework's rules rather than around them:
+The two share the framework's whole contract — both attribute a `human` / `agent` **actor** on every
+write and run the identical add-on gate (`assertAddonEnabled` inside `mutate()`) — and diverge on one
+instructive point, inside the rules rather than around them:
 
-- **Where the gated write authenticates.** Nutrition's writes attribute a `human` / `agent` **actor**
-  on the activity log, the board default. Fitness's central ingest — `POST /api/fitness/push` — is a
-  machine-to-machine push off the watch, so it authenticates with a **shared-secret `x-fitness-token`
-  header** instead of an actor. The **add-on gate is identical** either way (`assertAddonEnabled`
-  inside `mutate()`); only the *identity* shape differs. (See [Fitness](../features/fitness.md)
-  for the HAE ingest + token model.)
 - **An inter-add-on dependency.** Fitness's AI coach folds in nutrition's food log when it is present —
   the first use of the optional `dependsOn` field below.
 
@@ -248,9 +244,8 @@ comment on the `dependsOn` member for the full posture).
 - **[Nutrition & Chef](../features/nutrition.md)** — the first worked example: the food log, pantry,
   meal plan, and weight-loss verticals, the data model, the routes, the 19 MCP tools, and the operator
   skill.
-- **[Fitness](../features/fitness.md)** — the second worked example: Apple Watch HAE ingestion
-  + the `x-fitness-token` push, the canonical health taxonomy, the AI coach, and the soft nutrition
-  dependency.
+- **[Fitness](../features/fitness.md)** — the second worked example: Apple Watch HAE ingestion,
+  the canonical health taxonomy, the AI coach, and the soft nutrition dependency.
 - **[MCP servers](mcp-servers.md)** — the bridge topology and the child-lifecycle contract the add-on
   bridge inherits.
 - **[Platform API](platform-api.md)** — the board's single-seam HTTP contract the add-on routes sit

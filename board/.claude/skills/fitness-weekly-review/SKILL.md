@@ -18,23 +18,22 @@ description: >
 # Fitness — Weekly Review (the look-back operator)
 
 This is the **weekly-review** sub-skill of **fitness-coach** — read that skill for the
-shared philosophy, the canonical health taxonomy, the enable-gate, and the
-`FITNESS_PUSH_TOKEN` rules. Here you do **one** thing: turn *"how was my training this
-week?"* into a **persisted `weekly_review` artifact** on the board.
+shared philosophy, the canonical health taxonomy, and the enable-gate. Here you do **one**
+thing: turn *"how was my training this week?"* into a **persisted `weekly_review` artifact**
+on the board.
 
 **The board is a state machine; YOU are the coach.** There is **no board-side LLM** — the
 board never generates the review. It computes the deterministic numbers (the **form score**
 is a board compute you *read*, you do not recompute it), validates + versions + stores your
 JSON, and serves it on the `/fitness/weekly-review` history feed (latest-by-default,
 page-back, upserted by ISO week). You FETCH the inputs via the `fitness` MCP, **synthesise
-the review yourself**, and `save_weekly_review` it. `x-fitness-token` is the only credential
-— **no board Anthropic key is involved**.
+the review yourself**, and `save_weekly_review` it. The write is attributed to the **agent**
+and **no board Anthropic key is involved**.
 
-> **Gate + token (same as fitness-coach).** `save_weekly_review` is a **gated write** — it
+> **Gate (same as fitness-coach).** `save_weekly_review` is an **add-on-gated write** — it
 > 404s ("Not found — the fitness add-on may be disabled.") when the Fitness add-on is off;
-> tell the user to enable it at **/addons** and retry (you don't enable it yourself). A
-> **401** (Unauthorized) is a `FITNESS_PUSH_TOKEN` setup issue (`/fitness-mcp-setup`), not a
-> retry. All the FETCH reads below are **ungated** — read freely.
+> tell the user to enable it at **/addons** and retry (you don't enable it yourself). All
+> the FETCH reads below are **ungated** — read freely.
 
 > **NOT MEDICAL ADVICE.** A weekly review is an **informational estimate**, not medical
 > advice — carry that framing whenever you read recovery, load, or sleep. **Defer to a
@@ -155,8 +154,7 @@ next week's plan off this review.
 - **The board does NOT generate — YOU do.** No board-side LLM, no "click Generate" — you
   author the review and `save_weekly_review` it. The deterministic **form score** is the one
   number the board computes; you **read + average + interpret** it, never recompute.
-- **Gate + token.** A **404** = add-on disabled (enable at **/addons**, then retry); a **401**
-  = `FITNESS_PUSH_TOKEN` setup issue (`/fitness-mcp-setup`). Reads are ungated.
+- **Gate.** A **404** = add-on disabled (enable at **/addons**, then retry). Reads are ungated.
 - **Upsert by ISO week** — re-saving the same week replaces it.
 - **Profile-aware + English enums only;** respect days available / level / goal. No profile →
   weaker review; note it and point at **fitness-athlete-profile**.

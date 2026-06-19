@@ -39,11 +39,6 @@ gathering, the free-text → enum mapping, and the merge.
 > is off — tell the user to enable it from the board's **/addons** catalog (toggle on),
 > then retry. You don't enable it yourself; it's a deliberate, human, one-time switch.
 
-> **Token — the write needs `FITNESS_PUSH_TOKEN`.** `set_athlete_profile` authenticates
-> to the board with the shared secret the bridge carries. A `401 / Unauthorized — check
-> FITNESS_PUSH_TOKEN` (distinct from the 404 gate) means the token is unset or mismatched
-> — that's a setup issue (`/fitness-mcp-setup`), not something you can fix by retrying.
-
 > **NOT MEDICAL ADVICE.** A `weight_loss` goal or any `currentWeightKg` / `targetWeightKg`
 > is an **informational** target, **not** medical advice. Don't prescribe a weight or a
 > rate; record what the user states, and **defer to a clinician or registered dietitian**
@@ -178,8 +173,7 @@ step (*"want me to build you a training plan for the week?"*).
   never send a partial that drops the fields the user is keeping.
 - **The add-on must be ENABLED for the write.** A disabled add-on 404s `set_athlete_profile`
   ("Not found — the fitness add-on may be disabled.") while the read stays open — tell the
-  user to flip it on at **/addons**; you don't enable it yourself. A **401** (not 404) is a
-  token problem (`FITNESS_PUSH_TOKEN`), a setup issue for `/fitness-mcp-setup`.
+  user to flip it on at **/addons**; you don't enable it yourself.
 - **English vocabularies, validated.** `goal` ∈ `VALID_ATHLETE_GOAL`, `level` ∈
   `VALID_ATHLETE_LEVEL`, `sports` ⊆ `VALID_ATHLETE_SPORT`, `equipment` ⊆
   `VALID_ATHLETE_EQUIPMENT` (verbatim above). Map free-text onto them; **ask when

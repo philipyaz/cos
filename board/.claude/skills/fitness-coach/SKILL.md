@@ -54,6 +54,6 @@ which they want.
   `/fitness/weekly-review`, `/fitness/pre-workout-brief`, `/fitness/correlations`, and
   `/fitness/health` (the Apple Watch dashboard). The human glances; the agent does the work.
 - **The `fitness` MCP** is the only path to health DATA (never `bash`/`curl`) — 18 thin tools
-  (reads + `save_*` writes); writes are token-gated and need the add-on ENABLED. The detailed
+  (reads + `save_*` writes); writes are add-on-gated and need the add-on ENABLED. The detailed
   tool list, the canonical taxonomy, and the setup live in **/fitness-mcp-setup** — point
   there rather than restating it here.

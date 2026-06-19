@@ -1,15 +1,13 @@
 // Thin typed client over the Fitness add-on's /api/fitness/* routes — the browser's
 // single MUTATION path for the athlete profile + the calendar plan push (the agent's twin
-// path is the fitness MCP, which hits the same routes with an x-fitness-token header). It
-// mirrors nutrition-client's request(): a non-2xx throws Error(<api error text>) so callers
-// can surface it in a banner and refetch.
+// path is the fitness MCP, which hits the same routes). It mirrors nutrition-client's
+// request(): a non-2xx throws Error(<api error text>) so callers can surface it in a banner
+// and refetch.
 //
 // SAME-ORIGIN, NO AUTH HEADER: every fetch is a same-origin relative path with no auth
-// header. The x-fitness-token is the MCP server's machine-local secret for its gated WRITE
-// tools (push/delete-data) — it is NEVER sent from the browser UI. The profile + plan-push
-// WRITES here are GATED server-side by the add-on flag (assertAddonEnabled → 404 when the
-// "fitness" add-on is disabled); the data/profile/form-score READS stay viewable on a
-// disabled add-on (those routes read ungated).
+// header. The profile + plan-push WRITES here are GATED server-side by the add-on flag
+// (assertAddonEnabled → 404 when the "fitness" add-on is disabled); the data/profile/
+// form-score READS stay viewable on a disabled add-on (those routes read ungated).
 
 import type { HealthEntry, AthleteProfile, CoachingArtifact } from "./types";
 import type { FormScore } from "./fitness-score";
@@ -121,10 +119,8 @@ export function getFormScore(date: string): Promise<FormScoreResponse> {
 // The four AI coaching surfaces (training plan / weekly review / pre-workout brief /
 // correlations) are persisted on db.coachingArtifacts as ONE polymorphic array. The list +
 // fetch reads here are UNGATED (the history feed stays viewable when the add-on is disabled);
-// the delete WRITE is GATED server-side (disabled add-on → 404) AND token-gated at the route
-// edge — the browser never sends the token, so a UI delete only lands when the same-origin
-// route's FITNESS_PUSH_TOKEN matches; the agent's twin path is the fitness MCP's
-// delete_coaching_artifact (which attaches x-fitness-token).
+// the delete WRITE is GATED server-side (disabled add-on → 404); the agent's twin path is the
+// fitness MCP's delete_coaching_artifact.
 
 export interface CoachingListResponse {
   items: CoachingArtifact[]; // newest-first (see listCoachingArtifacts)
@@ -159,7 +155,7 @@ export function getCoachingArtifact(id: string): Promise<CoachingItemResponse> {
 }
 
 // DELETE /api/fitness/coaching/<id> — remove a coaching artifact (for a future delete button).
-// GATED server-side (disabled add-on → 404) AND token-gated at the route edge.
+// GATED server-side (disabled add-on → 404).
 export function deleteCoachingArtifact(id: string): Promise<{ ok: boolean; version?: number }> {
   return request(`/api/fitness/coaching/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

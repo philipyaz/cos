@@ -9,24 +9,19 @@
 //   • DISABLE the add-on (PATCH { enabled:false }); GET /api/addons reports it as
 //     enabled:false with a bridge:{ port, reachable } hint
 //   • while DISABLED: GET /api/fitness/summary + GET /api/fitness/profile → 200 (ungated reads);
-//     every WRITE (POST /api/fitness/push with a valid token, POST /api/fitness/profile) → 404
+//     every WRITE (POST /api/fitness/push, POST /api/fitness/profile) → 404
 //   • ENABLE the add-on (PATCH { enabled:true }) → 200, the response carries a bumped
 //     version, and GET /api/addons now reports enabled:true
 //   • while ENABLED: the same POSTs now succeed (push → 201, profile → 200) — the gate flipped
 //   • an unknown add-on id (PATCH /api/addons/nope) → 404; a non-boolean enabled → 400
 //
-// The push route is token-gated (x-fitness-token must match FITNESS_PUSH_TOKEN). The test
-// board exports FITNESS_PUSH_TOKEN (see tests/run.sh); locally pass it via env. When the
-// token is absent the push route 503s — the test SKIPs the push-write checks but still
-// drives the athlete-profile gate (which needs no token).
-//
 // Snapshots board/data/cases.json first and restores it in a `finally` (net-zero —
 // settings.addons + db.healthEntries + db.athleteProfile live in cases.json). Requires a
 // running board:
 //   cd board && npm run dev
-//   FITNESS_PUSH_TOKEN=… node tests/api-fitness-gate.mjs   # CRM_BASE_URL defaults to :3000
+//   node tests/api-fitness-gate.mjs   # CRM_BASE_URL defaults to :3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path), FITNESS_PUSH_TOKEN.
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,7 +30,6 @@ const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DATA_FILE =
   process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
-const FITNESS_TOKEN = (process.env.FITNESS_PUSH_TOKEN || "").trim();
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -74,7 +68,6 @@ const pushPayload = () => ({
     { id: `gate-hrv-${Date.now()}`, ts: "2026-06-10", type: "hrv", data: { value: 55 } },
   ],
 });
-const pushHeaders = () => ({ "x-fitness-token": FITNESS_TOKEN });
 
 // A complete, valid athlete profile (ENGLISH enums single-sourced in @/lib/types).
 const athleteProfile = () => ({
@@ -88,9 +81,6 @@ const athleteProfile = () => ({
 
 async function main() {
   console.log(`api-fitness-gate · board=${BASE}`);
-  if (!FITNESS_TOKEN) {
-    console.log("  ⚠ FITNESS_PUSH_TOKEN unset — push-write gate checks are SKIPPED (athlete gate still runs).");
-  }
 
   const snapshot = await fs.readFile(DATA_FILE, "utf8");
 
@@ -118,10 +108,8 @@ async function main() {
     check(readProfile.status === 200, `GET /api/fitness/profile while disabled → 200 (got ${readProfile.status})`);
 
     // Writes 404 while disabled.
-    if (FITNESS_TOKEN) {
-      const blockedPush = await POST("/api/fitness/push", pushPayload(), pushHeaders());
-      check(blockedPush.status === 404, `POST /api/fitness/push while disabled → 404 (got ${blockedPush.status})`);
-    }
+    const blockedPush = await POST("/api/fitness/push", pushPayload());
+    check(blockedPush.status === 404, `POST /api/fitness/push while disabled → 404 (got ${blockedPush.status})`);
     const blockedProfile = await POST("/api/fitness/profile", athleteProfile());
     check(blockedProfile.status === 404, `POST /api/fitness/profile while disabled → 404 (got ${blockedProfile.status})`);
 
@@ -140,11 +128,9 @@ async function main() {
     check(rowAfter?.enabled === true, "GET /api/addons now reports fitness as enabled:true");
 
     // The same writes now land.
-    if (FITNESS_TOKEN) {
-      const allowedPush = await POST("/api/fitness/push", pushPayload(), pushHeaders());
-      check(allowedPush.status === 201, `POST /api/fitness/push after enable → 201 (got ${allowedPush.status}) — the gate flipped`);
-      check(allowedPush.body.accepted === 1, `the push landed (accepted:1, got ${allowedPush.body.accepted})`);
-    }
+    const allowedPush = await POST("/api/fitness/push", pushPayload());
+    check(allowedPush.status === 201, `POST /api/fitness/push after enable → 201 (got ${allowedPush.status}) — the gate flipped`);
+    check(allowedPush.body.accepted === 1, `the push landed (accepted:1, got ${allowedPush.body.accepted})`);
     const allowedProfile = await POST("/api/fitness/profile", athleteProfile());
     check(allowedProfile.status === 200, `POST /api/fitness/profile after enable → 200 (got ${allowedProfile.status}) — the gate flipped`);
     check(allowedProfile.body.profile?.goal === "general_fitness", "the athlete profile persisted (goal echoed)");

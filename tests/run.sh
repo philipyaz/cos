@@ -89,25 +89,24 @@
 #      live there → net-zero). Skipped when no board is up.
 #  10h. api-fitness-gate — ONLY if a board is running: the Add-ons GATE contract for
 #      the unified "fitness" add-on (/api/fitness/* + /api/fitness/profile + /api/addons[/:id]). A
-#      DISABLED add-on rejects every WRITE (POST /api/fitness/push with a valid x-fitness-token,
-#      POST /api/fitness/profile) with 404 while its GETs stay 200; PATCH /api/addons/fitness flips the
-#      gate live + bumps db.version; unknown-id 404 + non-boolean-enabled 400. Snapshots+restores
-#      cases.json (settings.addons + healthEntries + athleteProfile live there). Skipped when no board.
+#      DISABLED add-on rejects every WRITE (POST /api/fitness/push, POST /api/fitness/profile) with
+#      404 while its GETs stay 200; PATCH /api/addons/fitness flips the gate live + bumps db.version;
+#      unknown-id 404 + non-boolean-enabled 400. Snapshots+restores cases.json (settings.addons +
+#      healthEntries + athleteProfile live there). Skipped when no board.
 #  10i. api-fitness-push — ONLY if a board is running: a push INGEST → SUMMARIZE round-trip that
 #      kills the split-brain-taxonomy bug — POST /api/fitness/push a realistic HAE payload (sleep +
 #      heart_rate_variability metrics + a workout), then assert GET /api/fitness/summary returns
 #      NON-EMPTY sleep + hrv (reading canonical type "sleep_night"/"hrv" + data.value) and
-#      GET /api/fitness/daily-summary surfaces them. Needs FITNESS_PUSH_TOKEN. Snapshots+restores
-#      cases.json. Skipped when no board.
-#  10j. api-fitness-coaching — ONLY if a board is running: full CRUD + gate + upsert + token
-#      contract for the "fitness" add-on's STATEFUL coaching artifacts (/api/fitness/coaching[/:id]
-#      + db.coachingArtifacts). With the add-on ENABLED a tokened POST mints a COACH-<n> artifact
+#      GET /api/fitness/daily-summary surfaces them. Snapshots+restores cases.json. Skipped when no
+#      board.
+#  10j. api-fitness-coaching — ONLY if a board is running: full CRUD + gate + upsert contract for
+#      the "fitness" add-on's STATEFUL coaching artifacts (/api/fitness/coaching[/:id]
+#      + db.coachingArtifacts). With the add-on ENABLED a POST mints a COACH-<n> artifact
 #      (201, created:true); GET ?kind=training_plan lists it; GET-by-id reads it back; a re-POST
 #      for the SAME (kind, periodKey) UPSERTS (created:false, same id — exactly one row per week,
-#      no duplicate); a POST WITHOUT x-fitness-token → 401 (edge token gate); the GATE (a DISABLED
-#      add-on 404s the tokened POST while GET stays 200 — reads open); DELETE with the token drops
-#      the id (a re-GET 404s). Needs FITNESS_PUSH_TOKEN; SKIPs when unset. Snapshots+restores
-#      cases.json (coachingArtifacts + settings.addons live there). Skipped when no board.
+#      no duplicate); the GATE (a DISABLED add-on 404s the POST while GET stays 200 — reads open);
+#      DELETE drops the id (a re-GET 404s). Snapshots+restores cases.json (coachingArtifacts +
+#      settings.addons live there). Skipped when no board.
 #  11. api-trust — ONLY if a board is running: drives the guard sender-trust
 #      WHITELIST API via the board's thin PROXY routes (/api/trust[/:email] →
 #      the guard sidecar :8009): GET always-200 online shape, add (default
@@ -189,9 +188,6 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/cos-tests.XXXXXX")"
 TEST_BOARD_PID=""
 TEST_BOARD_PORT="${COS_TEST_BOARD_PORT:-3999}"
 BASE=""
-# The token the fitness-push route requires (x-fitness-token). A throwaway value shared by the
-# test board AND the api-fitness-* steps so the push round-trip is exercised (not 503'd).
-export FITNESS_PUSH_TOKEN="${FITNESS_PUSH_TOKEN:-test-fitness-token}"
 BOARD_UP=0
 HTTP_CODE="test-board"
 # Shared by the test board AND the test processes so trust-derivation agrees on
@@ -226,7 +222,6 @@ start_test_board() {
   # self-contained: api-search falls back to keyword (finds its own marker), and
   # the guard-proxy tests see online:false and self-skip — nothing live is touched.
   ( cd "${sb}" && COS_DATA_DIR="${sb}/data" COS_PRINCIPAL_EMAIL="${COS_PRINCIPAL_EMAIL}" \
-      FITNESS_PUSH_TOKEN="${FITNESS_PUSH_TOKEN}" \
       COS_SEARCH_URL="http://127.0.0.1:59999" COS_GUARD_URL="http://127.0.0.1:59999" \
       "${BOARD_SRC}/node_modules/.bin/next" dev -p "${TEST_BOARD_PORT}" >"${TMP}/test-board.log" 2>&1 ) &
   TEST_BOARD_PID=$!
@@ -685,17 +680,15 @@ fi
 
 # --- 10h. api-fitness-gate (only when a board is healthy) --------------------
 # The Add-ons GATE contract for the unified "fitness" add-on (/fitness + /fitness/health). A DISABLED
-# add-on rejects every WRITE (POST /api/fitness/push with a valid x-fitness-token, POST
-# /api/fitness/profile) with 404 while its GET reads (GET /api/fitness/summary, GET /api/fitness/profile) stay
-# 200; enabling via PATCH /api/addons/fitness flips the gate live AND bumps db.version; an
-# unknown add-on id 404s and a non-boolean enabled 400s. The push-write checks need
-# FITNESS_PUSH_TOKEN (the test board exports it); the athlete-profile gate runs regardless.
-# Snapshots + restores board/data/cases.json (settings.addons + healthEntries + athleteProfile
-# live there → net-zero). Skipped when no board.
+# add-on rejects every WRITE (POST /api/fitness/push, POST /api/fitness/profile) with 404 while its
+# GET reads (GET /api/fitness/summary, GET /api/fitness/profile) stay 200; enabling via
+# PATCH /api/addons/fitness flips the gate live AND bumps db.version; an unknown add-on id 404s and
+# a non-boolean enabled 400s. Snapshots + restores board/data/cases.json (settings.addons +
+# healthEntries + athleteProfile live there → net-zero). Skipped when no board.
 echo
 echo "--- [10h] api-fitness-gate (live board) ---------------------"
 if [ "${BOARD_UP}" -eq 1 ]; then
-  if CRM_BASE_URL="${BASE}" FITNESS_PUSH_TOKEN="${FITNESS_PUSH_TOKEN}" node "${SCRIPT_DIR}/api-fitness-gate.mjs"; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-gate.mjs"; then
     echo "api-fitness-gate: PASS"
   else
     echo "api-fitness-gate: FAIL"
@@ -713,13 +706,12 @@ fi
 # GET /api/fitness/summary returns NON-EMPTY sleep {count,avg_hours} + hrv {count,avg_ms} +
 # workout (reading the CANONICAL taxonomy — type "sleep_night"/"hrv", data.value — NOT the
 # legacy "heart_rate_variability"/data.avg_ms shapes), and GET /api/fitness/daily-summary
-# surfaces the same. Needs FITNESS_PUSH_TOKEN (the push route is token-gated); SKIPs gracefully
-# when unset. Snapshots + restores board/data/cases.json (healthEntries + settings.addons live
-# there → net-zero). Skipped when no board.
+# surfaces the same. Snapshots + restores board/data/cases.json (healthEntries + settings.addons
+# live there → net-zero). Skipped when no board.
 echo
 echo "--- [10i] api-fitness-push (live board) ---------------------"
 if [ "${BOARD_UP}" -eq 1 ]; then
-  if CRM_BASE_URL="${BASE}" FITNESS_PUSH_TOKEN="${FITNESS_PUSH_TOKEN}" node "${SCRIPT_DIR}/api-fitness-push.mjs"; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-push.mjs"; then
     echo "api-fitness-push: PASS"
   else
     echo "api-fitness-push: FAIL"
@@ -731,20 +723,18 @@ else
 fi
 
 # --- 10j. api-fitness-coaching (only when a board is healthy) ----------------
-# Full CRUD + gate + upsert + token contract for the "fitness" add-on's STATEFUL coaching
+# Full CRUD + gate + upsert contract for the "fitness" add-on's STATEFUL coaching
 # artifacts (/api/fitness/coaching[/:id] + db.coachingArtifacts) with the add-on ENABLED:
-# a tokened POST mints a COACH-<n> artifact (201, created:true); GET ?kind=training_plan lists
+# a POST mints a COACH-<n> artifact (201, created:true); GET ?kind=training_plan lists
 # it (total >= 1); GET-by-id reads it back; a re-POST for the SAME (kind, periodKey) UPSERTS
 # (created:false, same id — the list still holds EXACTLY ONE training_plan for that week, no
-# duplicate); a POST WITHOUT x-fitness-token → 401 (edge token gate); the GATE (a DISABLED
-# add-on 404s the tokened POST while GET stays 200 — reads open); re-enable then DELETE with
-# the token → ok and a re-GET 404s. Needs FITNESS_PUSH_TOKEN (the coaching writes are
-# token-gated); SKIPs gracefully when unset. Snapshots + restores board/data/cases.json
+# duplicate); the GATE (a DISABLED add-on 404s the POST while GET stays 200 — reads open);
+# re-enable then DELETE → ok and a re-GET 404s. Snapshots + restores board/data/cases.json
 # (coachingArtifacts + settings.addons live there → net-zero). Skipped when no board.
 echo
 echo "--- [10j] api-fitness-coaching (live board) -----------------"
 if [ "${BOARD_UP}" -eq 1 ]; then
-  if CRM_BASE_URL="${BASE}" FITNESS_PUSH_TOKEN="${FITNESS_PUSH_TOKEN}" node "${SCRIPT_DIR}/api-fitness-coaching.mjs"; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-coaching.mjs"; then
     echo "api-fitness-coaching: PASS"
   else
     echo "api-fitness-coaching: FAIL"

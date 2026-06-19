@@ -5,22 +5,11 @@ import { storeErrorToResponse } from "@/lib/route-helpers";
 export const dynamic = "force-dynamic";
 
 // POST /api/fitness/push — receive a batch of Apple Watch HealthKit entries.
-// Token-gated: the x-fitness-token header must match FITNESS_PUSH_TOKEN from env.
+// Add-on-gated: like every other fitness write, this relies solely on the add-on enabled gate
+// (assertAddonEnabled in mutate → 404 when the "fitness" add-on is disabled). The iPhone Health
+// Auto Export shortcut posts here directly.
 // Entries are deduplicated by id. Entries older than 90 days are auto-purged.
 export async function POST(req: NextRequest) {
-  // ── Auth ──
-  const token = (process.env.FITNESS_PUSH_TOKEN || "").trim();
-  if (!token) {
-    return NextResponse.json(
-      { error: "Health push is not configured on the server." },
-      { status: 503 }
-    );
-  }
-  const provided = req.headers.get("x-fitness-token")?.trim();
-  if (provided !== token) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
   // ── Parse body ──
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object") {

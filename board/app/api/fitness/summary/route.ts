@@ -4,7 +4,7 @@ import { summarize } from "@/lib/fitness";
 export const dynamic = "force-dynamic";
 
 // GET /api/fitness/summary?date=&from=&to= — aggregated health summary.
-// Reads are ungated (no token needed).
+// Reads are ungated.
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const date = sp.get("date")?.trim() || undefined;

@@ -38,10 +38,10 @@ already computes *and persists* the snapshot, so you almost never call `save_cor
 > advice**: defer any injury, illness, abnormal symptom, pregnancy, or an under-18 user to a
 > physician / physiotherapist / qualified coach; don't push hard training off a number.
 
-> **Gate + token.** `get_correlations` is a **read/compute** — it works whether or not the
-> Fitness add-on is enabled (reads are always open). The persist it does is token-authed via
-> the bridge's `x-fitness-token`; if the snapshot doesn't land you may see a `401 / Unauthorized
-> — check FITNESS_PUSH_TOKEN` (a setup issue for `/fitness-mcp-setup`, not a retry).
+> **Gate.** `get_correlations` is a **read/compute** — it works whether or not the Fitness
+> add-on is enabled (reads are always open). The persist it does is add-on-gated: it lands
+> when the add-on is enabled and is skipped (404) when it's off — tell the user to enable it
+> at **/addons** if you need the snapshot to stick.
 
 ---
 
@@ -115,8 +115,8 @@ persists** the snapshot it computes. Reach for it **only** when the user **suppl
 externally-computed dataset** (their own numbers, a different tool's output) that you want to
 land on the feed — then `save_correlation_report({ from, to, days, data_points, correlation,
 regression, points })` with **their** figures (you are persisting their math, still not
-inventing your own Pearson). This is a **gated, token-authed write** — it 404s if the add-on is
-disabled (tell the user to enable it at **/addons**) and 401s on a bad token (`/fitness-mcp-setup`).
+inventing your own Pearson). This is an **add-on-gated write** — it 404s if the add-on is
+disabled (tell the user to enable it at **/addons**).
 
 ---
 
@@ -126,7 +126,7 @@ disabled (tell the user to enable it at **/addons**) and 401s on a bad token (`/
   the intercept — **never recompute them yourself**. Your value is the plain-language reading +
   the actionable training guidance, not the arithmetic.
 - **`fitness` MCP only** for the data — never `bash`/`curl`. Reads/compute are ungated; the
-  persist `get_correlations` does is token-authed.
+  persist `get_correlations` does is add-on-gated (lands when the add-on is enabled).
 - **Honour `n = data_points`.** Always state the sample size and **temper** the conclusion to
   it — a weak `r` on a small `n` is noise, not a finding. Don't over-claim.
 - **Correlation ≠ causation.** Say it explicitly every time — it's an association across logged

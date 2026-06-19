@@ -69,9 +69,7 @@ fi
 # Settings.addons — this default only seeds the bridge port for the supergateway HTTP bridge.
 : "${NUTRITION_BRIDGE_PORT:=8007}"
 # Fitness add-on (built-in; in-repo mcp/fitness-server). Gated per-board via Settings.addons —
-# this default only seeds the supergateway HTTP bridge port. The push token (FITNESS_PUSH_TOKEN)
-# is the one machine-local secret the bridge carries; it lives in config/secrets.env (sourced by
-# mcp/fitness-server/launch.sh), never here and never in a committed/generated file.
+# this default only seeds the supergateway HTTP bridge port.
 : "${FITNESS_BRIDGE_PORT:=8011}"
 
 # --- 3. Override defaults with the real machine config (once cos-setup has written it) ---------
