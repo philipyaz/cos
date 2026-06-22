@@ -509,15 +509,85 @@ const SET_NUTRITION_GOAL_TOOL = {
 const GET_NUTRITION_TARGETS_TOOL = {
   name: "get_nutrition_targets",
   description:
-    "The agent-facing 'how am I doing' read — `GET /api/nutrition/targets`. Read-only (works even " +
-    "if the add-on is disabled). Computes the full plan over the goal + weigh-ins + food log: " +
-    "current/trend/target weight + remaining, estimated BMR/TDEE and the measured (feedback-loop) " +
-    "TDEE with which basis is in use, the recommended daily calorie target + protein/fat/carb " +
-    "macros, the effective deficit, BMI now vs at target, the ETA to the target weight, today's " +
-    "calories used/remaining, the guardrail flags (always including the 'not medical advice' note), " +
-    "and the OFF-TRACK days (any logged day that went over / well over target). When the goal or a " +
-    "weigh-in is missing it reports what still needs configuring instead of numbers.",
+    "Read the LATEST agent-authored daily nutrition targets — `GET /api/nutrition/targets?latest=daily_targets`. " +
+    "Read-only. Returns the most recently SAVED daily target (calories + macros + the agent's stance/rationale), " +
+    "or 'none yet'. The board does NOT compute this — author today's with save_nutrition_targets after reading " +
+    "the goal (get_body_objective), the physiology facts (get_body_status), and get_diet_profile.",
   inputSchema: { type: "object", properties: {} },
+};
+
+// ── v14 dietary profile + agent-authored targets ──────────────────────────────
+
+const GET_DIET_PROFILE_TOOL = {
+  name: "get_diet_profile",
+  description:
+    "Read the dietary profile — `GET /api/nutrition/diet-profile`. Read-only. Returns `allergies` (a " +
+    "SAFETY list you MUST honor — NEVER plan or suggest a meal containing one), `dietType` (regime tags: " +
+    "vegan / halal / no-pork / keto …), `notes` (intolerances, foods avoided, preferences — soft), and " +
+    "`philosophy` (the 'our views on diet' methodology to follow when setting targets; a study-grounded " +
+    "default ships, the user can override it). CALL THIS FIRST before planning a meal, logging food " +
+    "against a plan, or authoring nutrition targets — if it errors, STOP and ask the user to confirm allergies.",
+  inputSchema: { type: "object", properties: {} },
+};
+
+const SET_DIET_PROFILE_TOOL = {
+  name: "set_diet_profile",
+  description:
+    "Update the dietary profile — `PATCH /api/nutrition/diet-profile` (MERGE: send ONLY the fields you " +
+    "change). " +
+    ADDON_GUARDRAIL +
+    " `allergies` is SAFETY-CRITICAL — a sent list REPLACES the old one, so to ADD one send the FULL new " +
+    "array (e.g. {allergies: [...existing, 'peanuts']}). `dietType` is regime tags (free strings: 'vegan', " +
+    "'halal', 'no-pork', 'keto'). `notes` is free text (intolerances / foods avoided / preferences). " +
+    "`philosophy` is the free-text 'views on diet' methodology — overwrite it for a vegan/keto/etc. user; " +
+    "leaving it empty restores the shipped default.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      allergies: { type: "array", items: { type: "string" }, description: "SAFETY list — the FULL allergy array (replaces the old one)." },
+      dietType: { type: "array", items: { type: "string" }, description: "Regime tags (free strings): vegan, halal, no-pork, keto…" },
+      notes: { type: "string", description: "Free text: intolerances, foods avoided, non-allergy issues, preferences." },
+      philosophy: { type: "string", description: "The 'our views on diet' methodology (free text). Empty restores the shipped default." },
+    },
+  },
+};
+
+const SAVE_NUTRITION_TARGETS_TOOL = {
+  name: "save_nutrition_targets",
+  description:
+    "Save the daily nutrition targets YOU authored — `POST /api/nutrition/targets`. " +
+    ADDON_GUARDRAIL +
+    " The board NEVER computes targets; you do, from get_body_objective + get_body_status + get_diet_profile " +
+    "+ the recent food log, then persist the result here (the save_training_plan pattern). Upserts by day. " +
+    "`periodKey` is the day 'YYYY-MM-DD' (defaults to today). Put the plan in `payload`: `daily_calories` " +
+    "(required number) + `protein_g`/`fat_g`/`carbs_g` + an optional `stance` ('deficit'|'surplus'|'maintenance'), " +
+    "`rationale` (why these numbers, citing the diet philosophy), and any extra fields — stored verbatim. " +
+    "The response carries board-computed `warnings` (e.g. a below-floor calorie note).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      periodKey: { type: "string", description: "The day 'YYYY-MM-DD' (the upsert key). Defaults to today." },
+      payload: {
+        type: "object",
+        description: "Your authored targets. Requires daily_calories (number); include protein_g/fat_g/carbs_g, stance, rationale, etc.",
+      },
+    },
+    required: ["payload"],
+  },
+};
+
+const LIST_NUTRITION_TARGETS_TOOL = {
+  name: "list_nutrition_targets",
+  description:
+    "List saved daily nutrition targets (history) — `GET /api/nutrition/targets`. Read-only. Filter by a " +
+    "half-open day window `from` (inclusive) / `to` (exclusive) as 'YYYY-MM-DD'. Newest first, one line per day.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      from: { type: "string", description: "Window start (inclusive), 'YYYY-MM-DD'." },
+      to: { type: "string", description: "Window end (exclusive), 'YYYY-MM-DD'." },
+    },
+  },
 };
 
 const TOOLS = [
@@ -530,6 +600,8 @@ const TOOLS = [
   LIST_WEIGHTS_TOOL,
   GET_NUTRITION_GOAL_TOOL,
   GET_NUTRITION_TARGETS_TOOL,
+  GET_DIET_PROFILE_TOOL,
+  LIST_NUTRITION_TARGETS_TOOL,
   // food-log lifecycle
   LOG_FOOD_TOOL,
   UPDATE_FOOD_LOG_TOOL,
@@ -545,6 +617,9 @@ const TOOLS = [
   // weight-loss lifecycle
   LOG_WEIGHT_TOOL,
   SET_NUTRITION_GOAL_TOOL,
+  // v14 dietary profile + agent-authored targets
+  SET_DIET_PROFILE_TOOL,
+  SAVE_NUTRITION_TARGETS_TOOL,
 ];
 
 const server = new Server(
@@ -1240,82 +1315,113 @@ async function handleSetNutritionGoal(args) {
   );
 }
 
+// Render one target artifact's macros compactly (P.. F.. C..).
+function targetMacros(p) {
+  return ["protein_g", "fat_g", "carbs_g"]
+    .filter((k) => typeof p[k] === "number")
+    .map((k) => `${k.replace("_g", "")} ${p[k]}g`)
+    .join(" · ");
+}
+
 async function handleGetNutritionTargets() {
-  const { data, errorResult } = await api("GET", "/api/nutrition/targets");
+  const { data, errorResult } = await api("GET", "/api/nutrition/targets?latest=daily_targets");
   if (errorResult) return errorResult;
-
-  const t = data.targets;
-  const lines = ["Nutrition targets — how am I doing:"];
-
-  // Not configured yet: tell the agent exactly what to set rather than print null numbers.
-  if (!t.configured) {
-    const needs = (t.needs ?? []).map((n) => (n === "goal" ? "a goal (set_nutrition_goal)" : "a weigh-in (log_weight)")).join(" and ");
-    lines.push(`Not fully configured yet — still need: ${needs || "more data"}.`);
-  } else {
-    // Weight: current (raw) + smoothed trend + target + how much remains.
-    const cur = t.currentWeightKg != null ? `${t.currentWeightKg.toFixed(1)} kg` : "—";
-    const trend = t.trendWeightKg != null ? `${t.trendWeightKg} kg` : "—";
-    const tgt = t.targetWeightKg != null ? `${t.targetWeightKg} kg` : "—";
-    lines.push(`Weight: current ${cur}  ·  trend ${trend}  ·  target ${tgt}`);
-    if (t.remainingKg != null) {
-      lines.push(t.remainingKg > 0 ? `Remaining: ${t.remainingKg} kg to go` : `Remaining: at or under target (${t.remainingKg} kg).`);
-    }
-
-    // Energy: estimated BMR/TDEE, the measured (feedback-loop) TDEE if available, and which
-    // basis the deficit used.
-    if (t.bmrKcal != null) lines.push(`BMR (estimated): ${t.bmrKcal} kcal`);
-    if (t.tdeeKcal != null) lines.push(`TDEE estimated (maintenance): ${t.tdeeKcal} kcal`);
-    if (t.measuredTdeeKcal != null) lines.push(`TDEE measured (feedback loop): ${t.measuredTdeeKcal} kcal`);
-    lines.push(`Basis in use: ${t.basis}`);
-
-    // The plan: daily calorie target, deficit, macros.
-    if (t.dailyCalorieTarget != null) {
-      lines.push(`Daily calorie target: ${t.dailyCalorieTarget} kcal` + (t.deficitKcal != null ? `  (deficit ${t.deficitKcal} kcal/day)` : ""));
-    }
-    if (t.rateKgPerWeek != null) lines.push(`Effective loss rate: ${t.rateKgPerWeek} kg/week`);
-    if (t.macros) lines.push(`Macros: protein ${t.macros.proteinG} g · fat ${t.macros.fatG} g · carbs ${t.macros.carbsG} g`);
-
-    // BMI now vs at target.
-    if (t.bmiCurrent != null || t.bmiTarget != null) {
-      lines.push(`BMI: now ${t.bmiCurrent ?? "—"}  ·  at target ${t.bmiTarget ?? "—"}`);
-    }
-
-    // ETA to target.
-    if (t.etaWeeks != null) {
-      lines.push(
-        t.etaWeeks > 0
-          ? `ETA: ~${t.etaWeeks} weeks${t.etaDate ? ` (around ${t.etaDate})` : ""}`
-          : `ETA: already at or under target.`
-      );
-    }
-
-    // Today's budget.
-    lines.push(
-      `Today: ${t.todayCalories} kcal logged` +
-        (t.todayRemaining != null ? `, ${t.todayRemaining} kcal ${t.todayRemaining >= 0 ? "remaining" : "over"}` : "")
+  const a = data.artifact;
+  if (!a) {
+    return text(
+      "No daily nutrition targets saved yet. Author today's with save_nutrition_targets — first read " +
+        "get_body_objective (the goal), get_body_status (the physiology facts), and get_diet_profile " +
+        "(allergies + the diet-views methodology)."
     );
   }
+  const p = a.payload ?? {};
+  const lines = [
+    `Latest daily targets — ${a.periodKey} (authored by ${a.source}):`,
+    `Calories: ${p.daily_calories ?? "—"} kcal${p.stance ? `  (${p.stance})` : ""}`,
+  ];
+  const macros = targetMacros(p);
+  if (macros) lines.push(`Macros: ${macros}`);
+  if (p.rationale) lines.push(`Rationale: ${p.rationale}`);
+  return text(lines.join("\n"));
+}
 
-  // Guardrail flags — always present (the not-medical-advice note leads). Warns flag a
-  // safety clamp that bit. Render every flag so nothing is silently dropped.
-  if (Array.isArray(t.flags) && t.flags.length) {
-    lines.push("");
-    lines.push("Guardrails:");
-    for (const f of t.flags) lines.push(`  - [${f.level}] ${f.message}`);
+async function handleListNutritionTargets(args) {
+  const sp = new URLSearchParams();
+  for (const k of ["from", "to"]) {
+    const v = str(args[k]);
+    if (v) sp.set(k, v);
   }
-
-  // OFF-TRACK days — the adherence rows whose status is over / well_over (most recent first,
-  // as the engine already orders them). This is the headline "where did it go wrong" surface.
-  const offTrack = Array.isArray(t.adherence) ? t.adherence.filter((d) => d.status === "over" || d.status === "well_over") : [];
-  if (offTrack.length) {
-    lines.push("");
-    lines.push(`Off-track days (${offTrack.length}):`);
-    for (const d of offTrack) {
-      const over = d.deltaKcal > 0 ? `+${d.deltaKcal}` : `${d.deltaKcal}`;
-      lines.push(`  - ${d.date}  ${d.calories} kcal vs ${d.target} target  (${over} kcal, ${d.status.replace("_", " ")})`);
-    }
+  const qs = sp.toString();
+  const { data, errorResult } = await api("GET", `/api/nutrition/targets${qs ? `?${qs}` : ""}`);
+  if (errorResult) return errorResult;
+  const items = data.items ?? [];
+  const filters = qs ? ` (${qs.replace(/&/g, ", ")})` : "";
+  if (!items.length) return text(`No saved nutrition targets${filters}. Author today's with save_nutrition_targets.`);
+  const lines = [`Nutrition targets (${items.length}, newest first)${filters}:`];
+  for (const a of items) {
+    const p = a.payload ?? {};
+    const m = ["protein_g", "fat_g", "carbs_g"].filter((k) => typeof p[k] === "number").map((k) => `${k.replace("_g", "")[0].toUpperCase()}${p[k]}`).join(" ");
+    lines.push(`  - ${a.periodKey}  ${p.daily_calories ?? "—"} kcal${m ? `  ${m}` : ""}${p.stance ? `  (${p.stance})` : ""}  [${a.source}]`);
   }
+  return text(lines.join("\n"));
+}
 
+// ── Dietary profile tools ────────────────────────────────────────────────────
+
+async function handleGetDietProfile() {
+  const { data, errorResult } = await api("GET", "/api/nutrition/diet-profile");
+  if (errorResult) return errorResult;
+  const p = data.profile ?? {};
+  const lines = ["Dietary profile:"];
+  lines.push(`Allergies (SAFETY — NEVER serve these): ${p.allergies?.length ? p.allergies.join(", ") : "none recorded"}`);
+  lines.push(`Diet type / regime: ${p.dietType?.length ? p.dietType.join(", ") : "none"}`);
+  if (p.notes) lines.push(`Notes: ${p.notes}`);
+  lines.push("");
+  lines.push("Our views on diet (the methodology to follow when setting targets):");
+  lines.push(p.philosophy || "(none)");
+  return text(lines.join("\n"));
+}
+
+async function handleSetDietProfile(args) {
+  const payload = {};
+  if (Array.isArray(args.allergies)) payload.allergies = args.allergies.filter((s) => typeof s === "string");
+  if (Array.isArray(args.dietType)) payload.dietType = args.dietType.filter((s) => typeof s === "string");
+  if (typeof args.notes === "string") payload.notes = args.notes;
+  if (typeof args.philosophy === "string") payload.philosophy = args.philosophy;
+  if (Object.keys(payload).length === 0) {
+    return err("Nothing to update — pass at least one of: allergies, dietType, notes, philosophy.");
+  }
+  const { data, errorResult } = await api("PATCH", "/api/nutrition/diet-profile", payload);
+  if (errorResult) return errorResult;
+  const p = data.profile ?? {};
+  return text(
+    `Dietary profile updated (${Object.keys(payload).join(", ")}).\n` +
+      `Allergies: ${p.allergies?.length ? p.allergies.join(", ") : "none"}  ·  Diet: ${p.dietType?.length ? p.dietType.join(", ") : "none"}`
+  );
+}
+
+async function handleSaveNutritionTargets(args) {
+  if (!args.payload || typeof args.payload !== "object" || Array.isArray(args.payload)) {
+    return err("'payload' is required and must be an object with at least daily_calories (number).");
+  }
+  if (typeof args.payload.daily_calories !== "number") {
+    return err("'payload.daily_calories' is required and must be a number.");
+  }
+  const body = { payload: args.payload };
+  if (typeof args.periodKey === "string" && args.periodKey !== "") body.periodKey = args.periodKey;
+
+  const { data, errorResult } = await api("POST", "/api/nutrition/targets", body);
+  if (errorResult) return errorResult;
+  const a = data.artifact;
+  const p = a.payload ?? {};
+  const lines = [
+    `${data.created ? "Saved" : "Updated"} daily targets for ${a.periodKey} (${a.id}).`,
+    `Calories: ${p.daily_calories} kcal${p.stance ? `  (${p.stance})` : ""}`,
+  ];
+  const macros = targetMacros(p);
+  if (macros) lines.push(`Macros: ${macros}`);
+  if (p.rationale) lines.push(`Rationale: ${p.rationale}`);
+  if (Array.isArray(data.warnings)) for (const w of data.warnings) lines.push(`[${w.level}] ${w.message}`);
   return text(lines.join("\n"));
 }
 
@@ -1341,6 +1447,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleGetNutritionGoal(args);
     case "get_nutrition_targets":
       return handleGetNutritionTargets(args);
+    case "list_nutrition_targets":
+      return handleListNutritionTargets(args);
+    case "get_diet_profile":
+      return handleGetDietProfile(args);
     // food-log lifecycle
     case "log_food":
       return handleLogFood(args);
@@ -1367,6 +1477,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleLogWeight(args);
     case "set_nutrition_goal":
       return handleSetNutritionGoal(args);
+    // v14 dietary profile + agent-authored targets
+    case "set_diet_profile":
+      return handleSetDietProfile(args);
+    case "save_nutrition_targets":
+      return handleSaveNutritionTargets(args);
     default:
       return err(`Unknown tool: ${request.params.name}`);
   }

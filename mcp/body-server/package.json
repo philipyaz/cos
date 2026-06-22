@@ -1,0 +1,11 @@
+{
+  "name": "body-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server for the Cos 'Body' add-on — the single owner of body identity, the weight + body-composition series, and the free-text objective on the Cos board.",
+  "bin": { "body-mcp": "server.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

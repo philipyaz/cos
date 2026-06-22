@@ -699,6 +699,45 @@ else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
+# --- 10h1. api-body-gate (only when a board is healthy) ----------------------
+# The Add-ons GATE contract for the foundational "body" add-on, PLUS the two v14 provider invariants:
+# enabling a consumer (nutrition/fitness) AUTO-ENABLES body, and disabling body while a hard consumer
+# is on → 409. A DISABLED body rejects every WRITE (PUT /api/body/{profile,objective}, POST
+# /api/body/weight) with 404 while GETs stay 200. Snapshots + restores cases.json. Skipped when no board.
+echo
+echo "--- [10h1] api-body-gate (live board) -----------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-body-gate.mjs"; then
+    echo "api-body-gate: PASS"
+  else
+    echo "api-body-gate: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-body-gate"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10h2. api-nutrition-diet-profile (only when a board is healthy) ---------
+# The v14 nutrition surfaces: the dietary PROFILE (allergies/dietType/notes + the default-when-empty
+# diet-views philosophy; PATCH-merge keeps the safety allergy list) and the AGENT-AUTHORED daily-
+# targets feed (save attributed source:agent, the board-computed `warnings` sibling incl. the
+# low-calorie safety warn, the { items, total } history feed + ?latest). Snapshots + restores
+# cases.json. Skipped when no board.
+echo
+echo "--- [10h2] api-nutrition-diet-profile (live board) ----------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-diet-profile.mjs"; then
+    echo "api-nutrition-diet-profile: PASS"
+  else
+    echo "api-nutrition-diet-profile: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-diet-profile"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
 # --- 10i. api-fitness-push (only when a board is healthy) --------------------
 # A round-trip through the fitness-push INGEST → SUMMARIZE pipeline that kills the bug the old
 # test masked: with the add-on ENABLED, POST /api/fitness/push a realistic Health-Auto-Export
