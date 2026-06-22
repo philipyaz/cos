@@ -192,7 +192,7 @@ const ATHLETE_GOALS = [
   "weight_loss", "sprint_triathlon", "olympic_triathlon",
   "cycling", "swimming", "running", "general_fitness",
 ];
-const ATHLETE_LEVELS = ["beginner", "intermediate", "advanced"];
+// (v14: the athlete `level` enum is gone — training status lives on the body add-on's bodyProfile.)
 const ATHLETE_SPORTS = [
   "cycling_outdoor", "cycling_indoor", "running", "walking",
   "swimming_pool", "swimming_open_water", "rowing",
@@ -212,10 +212,11 @@ const ATHLETE_EQUIPMENT = [
 const GET_ATHLETE_PROFILE_TOOL = {
   name: "get_athlete_profile",
   description:
-    "Read the athlete training-profile singleton — the coach's context: goal, level, weekly " +
-    "availability (daysPerWeek, maxSessionMinutes), sports + equipment, goalDate, and current/" +
-    "target weight. Ungated read. Returns { profile, version }; profile is null when none is set " +
-    "(tell the user to set it first via set_athlete_profile / the fitness-athlete-profile skill).",
+    "Read the athlete training-profile singleton — the coach's TRAINING-FOCUS context: goal " +
+    "(sport/event focus), weekly availability (daysPerWeek, maxSessionMinutes), sports + equipment, " +
+    "and goalDate. Ungated read. Returns { profile, version }; profile is null when none is set. " +
+    "NOTE: training STATUS, current weight, and the BODY goal live in the body add-on — read them " +
+    "with get_body_profile / get_body_status / get_body_objective, NOT here.",
   inputSchema: {
     type: "object",
     properties: {},
@@ -225,29 +226,22 @@ const GET_ATHLETE_PROFILE_TOOL = {
 const SET_ATHLETE_PROFILE_TOOL = {
   name: "set_athlete_profile",
   description:
-    "Create-or-replace the athlete training-profile singleton (add-on-gated write). " +
-    "There is exactly ONE profile — a second call REPLACES it (createdAt is preserved). The board " +
-    "validates against its English enums and silently drops any sports/equipment values outside the " +
-    "allowed vocabulary, so only pass allowed values. Returns { profile, version }.",
+    "Create-or-replace the athlete training-profile singleton (add-on-gated write) — the TRAINING-FOCUS " +
+    "half only. There is exactly ONE profile — a second call REPLACES it (createdAt is preserved). " +
+    "Training STATUS / current weight / the BODY goal are NOT here — set those via the body add-on " +
+    "(set_body_profile / log_weight / set_body_objective). Returns { profile, version }.",
   inputSchema: {
     type: "object",
     properties: {
       goal: {
         type: "string",
         enum: ATHLETE_GOALS,
-        description: "Primary training goal (required).",
+        description: "Training FOCUS — the sport/event (required). NOT the body goal (that is the body objective).",
       },
       goalDate: {
         type: "string",
         description: "Target date for the goal as YYYY-MM-DD, or \"\" for none (optional).",
       },
-      level: {
-        type: "string",
-        enum: ATHLETE_LEVELS,
-        description: "Self-assessed experience level (required).",
-      },
-      currentWeightKg: { type: "number", description: "Current bodyweight in kilograms (optional, > 0)." },
-      targetWeightKg: { type: "number", description: "Target bodyweight in kilograms (optional, > 0)." },
       daysPerWeek: { type: "number", description: "Sessions available per week, 1-7 (optional)." },
       maxSessionMinutes: { type: "number", description: "Max minutes per session (optional, > 0)." },
       sports: {
@@ -266,7 +260,7 @@ const SET_ATHLETE_PROFILE_TOOL = {
       },
       notes: { type: "string", description: "Freeform context for the coach (optional; capped at 2000 chars)." },
     },
-    required: ["goal", "level"],
+    required: ["goal"],
   },
 };
 
@@ -665,11 +659,9 @@ async function handleSetAthleteProfile(args) {
   if (!ATHLETE_GOALS.includes(args.goal)) {
     return err(`'goal' is required, one of: ${ATHLETE_GOALS.join(", ")}.`);
   }
-  if (!ATHLETE_LEVELS.includes(args.level)) {
-    return err(`'level' is required, one of: ${ATHLETE_LEVELS.join(", ")}.`);
-  }
   // Pass the whole args object through; the board is the single validator (it coerces the
-  // optionals and drops out-of-vocabulary sports/equipment). ZERO business logic here.
+  // optionals, ignores any v14-removed fields like level/weight, and drops out-of-vocabulary
+  // sports/equipment). ZERO business logic here.
   const { data, errorResult } = await healthApi("POST", "/api/fitness/profile", args);
   if (errorResult) return errorResult;
   return text(JSON.stringify(data, null, 2));

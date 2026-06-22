@@ -494,9 +494,9 @@ export const VALID_ATHLETE_GOAL: AthleteGoal[] = [
   "cycling", "swimming", "running", "general_fitness",
 ];
 
-// The athlete's self-assessed experience level.
-export type AthleteLevel = "beginner" | "intermediate" | "advanced";
-export const VALID_ATHLETE_LEVEL: AthleteLevel[] = ["beginner", "intermediate", "advanced"];
+// NOTE (v14 dedup): the athlete `level` enum is REMOVED — training experience is now the body
+// add-on's `BodyProfile.trainingStatus` (novice|intermediate|advanced), read cross-add-on. Likewise
+// the athlete's current/target weight moved to the body add-on (db.weights latest / bodyObjective).
 
 // The sports an athlete trains (advisory tags the AI coach reads). English value domain,
 // single-sourced for the route validator + the UI multiselect.
@@ -526,12 +526,14 @@ export const VALID_ATHLETE_EQUIPMENT: string[] = [
 // db.nutritionGoal: exactly one current profile, a bare object set/replaced (never minted
 // with an id). Owned by the "fitness" add-on; feeds the AI coaching routes (training plan,
 // weekly review, pre-workout brief). Weights are kilograms (canonical, like WeightEntry).
+// The athlete training-profile SINGLETON — the TRAINING-FOCUS half (the body half — identity /
+// weight / objective — moved to the body add-on in v14). `goal` is a training-FOCUS tag (sport/event),
+// NOT the body objective: the canonical "what's my body goal" is the free-text db.bodyObjective. The
+// coach reads training status from db.bodyProfile.trainingStatus, current weight from db.weights, and
+// the target from db.bodyObjective — cross-add-on, ungated — NOT from here.
 export interface AthleteProfile {
-  goal: AthleteGoal;
+  goal: AthleteGoal;             // training FOCUS (sport/event), not the body objective
   goalDate: string;              // ISO "YYYY-MM-DD" target date, or "" when none set
-  level: AthleteLevel;
-  currentWeightKg: number | null;
-  targetWeightKg: number | null;
   daysPerWeek: number | null;    // 1..7 sessions per week, or null
   maxSessionMinutes: number | null;
   sports: string[];              // ⊆ VALID_ATHLETE_SPORT

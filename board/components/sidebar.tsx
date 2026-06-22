@@ -31,6 +31,7 @@ import {
   IconRunner,
   IconTrend,
   IconSpark,
+  IconScale,
 } from "@/components/icons";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
@@ -48,6 +49,7 @@ const ADDON_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   IconTrend,
   IconBolt,
   IconSpark,
+  IconScale,
 };
 function addonIcon(key: string): ReactNode {
   const Glyph = ADDON_ICONS[key] ?? IconBolt;

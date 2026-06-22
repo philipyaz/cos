@@ -21,7 +21,6 @@ import { formatDay } from "@/lib/fitness-format";
 import { IconRunner, IconWarning } from "@/components/icons";
 import {
   VALID_ATHLETE_GOAL,
-  VALID_ATHLETE_LEVEL,
   VALID_ATHLETE_SPORT,
   VALID_ATHLETE_EQUIPMENT,
 } from "@/lib/types";
@@ -51,13 +50,6 @@ const GOAL_LABELS: Record<string, string> = {
   general_fitness: "General fitness",
 };
 const GOALS = VALID_ATHLETE_GOAL.map((value) => ({ value, label: GOAL_LABELS[value] ?? value }));
-
-const LEVEL_LABELS: Record<string, string> = {
-  beginner: "Beginner",
-  intermediate: "Intermediate",
-  advanced: "Advanced",
-};
-const LEVELS = VALID_ATHLETE_LEVEL.map((value) => ({ value, label: LEVEL_LABELS[value] ?? value }));
 
 // Human labels for every sport value in VALID_ATHLETE_SPORT.
 const SPORT_LABELS: Record<string, string> = {
@@ -151,9 +143,6 @@ const INPUT_CLASS =
 interface AthleteProfile {
   goal: string;
   goalDate: string;
-  level: string;
-  currentWeightKg: number | null;
-  targetWeightKg: number | null;
   daysPerWeek: number | null;
   maxSessionMinutes: number | null;
   sports: string[];
@@ -165,9 +154,6 @@ interface AthleteProfile {
 const EMPTY: AthleteProfile = {
   goal: "general_fitness",
   goalDate: "",
-  level: "beginner",
-  currentWeightKg: null,
-  targetWeightKg: null,
   daysPerWeek: null,
   maxSessionMinutes: null,
   sports: [],
@@ -175,11 +161,6 @@ const EMPTY: AthleteProfile = {
   notes: "",
   updatedAt: "",
 };
-
-interface LastWeight {
-  kg: number;
-  date: string;
-}
 
 // ── View ─────────────────────────────────────────────────────────────────────
 
@@ -189,7 +170,6 @@ export function FitnessOverviewView() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastWeight, setLastWeight] = useState<LastWeight | null>(null);
 
   // The board version we last reconciled to — a ref so the SSE callback always compares
   // against the freshest value (mirrors the other live views). Seeded to 0 so the SSE
@@ -215,40 +195,12 @@ export function FitnessOverviewView() {
 
   useLiveBoard(lastVersion, refetch);
 
-  // Initial seed from the client (no SSR props): the profile (via refetch, which also seeds
-  // lastVersion) and the latest weigh-in. Both are best-effort and independent.
+  // Initial seed from the client (no SSR props): the profile via refetch (which also seeds
+  // lastVersion). Current weight + the body goal live in the BODY add-on now (/body), not here.
   useEffect(() => {
-    const loadProfile = refetch();
-
-    // Source the current weight from the nutrition weigh-ins (the latest entry) — the old
-    // page queried a "body_mass" health type that is never produced. The weight route
-    // returns {weights} sorted ASCENDING by date, so the latest is the LAST element. When
-    // the nutrition add-on is off / has no weigh-ins, this leaves the field blank.
-    const loadWeight = fetch("/api/nutrition/weight")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const weights: { date: string; weightKg: number }[] = d?.weights ?? [];
-        if (weights.length > 0) {
-          const latest = weights[weights.length - 1];
-          if (typeof latest.weightKg === "number") {
-            setLastWeight({ kg: latest.weightKg, date: latest.date });
-          }
-        }
-      })
-      .catch(() => {});
-
-    Promise.all([loadProfile, loadWeight]).finally(() => setLoading(false));
+    refetch().finally(() => setLoading(false));
     // Mount-once seed (refetch closes over mount-time state, like useLiveBoard).
   }, []);
-
-  // Pre-fill currentWeightKg from the latest weigh-in if the profile has no weight yet.
-  useEffect(() => {
-    if (lastWeight && form.currentWeightKg == null) {
-      setForm((f) => ({ ...f, currentWeightKg: lastWeight.kg }));
-    }
-    // Only run when lastWeight arrives, not on every form change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastWeight]);
 
   // Save the profile through the typed fitness-client (it throws on a non-2xx with the
   // API's error text). On success adopt the canonical profile + advance lastVersion to the
@@ -348,7 +300,7 @@ export function FitnessOverviewView() {
         <div className="p-5 space-y-5">
           {/* Row 1: Goal + Goal date */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Primary goal">
+            <Field label="Training focus">
               <select
                 value={form.goal}
                 onChange={(e) =>
@@ -362,6 +314,10 @@ export function FitnessOverviewView() {
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-[11px] text-ink-400">
+                Your sport/event focus. Your body goal (fat loss, muscle, recomp) lives in{" "}
+                <a href="/body" className="underline hover:text-ink-600">Body</a>.
+              </p>
             </Field>
             <Field label="Goal date">
               <input
@@ -375,23 +331,9 @@ export function FitnessOverviewView() {
             </Field>
           </div>
 
-          {/* Row 2: Level + Days per week + Max session */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Field label="Level">
-              <select
-                value={form.level}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, level: e.target.value }))
-                }
-                className={INPUT_CLASS}
-              >
-                {LEVELS.map((l) => (
-                  <option key={l.value} value={l.value}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
+          {/* Row 2: training availability (days/week + max session). Experience LEVEL moved to the
+              body add-on's trainingStatus (v14). */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Days / week">
               <input
                 type="number"
@@ -429,50 +371,11 @@ export function FitnessOverviewView() {
             </Field>
           </div>
 
-          {/* Row 3: Weight current + target */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Current weight (kg)">
-              <input
-                type="number"
-                step={0.1}
-                min={0}
-                value={form.currentWeightKg ?? ""}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    currentWeightKg: e.target.value
-                      ? Number(e.target.value)
-                      : null,
-                  }))
-                }
-                placeholder="75"
-                className={INPUT_CLASS}
-              />
-              {lastWeight && (
-                <p className="mt-1 text-[11px] text-ink-400">
-                  Latest weigh-in: {lastWeight.kg} kg on {formatDay(lastWeight.date)}
-                </p>
-              )}
-            </Field>
-            <Field label="Target weight (kg, optional)">
-              <input
-                type="number"
-                step={0.1}
-                min={0}
-                value={form.targetWeightKg ?? ""}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    targetWeightKg: e.target.value
-                      ? Number(e.target.value)
-                      : null,
-                  }))
-                }
-                placeholder="70"
-                className={INPUT_CLASS}
-              />
-            </Field>
-          </div>
+          {/* Weight, body composition, and the body goal moved to the Body add-on (v14). */}
+          <p className="text-[12px] text-ink-500 rounded-lg border border-ink-100 bg-ink-50/40 px-3 py-2">
+            Your weight, body composition, and body goal now live in{" "}
+            <a href="/body" className="underline hover:text-ink-700">Body</a> — this profile is your training focus + availability.
+          </p>
 
           {/* Sports — grouped by category */}
           <Field label="Available sports">

@@ -4,11 +4,9 @@ import { readDB } from "@/lib/store";
 import { storeErrorToResponse, isISODate } from "@/lib/route-helpers";
 import {
   VALID_ATHLETE_GOAL,
-  VALID_ATHLETE_LEVEL,
   VALID_ATHLETE_SPORT,
   VALID_ATHLETE_EQUIPMENT,
   type AthleteGoal,
-  type AthleteLevel,
   type AthleteProfile,
 } from "@/lib/types";
 
@@ -44,12 +42,6 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  if (!VALID_ATHLETE_LEVEL.includes(body.level)) {
-    return NextResponse.json(
-      { error: `'level' must be one of: ${VALID_ATHLETE_LEVEL.join(", ")}.` },
-      { status: 400 },
-    );
-  }
   if ("goalDate" in body && body.goalDate !== "" && body.goalDate != null && !isISODate(body.goalDate)) {
     return NextResponse.json(
       { error: "'goalDate' must be YYYY-MM-DD or an empty string." },
@@ -67,9 +59,6 @@ export async function POST(req: NextRequest) {
   const input: Omit<AthleteProfile, "createdAt" | "updatedAt"> = {
     goal: body.goal as AthleteGoal,
     goalDate: isISODate(body.goalDate) ? body.goalDate : "",
-    level: body.level as AthleteLevel,
-    currentWeightKg: posNumOrNull(body.currentWeightKg),
-    targetWeightKg: posNumOrNull(body.targetWeightKg),
     daysPerWeek: posIntOrNull(body.daysPerWeek, 1, 7),
     maxSessionMinutes: posNumOrNull(body.maxSessionMinutes) != null ? Math.round(body.maxSessionMinutes) : null,
     sports,
