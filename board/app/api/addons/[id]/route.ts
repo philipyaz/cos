@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { mutate, NotFoundError } from "@/lib/store";
-import { getAddon } from "@/lib/addons";
+import { mutate, NotFoundError, VersionConflictError } from "@/lib/store";
+import { getAddon, listAddons } from "@/lib/addons";
 import { resolveActor, storeErrorToResponse } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
@@ -40,11 +40,46 @@ export async function PATCH(
       // settings object — autoSync defaults off, the conservative router-off default).
       db.settings ??= { autoSync: false };
       db.settings.addons ??= {};
+
+      // PROVIDER-DISABLE GUARD (v14): refuse to turn OFF an add-on while a hard (required)
+      // consumer is still enabled — that would leave the consumer pointing at a disabled
+      // provider. The user must disable the consumer first (→ 409). This makes the
+      // "consumer enabled ⇒ provider enabled" invariant enforced, not merely emergent.
+      if (!enabled) {
+        const blockers = listAddons().filter(
+          (a) =>
+            a.id !== id &&
+            (a.dependsOn ?? []).some((d) => d.id === id && d.required) &&
+            db.settings!.addons![a.id]?.enabled === true,
+        );
+        if (blockers.length) {
+          const names = blockers.map((b) => `"${b.id}"`).join(", ");
+          throw new VersionConflictError(
+            `Cannot disable "${id}" while ${names} ${blockers.length === 1 ? "is" : "are"} enabled (a hard dependency). Disable ${blockers.length === 1 ? "it" : "them"} first.`,
+          );
+        }
+      }
+
       const existing = db.settings.addons[id];
       db.settings.addons[id] = {
         enabled,
         installedAt: existing?.installedAt ?? now,
       };
+
+      // HARD AUTO-ENABLE CASCADE (v14): enabling a consumer flips its REQUIRED providers ON in
+      // the SAME atomic write (so the gate never trips for a live consumer). We do NOT
+      // auto-DISABLE on consumer-off (a sibling consumer or the user may still want the provider).
+      if (enabled) {
+        for (const dep of getAddon(id)?.dependsOn ?? []) {
+          if (!dep.required) continue;
+          if (db.settings.addons[dep.id]?.enabled === true) continue; // already on — keep installedAt
+          db.settings.addons[dep.id] = {
+            enabled: true,
+            installedAt: db.settings.addons[dep.id]?.installedAt ?? now,
+          };
+        }
+      }
+
       return { addon: { id, enabled }, version: db.version };
     });
     return NextResponse.json({ addon, version });

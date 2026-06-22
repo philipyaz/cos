@@ -36,7 +36,7 @@ const VALID_LABEL_COLORS = new Set([
   "sky", "blue", "indigo", "violet", "fuchsia", "pink",
 ]); // labels — kept in lockstep with board/lib/types.ts VALID_LABEL_COLORS
 const VALID_REMINDER_STATUS = new Set(["open", "done", "dismissed"]); // reminders (v5) — board/lib/types.ts VALID_REMINDER_STATUS
-const SCHEMA_VERSION = 13; // board/lib/types.ts SCHEMA_VERSION (v11 unanswered-messages; v12 fitness data db.healthEntries/db.athleteProfile; v13 fitness coaching db.coachingArtifacts; additive optional, older files read unchanged)
+const SCHEMA_VERSION = 14; // board/lib/types.ts SCHEMA_VERSION (v12 fitness data; v13 fitness coaching; v14 "body" add-on db.bodyProfile/db.bodyObjective + nutrition db.dietProfile/db.nutritionTargets, db.weights re-homed to body, db.nutritionGoal dropped on next write)
 const REMINDER_TASK_ID_RE = (reminderId) =>
   new RegExp(`^${reminderId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-T\\d+$`); // reminder task ids (v6): REM-<n>-T<k>
 const CASE_ID_RE = /^CASE-\d+$/;

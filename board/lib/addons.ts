@@ -34,12 +34,51 @@ export interface AddonManifest {
   // READS another add-on's core-store data and works BETTER with it, but degrades
   // gracefully without it — the catalog surfaces it as "works better with <X>", and the
   // runtime read posture is unchanged (reads stay open; a missing dependency just defaults
-  // to empty). It does NOT auto-enable or hard-gate. A HARD edge (`required: true`) is
-  // reserved for a future case where the dependent is genuinely useless alone. The reads
-  // are NEVER gated on the dependency's isAddonEnabled (that would hide frozen-but-readable
-  // data, violating the "reads stay open" contract).
+  // to empty). It does NOT auto-enable or hard-gate. A HARD edge (`required: true`) means
+  // the dependent genuinely cannot stand alone: enabling this add-on AUTO-ENABLES its hard
+  // providers in the SAME settings write (the cascade in /api/addons/[id]), and a provider
+  // refuses to be disabled while a hard consumer is on (the 409 guard). v14 uses this so the
+  // foundational "body" add-on (the single owner of body identity) is always present whenever
+  // nutrition or fitness is on. The reads are STILL never gated on the dependency's
+  // isAddonEnabled (frozen-but-readable data stays viewable — the "reads stay open" contract).
   dependsOn?: { id: string; required: boolean }[];
 }
+
+// The foundational add-on: Body. The SINGLE OWNER of body identity (db.bodyProfile — sex/DOB/
+// height/trainingStatus/resistanceTrains), the weight + body-composition series (db.weights,
+// re-homed off nutrition), and the user's objective (db.bodyObjective — a FREE-TEXT goal + a
+// target-weight anchor, NOT a picker). It exists to kill the old triple-duplication of weight/
+// target/objective across nutrition + fitness, which both now READ it cross-add-on. It HARD
+// auto-enables under either consumer (see the cascade in /api/addons/[id]). Its db ARRAY is
+// db.weights; the two singletons (bodyProfile/bodyObjective) are bare objects, deliberately
+// omitted from dataArrays (like nutrition's nutritionGoal / fitness's athleteProfile). Its
+// status route serves the deterministic physiology BASELINE (BMR/TDEE/BMI/trend) — never a
+// recommendation; the recommendation is the agent's job (the nutrition targets artifact).
+const BODY_ADDON: AddonManifest = {
+  id: "body",
+  title: "Body",
+  description: "Your body identity, weight & body-composition history, and your objective — shared by Nutrition & Fitness.",
+  icon: "IconScale",
+  navItems: [{ href: "/body", label: "Body", icon: "IconScale" }],
+  apiPrefixes: ["/api/body"],
+  dataArrays: ["weights"], // the two singletons (bodyProfile/bodyObjective) are bare objects → omitted
+  mcp: {
+    server: "body",
+    bridgePortVar: "BODY_BRIDGE_PORT",
+    defaultPort: 8012,
+    setupSkill: "body-mcp-setup",
+    tools: [
+      "get_body_profile",
+      "set_body_profile",
+      "get_body_objective",
+      "set_body_objective",
+      "log_weight",
+      "list_weights",
+      "delete_weight",
+      "get_body_status",
+    ],
+  },
+};
 
 // The first add-on: Nutrition & Chef. It ships four verticals end-to-end — the food log,
 // the pantry, the meal plan, and (v10) the weight-loss vertical — each contributing its
@@ -58,9 +97,13 @@ const NUTRITION_ADDON: AddonManifest = {
     { href: "/nutrition/plan", label: "Meal Plan", icon: "IconMealPlan" },
   ],
   apiPrefixes: ["/api/nutrition"],
-  // Owned db ARRAYS only. db.nutritionGoal (the v10 goal/profile singleton) is a bare
-  // object, not an array, so it is deliberately omitted here.
-  dataArrays: ["foodLogs", "pantryItems", "mealPlanEntries", "weights"],
+  // Owned db ARRAYS only. db.dietProfile (v14 dietary singleton) is a bare object, not an array,
+  // so it is omitted here (like the old nutritionGoal). db.weights is RE-HOMED to the "body"
+  // add-on (v14). db.nutritionTargets (v14) is the agent-authored daily-targets feed.
+  dataArrays: ["foodLogs", "pantryItems", "mealPlanEntries", "nutritionTargets"],
+  // HARD-depends on "body": nutrition reads body identity/weight/objective and is meaningless
+  // without it, so enabling nutrition auto-enables body (the cascade in /api/addons/[id]).
+  dependsOn: [{ id: "body", required: true }],
   mcp: {
     server: "nutrition",
     bridgePortVar: "NUTRITION_BRIDGE_PORT",
@@ -81,11 +124,21 @@ const NUTRITION_ADDON: AddonManifest = {
       "get_meal_plan",
       "update_meal_plan",
       "remove_meal_plan",
+      // v14 dietary profile (the ONE dietary endpoint: allergies/dietType/notes/philosophy).
+      "get_diet_profile",
+      "set_diet_profile",
+      // v14 AGENT-authored daily nutrition targets (gated writes; ungated reads) — replaces the
+      // old engine-computed get_nutrition_targets, which is re-pointed at the latest artifact.
+      "save_nutrition_targets",
+      "list_nutrition_targets",
+      "get_nutrition_targets",
+      // ── Removed in Phase 2 (hard-cut): log_weight, list_weights (→ body), get_nutrition_goal,
+      // set_nutrition_goal (→ body objective). Kept in the manifest while the server still exposes
+      // them so the gate test's "manifest ⊇ server tools" invariant holds during the cutover.
       "log_weight",
       "list_weights",
       "get_nutrition_goal",
       "set_nutrition_goal",
-      "get_nutrition_targets",
     ],
   },
 };
@@ -121,7 +174,9 @@ const FITNESS_ADDON: AddonManifest = {
   // v13 db.coachingArtifacts array holds the FOUR stateful AI coaching surfaces (training
   // plan / weekly review / pre-workout brief / correlations), upserted by (kind, periodKey).
   dataArrays: ["healthEntries", "coachingArtifacts"],
-  dependsOn: [{ id: "nutrition", required: false }],
+  // HARD-depends on "body" (reads training-status/weight/objective cross-add-on) → enabling
+  // fitness auto-enables body. SOFT-depends on nutrition (folds food logs into coaching context).
+  dependsOn: [{ id: "body", required: true }, { id: "nutrition", required: false }],
   mcp: {
     server: "fitness",
     bridgePortVar: "FITNESS_BRIDGE_PORT",
@@ -155,8 +210,9 @@ const FITNESS_ADDON: AddonManifest = {
   },
 };
 
-// The static add-on registry — one entry per add-on. Order is the catalog/display order.
-export const ADDON_REGISTRY: AddonManifest[] = [NUTRITION_ADDON, FITNESS_ADDON];
+// The static add-on registry — one entry per add-on. Order is the catalog/display order
+// (provider "body" first, then its consumers).
+export const ADDON_REGISTRY: AddonManifest[] = [BODY_ADDON, NUTRITION_ADDON, FITNESS_ADDON];
 
 // Every known add-on (the full registry).
 export function listAddons(): AddonManifest[] {
