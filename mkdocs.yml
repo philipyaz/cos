@@ -138,6 +138,7 @@ nav:
       - Reminders: features/reminders.md
       - Priorities: features/priorities.md
       - Activity: features/activity.md
+      - Body: features/body.md
       - Nutrition & Chef: features/nutrition.md
       - Fitness: features/fitness.md
   - Subsystems:
