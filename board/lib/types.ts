@@ -438,24 +438,10 @@ export interface WeightEntry {
   updatedAt: string;
 }
 
-// The user's weight-loss goal + body profile — a SINGLETON (db.nutritionGoal, NOT an
-// array): there is exactly one current goal at a time, so it lives as a bare object keyed
-// by nothing (set/replace, never minted with an id). It supplies the physiological inputs
-// the targets engine needs (sex/age/heightCm/activity feed BMR→TDEE) plus the user's
-// chosen target weight + loss rate. `rateKgPerWeek` is the DESIRED loss rate (default 0.5);
-// the engine CLAMPS it by safety guardrails (≤1%/wk, ≤1.0 kg/wk) before deriving a deficit.
-// `weightUnit` is a DISPLAY/entry preference only — storage stays kilograms regardless.
-export interface NutritionGoal {
-  sex: BiologicalSex; // BMR sex constant input
-  age: number; // years — BMR input
-  heightCm: number; // centimetres — BMR + BMI input
-  activity: ActivityLevel; // TDEE activity multiplier (see ACTIVITY_FACTOR)
-  targetWeightKg: number; // the goal weight (canonical kg)
-  rateKgPerWeek: number; // desired loss rate; default 0.5; clamped by the engine guardrails
-  weightUnit?: "kg" | "lb"; // DISPLAY/entry preference only (storage stays kg). default "kg"
-  createdAt: string;
-  updatedAt: string;
-}
+// NOTE (v14 hard-cut): the legacy `NutritionGoal` SINGLETON is REMOVED. Body identity
+// (db.bodyProfile) + the free-text objective (db.bodyObjective) replace it. The v14 migration
+// still reads a legacy on-disk nutritionGoal (as a bare object) to synthesize those two, then
+// drops it on the next write — but it is no longer a typed, served, or written shape.
 
 // ── Fitness add-on records (v12) ──────────────────────────────────────────────
 // The "fitness" add-on stores its data in the CORE store (cases.json) alongside the
@@ -994,7 +980,6 @@ export interface DBShape {
   pantryItems?: PantryItem[]; // Nutrition & Chef pantry items (v9); owned by the "nutrition" add-on
   mealPlanEntries?: MealPlanEntry[]; // Nutrition & Chef meal-plan entries (v9); owned by the "nutrition" add-on
   weights?: WeightEntry[]; // Weigh-in + body-composition time-series; RE-HOMED to the "body" add-on (v14; was "nutrition" in v10)
-  nutritionGoal?: NutritionGoal; // LEGACY Nutrition goal SINGLETON (v10); read-only source for the v14 migration, then dropped (removed Phase 2)
   bodyProfile?: BodyProfile; // Body identity SINGLETON (v14); owned by the "body" add-on (NOT an array)
   bodyObjective?: BodyObjective; // Body objective SINGLETON (v14) — free-text goal + target anchor; owned by the "body" add-on (NOT an array)
   dietProfile?: DietProfile; // Dietary profile SINGLETON (v14) — allergies/dietType/notes/philosophy; owned by the "nutrition" add-on (NOT an array)

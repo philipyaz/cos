@@ -17,7 +17,6 @@ import type {
   PantryItem,
   MealPlanEntry,
   WeightEntry,
-  NutritionGoal,
   ActivityLevel,
   BiologicalSex,
   AthleteProfile,
@@ -971,60 +970,10 @@ export function applyWeightUpdate(rec: WeightEntry, patch: Record<string, unknow
   return rec;
 }
 
-// Read the goal/profile SINGLETON, or undefined when none is set yet.
-export function getNutritionGoal(db: DBShape): NutritionGoal | undefined {
-  return db.nutritionGoal;
-}
-
-// Create-or-replace the goal SINGLETON (the PUT path). The caller passes already-
-// validated/coerced fields (the route enforces the enums + required numerics). createdAt
-// is PRESERVED across a replace (first-set time is sticky, like the other records);
-// updatedAt is always bumped. Optional rateKgPerWeek/weightUnit fall back to their
-// defaults (0.5 / "kg") when absent so the stored singleton is always complete.
-export function setNutritionGoal(
-  db: DBShape,
-  input: {
-    sex: BiologicalSex;
-    age: number;
-    heightCm: number;
-    activity: ActivityLevel;
-    targetWeightKg: number;
-    rateKgPerWeek?: number;
-    weightUnit?: "kg" | "lb";
-  },
-): NutritionGoal {
-  const now = nowISO();
-  const goal: NutritionGoal = {
-    sex: input.sex,
-    age: input.age,
-    heightCm: input.heightCm,
-    activity: input.activity,
-    targetWeightKg: input.targetWeightKg,
-    rateKgPerWeek: typeof input.rateKgPerWeek === "number" && Number.isFinite(input.rateKgPerWeek) ? input.rateKgPerWeek : 0.5,
-    weightUnit: input.weightUnit === "lb" ? "lb" : "kg",
-    createdAt: db.nutritionGoal?.createdAt ?? now, // sticky first-set time across replaces
-    updatedAt: now,
-  };
-  db.nutritionGoal = goal;
-  return goal;
-}
-
-// Merge a partial patch onto the EXISTING goal singleton (the PATCH path; the route
-// 404s when no goal is set yet). The single un-validating coercive chokepoint for the
-// goal: enums are validated against their VALID_ arrays (out-of-enum ignored), required
-// numerics are only written when finite + positive (never blanked to a nonsense value),
-// and weightUnit accepts only "kg"|"lb". Identity (createdAt) is never changed.
-export function applyGoalPatch(goal: NutritionGoal, patch: Record<string, unknown>): NutritionGoal {
-  if ("sex" in patch && VALID_BIOLOGICAL_SEX.includes(patch.sex as BiologicalSex)) goal.sex = patch.sex as BiologicalSex;
-  if ("age" in patch && typeof patch.age === "number" && Number.isFinite(patch.age) && patch.age > 0) goal.age = patch.age;
-  if ("heightCm" in patch && typeof patch.heightCm === "number" && Number.isFinite(patch.heightCm) && patch.heightCm > 0) goal.heightCm = patch.heightCm;
-  if ("activity" in patch && VALID_ACTIVITY_LEVEL.includes(patch.activity as ActivityLevel)) goal.activity = patch.activity as ActivityLevel;
-  if ("targetWeightKg" in patch && typeof patch.targetWeightKg === "number" && Number.isFinite(patch.targetWeightKg) && patch.targetWeightKg > 0) goal.targetWeightKg = patch.targetWeightKg;
-  if ("rateKgPerWeek" in patch && typeof patch.rateKgPerWeek === "number" && Number.isFinite(patch.rateKgPerWeek) && patch.rateKgPerWeek > 0) goal.rateKgPerWeek = patch.rateKgPerWeek;
-  if ("weightUnit" in patch && (patch.weightUnit === "kg" || patch.weightUnit === "lb")) goal.weightUnit = patch.weightUnit;
-  goal.updatedAt = nowISO();
-  return goal;
-}
+// NOTE (v14 hard-cut): getNutritionGoal / setNutritionGoal / applyGoalPatch are REMOVED. The legacy
+// db.nutritionGoal is no longer a live concept — body identity + the free-text objective replace it
+// (see getBodyProfile / getBodyObjective below). migrate() still READS a legacy obj.nutritionGoal
+// (as a bare Record) to synthesize the v14 singletons, but nothing writes or serves it anymore.
 
 // ── Athlete profile singleton (v12; "fitness" add-on) ───────────────────────────
 // Read the athlete training-profile SINGLETON (db.athleteProfile), or undefined when none

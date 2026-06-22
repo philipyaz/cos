@@ -7,8 +7,7 @@
 // safe fetch+error path. Writes default to the "human" actor (no x-actor header), which
 // the routes resolve for attribution — exactly what we want for UI edits.
 
-import type { PantryItem, WeightEntry, NutritionGoal } from "./types";
-import type { NutritionTargets } from "./nutrition-targets";
+import type { PantryItem, NutritionTargetArtifact, DietProfile } from "./types";
 
 // Parse a JSON body, throwing the API's { error } text (or a status fallback) on a
 // non-ok response so the caller gets a meaningful message. Mirrors board-client.request.
@@ -71,76 +70,47 @@ export function deletePantryItem(id: string): Promise<PantryOkResponse> {
   return request(`/api/nutrition/pantry/${id}`, { method: "DELETE" });
 }
 
-// ── Weight-loss vertical (v10) ─────────────────────────────────────────────────
-// The same safe fetch+error path now fronts the weigh-in series, the goal singleton,
-// and the read-only targets envelope. Weigh-in/goal WRITES are GATED server-side
-// (disabled add-on → 404); the GET fetchers stay viewable on a disabled add-on (the
-// routes read ungated), so a cold-start panel can still surface what to set up.
-
-export interface WeightListResponse {
-  weights: WeightEntry[]; // sorted ASC by date (the engine + chart both expect ascending)
-  version: number;
-}
-export interface WeightEntryResponse {
-  entry: WeightEntry;
-  version: number;
-  created?: boolean; // POST /weight upsert: true when a new day was created, false on update
-}
-export interface WeightOkResponse {
-  ok: true;
-  version: number;
-}
-export interface GoalResponse {
-  goal: NutritionGoal | null; // null until the singleton is first PUT
-  version: number;
-}
-export interface TargetsResponse {
-  targets: NutritionTargets; // always resolvable (see computeNutritionTargets)
+// ── Dietary profile (v14) ───────────────────────────────────────────────────
+// The ONE dietary endpoint: allergies (SAFETY) / dietType / notes + the "views on diet"
+// philosophy (GET returns the shipped default when the user's is empty). PUT = full replace
+// (the drawer Save); PATCH = present-keys merge. Writes GATED server-side (disabled → 404).
+export interface DietProfileResponse {
+  profile: DietProfile; // always resolvable (the effective profile, default philosophy injected)
   version: number;
 }
 
-// GET /api/nutrition/weight?from=&to= — the weigh-in series, ASC by date. The half-open
-// [from, to) window is optional; omit both for the full series. Ungated (viewable when
-// the add-on is disabled). Used to seed the weight-vs-intake chart + the trend.
-export function listWeights(from?: string, to?: string): Promise<WeightListResponse> {
+export function getDietProfile(): Promise<DietProfileResponse> {
+  return request("/api/nutrition/diet-profile");
+}
+
+// PUT — full replace (the drawer Save).
+export function setDietProfile(input: Record<string, unknown>): Promise<DietProfileResponse> {
+  return request("/api/nutrition/diet-profile", { method: "PUT", body: JSON.stringify(input) });
+}
+
+// ── Agent-authored daily targets (v14) ──────────────────────────────────────
+// The board NEVER computes targets — the agent authors them and POSTs them; the UI READS the
+// latest artifact and renders it. Refetched on each SSE bump so the panel reflects new targets.
+export interface NutritionTargetLatestResponse {
+  artifact: NutritionTargetArtifact | null;
+  version: number;
+}
+export interface NutritionTargetFeedResponse {
+  items: NutritionTargetArtifact[]; // newest first
+  total: number;
+  version: number;
+}
+
+// GET /api/nutrition/targets?latest=daily_targets — the most recent authored daily target.
+export function getLatestNutritionTarget(): Promise<NutritionTargetLatestResponse> {
+  return request("/api/nutrition/targets?latest=daily_targets");
+}
+
+// GET /api/nutrition/targets[?from=&to=] — the history feed (newest first).
+export function listNutritionTargets(from?: string, to?: string): Promise<NutritionTargetFeedResponse> {
   const qs = new URLSearchParams();
   if (from) qs.set("from", from);
   if (to) qs.set("to", to);
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return request(`/api/nutrition/weight${suffix}`);
-}
-
-// POST /api/nutrition/weight — UPSERT BY DAY (the single add-or-update endpoint). The
-// route stores canonical kg, so the caller passes weightKg (already lb→kg converted).
-// GATED server-side (disabled add-on → 404).
-export function upsertWeight(input: {
-  date: string;
-  weightKg: number;
-  note?: string;
-}): Promise<WeightEntryResponse> {
-  return request("/api/nutrition/weight", { method: "POST", body: JSON.stringify(input) });
-}
-
-// DELETE /api/nutrition/weight/[id] — hard-remove a single weigh-in (no soft-archive;
-// callers confirm first). GATED server-side (disabled add-on → 404).
-export function deleteWeight(id: string): Promise<WeightOkResponse> {
-  return request(`/api/nutrition/weight/${id}`, { method: "DELETE" });
-}
-
-// GET /api/nutrition/goal — the goal/profile singleton (null until first set). Ungated.
-export function getGoal(): Promise<GoalResponse> {
-  return request("/api/nutrition/goal");
-}
-
-// PUT /api/nutrition/goal — upsert the singleton (create-or-replace). GATED server-side
-// (disabled add-on → 404). The route validates enums/numerics + defaults rate/unit.
-export function setGoal(input: Record<string, unknown>): Promise<GoalResponse> {
-  return request("/api/nutrition/goal", { method: "PUT", body: JSON.stringify(input) });
-}
-
-// GET /api/nutrition/targets — the render-ready targets envelope (computed server-side
-// over the goal/weights/foodLogs at the request-time clock). Ungated. Refetched on each
-// SSE bump so the panel reflects every food-log / weigh-in / goal write.
-export function getTargets(): Promise<TargetsResponse> {
-  return request("/api/nutrition/targets");
+  return request(`/api/nutrition/targets${suffix}`);
 }

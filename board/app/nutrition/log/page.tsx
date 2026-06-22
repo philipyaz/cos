@@ -1,40 +1,38 @@
 import { notFound } from "next/navigation";
 import { readDB } from "@/lib/store";
 import { isAddonEnabled } from "@/lib/addons";
-import { computeNutritionTargets } from "@/lib/nutrition-targets";
+import { bodyBaseline } from "@/lib/body-baseline";
 import { toISODay } from "@/lib/nutrition-format";
 import { TopBar } from "@/components/topbar";
 import { FoodLogView } from "@/components/nutrition/food-log-view";
 
-// The Food Log surface — the Phase-1 vertical of the Nutrition & Chef add-on. A server
-// component (like the Reminders page) that SSR-seeds the interactive client view, then
-// leaves it to refetch live off the SSE stream. The food-log data lives in the CORE
-// store (db.foodLogs), but it is an OPTIONAL add-on: this page is GATED — when the
-// "nutrition" add-on is disabled it 404s (notFound), so a disabled add-on has no
-// reachable surface even though its data stays on disk + readable via the API.
+// The Food Log surface — the Nutrition & Chef add-on's headline read. A server component that
+// SSR-seeds the interactive client view (then it refetches live off the SSE stream). GATED — a
+// disabled "nutrition" add-on 404s (notFound), so it has no reachable surface even though its
+// data stays readable via the API.
 export const dynamic = "force-dynamic";
 
 export default async function FoodLogPage() {
   const db = await readDB();
-  // Gate the surface on the add-on flag. The WRITE routes gate inside mutate() (a
-  // disabled add-on refuses new entries), and the nav group hides when disabled — but a
-  // hand-typed /nutrition/log must also 404, so the disabled add-on is fully dormant.
   if (!isAddonEnabled(db, "nutrition")) notFound();
 
-  // ONE request-time clock: an ISO instant the client parses (to mark "Today"), and the
-  // local calendar day the engine projects against (the engine itself is clockless — we
-  // pass `today` in). Both come from the SAME new Date() so they can't disagree.
+  // ONE request-time clock: an ISO instant the client parses (to mark "Today") + the local
+  // calendar day the pure body-baseline projects against (it takes `today` as a string).
   const clock = new Date();
   const now = clock.toISOString();
   const today = toISODay(clock);
 
-  // The weight-loss vertical's SSR seed. The targets engine is pure + always resolvable, so
-  // we compute the envelope here over the goal/weights/foodLogs and hand it to the view (the
-  // panel then refetches /api/nutrition/targets live on each SSE bump). nutritionGoal is a
-  // SINGLETON object (not an array); default a missing goal to null.
-  const goal = db.nutritionGoal ?? null;
+  // The v14 ObjectivePanel's SSR seed: the free-text objective, the deterministic physiology
+  // baseline (facts only — NOT a recommendation), the weight series, and the latest AGENT-AUTHORED
+  // daily-targets artifact (the board never computes targets; the agent authors them).
+  const profile = db.bodyProfile ?? null;
+  const objective = db.bodyObjective ?? null;
   const weights = db.weights ?? [];
-  const targets = computeNutritionTargets({ goal, weights, foodLogs: db.foodLogs ?? [], today });
+  const baseline = bodyBaseline({ profile, objective, weights, foodLogs: db.foodLogs ?? [], today });
+  const latestTarget =
+    [...(db.nutritionTargets ?? [])]
+      .filter((a) => a.kind === "daily_targets")
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))[0] ?? null;
 
   return (
     <>
@@ -43,9 +41,12 @@ export default async function FoodLogPage() {
         now={now}
         entries={db.foodLogs ?? []}
         version={db.version}
-        goal={goal}
+        objective={objective}
+        baseline={baseline}
+        latestTarget={latestTarget}
         weights={weights}
-        targets={targets}
+        unit={profile?.weightUnit ?? "kg"}
+        sex={profile?.sex}
       />
     </>
   );

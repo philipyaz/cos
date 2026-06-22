@@ -132,13 +132,8 @@ const NUTRITION_ADDON: AddonManifest = {
       "save_nutrition_targets",
       "list_nutrition_targets",
       "get_nutrition_targets",
-      // ── Removed in Phase 2 (hard-cut): log_weight, list_weights (→ body), get_nutrition_goal,
-      // set_nutrition_goal (→ body objective). Kept in the manifest while the server still exposes
-      // them so the gate test's "manifest ⊇ server tools" invariant holds during the cutover.
-      "log_weight",
-      "list_weights",
-      "get_nutrition_goal",
-      "set_nutrition_goal",
+      // (v14 hard-cut: log_weight/list_weights moved to the body add-on; get/set_nutrition_goal
+      //  removed — the free-text body objective replaces the goal singleton.)
     ],
   },
 };

@@ -420,92 +420,6 @@ const REMOVE_MEAL_PLAN_TOOL = {
   },
 };
 
-// ── Weight-loss tool definitions (OUR weight/goal/targets model field names exactly) ──
-
-const LOG_WEIGHT_TOOL = {
-  name: "log_weight",
-  description:
-    "Record a weigh-in — `POST /api/nutrition/weight`. " +
-    ADDON_GUARDRAIL +
-    " UPSERTS BY DAY: at most ONE weigh-in per `date` ('YYYY-MM-DD') — logging the same day " +
-    "again UPDATES that entry rather than adding a second. Give the weight EXACTLY ONE way: " +
-    "`weightKg` (kilograms) OR `weightLb` (pounds) — pounds are converted to kg server-side " +
-    "(storage is always kilograms). Optional `note`. Returns the WEIGHT-id and whether the " +
-    "entry was created (201) or an existing day updated (200).",
-  inputSchema: {
-    type: "object",
-    properties: {
-      date: { type: "string", description: "Calendar day of the weigh-in, as 'YYYY-MM-DD' (the upsert key — one entry per day)." },
-      weightKg: { type: "number", description: "Weight in kilograms. Give EITHER this OR weightLb, not both." },
-      weightLb: { type: "number", description: "Weight in pounds (converted to kg server-side). Give EITHER this OR weightKg, not both." },
-      note: { type: "string", description: "Optional freeform note (e.g. 'post-holiday', 'morning, fasted')." },
-    },
-    required: ["date"],
-  },
-};
-
-const LIST_WEIGHTS_TOOL = {
-  name: "list_weights",
-  description:
-    "List weigh-ins — `GET /api/nutrition/weight`. Read-only (works even if the add-on is " +
-    "disabled). Filter by a half-open day window with `from` (inclusive) / `to` (exclusive) as " +
-    "'YYYY-MM-DD'. With no filters, returns ALL weigh-ins. Renders one line per day in date " +
-    "order (oldest first, newest last) and the smoothed current trend at the foot.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      from: { type: "string", description: "Window start (inclusive), 'YYYY-MM-DD'." },
-      to: { type: "string", description: "Window end (exclusive), 'YYYY-MM-DD'." },
-    },
-  },
-};
-
-const GET_NUTRITION_GOAL_TOOL = {
-  name: "get_nutrition_goal",
-  description:
-    "Fetch the weight-loss goal / body profile SINGLETON — `GET /api/nutrition/goal`. Read-only " +
-    "(works even if the add-on is disabled). Renders sex, age, height, activity level, target " +
-    "weight, desired loss rate, and the weight-unit preference. Returns 'not set' when no goal " +
-    "has been configured yet (set one with `set_nutrition_goal`).",
-  inputSchema: { type: "object", properties: {} },
-};
-
-const SET_NUTRITION_GOAL_TOOL = {
-  name: "set_nutrition_goal",
-  description:
-    "Set (create or replace) the weight-loss goal / body profile SINGLETON — `PUT /api/nutrition/goal`. " +
-    ADDON_GUARDRAIL +
-    " Required: `sex` (male|female), `age` (years, >0), `heightCm` (>0), `activity` " +
-    "(sedentary|light|moderate|very_active|extra_active), and `targetWeightKg` (>0). Optional: " +
-    "`rateKgPerWeek` (DESIRED weekly loss, default 0.5 — the engine CLAMPS it for safety to " +
-    "≤1%/wk of body weight and ≤1.0 kg/wk) and `weightUnit` (kg|lb, a display/entry preference " +
-    "only — storage stays kilograms; default kg). There is exactly ONE goal — this replaces it.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      sex: { type: "string", enum: BIOLOGICAL_SEX, description: "Biological sex for the BMR equation: male | female." },
-      age: { type: "number", description: "Age in years (>0) — a BMR input." },
-      heightCm: { type: "number", description: "Height in centimetres (>0) — a BMR + BMI input." },
-      activity: {
-        type: "string",
-        enum: ACTIVITY_LEVEL,
-        description: "Activity level (TDEE multiplier): sedentary | light | moderate | very_active | extra_active.",
-      },
-      targetWeightKg: { type: "number", description: "The goal weight in kilograms (>0)." },
-      rateKgPerWeek: {
-        type: "number",
-        description: "Desired weekly loss rate in kg (default 0.5). Clamped by safety guardrails (≤1%/wk, ≤1.0 kg/wk).",
-      },
-      weightUnit: {
-        type: "string",
-        enum: WEIGHT_UNIT,
-        description: "Display/entry unit preference: kg | lb (storage stays kg regardless). Default kg.",
-      },
-    },
-    required: ["sex", "age", "heightCm", "activity", "targetWeightKg"],
-  },
-};
-
 const GET_NUTRITION_TARGETS_TOOL = {
   name: "get_nutrition_targets",
   description:
@@ -597,8 +511,6 @@ const TOOLS = [
   READ_PANTRY_TOOL,
   LIST_MEAL_PLAN_TOOL,
   GET_MEAL_PLAN_TOOL,
-  LIST_WEIGHTS_TOOL,
-  GET_NUTRITION_GOAL_TOOL,
   GET_NUTRITION_TARGETS_TOOL,
   GET_DIET_PROFILE_TOOL,
   LIST_NUTRITION_TARGETS_TOOL,
@@ -614,9 +526,6 @@ const TOOLS = [
   PLAN_MEAL_TOOL,
   UPDATE_MEAL_PLAN_TOOL,
   REMOVE_MEAL_PLAN_TOOL,
-  // weight-loss lifecycle
-  LOG_WEIGHT_TOOL,
-  SET_NUTRITION_GOAL_TOOL,
   // v14 dietary profile + agent-authored targets
   SET_DIET_PROFILE_TOOL,
   SAVE_NUTRITION_TARGETS_TOOL,
@@ -1166,155 +1075,6 @@ async function handleRemoveMealPlan(args) {
   return text(`Removed ${id} from the meal plan (no soft-archive; hard-removed).`);
 }
 
-// ── Weight-loss tools ──────────────────────────────────────────────────────────
-
-// One-line render of a weigh-in. Weight is canonical kg (with one decimal) plus a pounds
-// twin for the reader, since people often think in pounds even when storage is kg.
-function weightLine(w) {
-  return `  - ${w.date}  ${w.weightKg.toFixed(1)} kg (${kgToLb(w.weightKg)})${w.note ? `  — ${w.note}` : ""}`;
-}
-
-async function handleLogWeight(args) {
-  if (!isISODate(args.date)) {
-    return err("'date' is required as 'YYYY-MM-DD'.");
-  }
-  // Require EXACTLY ONE of weightKg / weightLb — ambiguous or missing weight is a hard error
-  // (the route stores canonical kg; we just forward whichever unit the caller gave).
-  const hasKg = args.weightKg !== undefined;
-  const hasLb = args.weightLb !== undefined;
-  if (hasKg && hasLb) {
-    return err("Give EXACTLY ONE of 'weightKg' or 'weightLb', not both.");
-  }
-  if (!hasKg && !hasLb) {
-    return err("A weight is required: pass 'weightKg' (kilograms) or 'weightLb' (pounds).");
-  }
-  if (hasKg && (typeof args.weightKg !== "number" || !(args.weightKg > 0))) {
-    return err("'weightKg' must be a positive number.");
-  }
-  if (hasLb && (typeof args.weightLb !== "number" || !(args.weightLb > 0))) {
-    return err("'weightLb' must be a positive number.");
-  }
-
-  const payload = { date: args.date };
-  if (hasKg) payload.weightKg = args.weightKg;
-  if (hasLb) payload.weightLb = args.weightLb; // the route converts lb → kg
-  if (typeof args.note === "string" && args.note !== "") payload.note = args.note;
-
-  const { data, errorResult } = await api("POST", "/api/nutrition/weight", payload);
-  if (errorResult) return errorResult;
-
-  const w = data.entry;
-  const verb = data.created ? "Logged" : "Updated";
-  return text(
-    `${verb} ${w.id} — ${w.date}\n` +
-      `Weight: ${w.weightKg.toFixed(1)} kg (${kgToLb(w.weightKg)})${w.note ? `\nNote: ${w.note}` : ""}\n` +
-      `${data.created ? "Recorded a new weigh-in." : "Updated the existing weigh-in for that day."}`
-  );
-}
-
-async function handleListWeights(args) {
-  const sp = new URLSearchParams();
-  for (const k of ["from", "to"]) {
-    const v = str(args[k]);
-    if (v) sp.set(k, v);
-  }
-  const qs = sp.toString();
-
-  const { data, errorResult } = await api("GET", `/api/nutrition/weight${qs ? `?${qs}` : ""}`);
-  if (errorResult) return errorResult;
-
-  // The route already returns weights sorted ASC by date (oldest first); render as-is so the
-  // newest weigh-in is last, the natural reading order for a trend line.
-  const weights = data.weights ?? [];
-  const filters = qs ? ` (${qs.replace(/&/g, ", ")})` : "";
-  if (!weights.length) return text(`No weigh-ins${filters}.`);
-
-  const lines = [`Weigh-ins (${weights.length})${filters}:`];
-  for (const w of weights) lines.push(weightLine(w));
-
-  // The trend = the latest weight minus the first, plus the net delta over the window, so the
-  // reader sees the direction of travel without recomputing it. (The smoothed EWMA trend lives
-  // in get_nutrition_targets; here we report the raw first→last delta this window covers.)
-  const first = weights[0];
-  const last = weights[weights.length - 1];
-  if (weights.length >= 2) {
-    const delta = last.weightKg - first.weightKg;
-    const sign = delta > 0 ? "+" : "";
-    lines.push(
-      `Trend: ${first.weightKg.toFixed(1)} → ${last.weightKg.toFixed(1)} kg ` +
-        `(${sign}${delta.toFixed(1)} kg over ${weights.length} weigh-ins)`
-    );
-  }
-  return text(lines.join("\n"));
-}
-
-async function handleGetNutritionGoal() {
-  const { data, errorResult } = await api("GET", "/api/nutrition/goal");
-  if (errorResult) return errorResult;
-
-  const g = data.goal;
-  if (!g) {
-    return text("No nutrition goal set yet. Set one with set_nutrition_goal (sex, age, heightCm, activity, targetWeightKg).");
-  }
-  const unit = g.weightUnit ?? "kg";
-  const lines = [
-    "Nutrition goal:",
-    `Sex: ${g.sex}`,
-    `Age: ${g.age} years`,
-    `Height: ${g.heightCm} cm`,
-    `Activity: ${g.activity}`,
-    `Target weight: ${g.targetWeightKg} kg (${kgToLb(g.targetWeightKg)})`,
-    `Desired loss rate: ${g.rateKgPerWeek} kg/week (clamped for safety by the targets engine)`,
-    `Weight unit (display): ${unit}`,
-  ];
-  return text(lines.join("\n"));
-}
-
-async function handleSetNutritionGoal(args) {
-  if (typeof args.sex !== "string" || !BIOLOGICAL_SEX.includes(args.sex)) {
-    return err(`'sex' is required and must be one of: ${BIOLOGICAL_SEX.join(", ")}.`);
-  }
-  if (typeof args.age !== "number" || !(args.age > 0)) {
-    return err("'age' is required and must be a positive number (years).");
-  }
-  if (typeof args.heightCm !== "number" || !(args.heightCm > 0)) {
-    return err("'heightCm' is required and must be a positive number (centimetres).");
-  }
-  if (typeof args.activity !== "string" || !ACTIVITY_LEVEL.includes(args.activity)) {
-    return err(`'activity' is required and must be one of: ${ACTIVITY_LEVEL.join(", ")}.`);
-  }
-  if (typeof args.targetWeightKg !== "number" || !(args.targetWeightKg > 0)) {
-    return err("'targetWeightKg' is required and must be a positive number (kilograms).");
-  }
-  if (args.rateKgPerWeek !== undefined && (typeof args.rateKgPerWeek !== "number" || !(args.rateKgPerWeek > 0))) {
-    return err("'rateKgPerWeek' must be a positive number.");
-  }
-  if (args.weightUnit !== undefined && !WEIGHT_UNIT.includes(args.weightUnit)) {
-    return err(`'weightUnit' must be one of: ${WEIGHT_UNIT.join(", ")}.`);
-  }
-
-  const payload = {
-    sex: args.sex,
-    age: args.age,
-    heightCm: args.heightCm,
-    activity: args.activity,
-    targetWeightKg: args.targetWeightKg,
-  };
-  if (typeof args.rateKgPerWeek === "number") payload.rateKgPerWeek = args.rateKgPerWeek;
-  if (typeof args.weightUnit === "string") payload.weightUnit = args.weightUnit;
-
-  const { data, errorResult } = await api("PUT", "/api/nutrition/goal", payload);
-  if (errorResult) return errorResult;
-
-  const g = data.goal;
-  return text(
-    `Goal set.\n` +
-      `Sex: ${g.sex}  Age: ${g.age}  Height: ${g.heightCm} cm  Activity: ${g.activity}\n` +
-      `Target: ${g.targetWeightKg} kg  Rate: ${g.rateKgPerWeek} kg/week  Unit: ${g.weightUnit ?? "kg"}\n` +
-      `Run get_nutrition_targets to see your daily calorie + macro plan.`
-  );
-}
-
 // Render one target artifact's macros compactly (P.. F.. C..).
 function targetMacros(p) {
   return ["protein_g", "fat_g", "carbs_g"]
@@ -1441,10 +1201,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleListMealPlan(args);
     case "get_meal_plan":
       return handleGetMealPlan(args);
-    case "list_weights":
-      return handleListWeights(args);
-    case "get_nutrition_goal":
-      return handleGetNutritionGoal(args);
     case "get_nutrition_targets":
       return handleGetNutritionTargets(args);
     case "list_nutrition_targets":
@@ -1473,11 +1229,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "remove_meal_plan":
       return handleRemoveMealPlan(args);
     // weight-loss lifecycle
-    case "log_weight":
-      return handleLogWeight(args);
-    case "set_nutrition_goal":
-      return handleSetNutritionGoal(args);
-    // v14 dietary profile + agent-authored targets
     case "set_diet_profile":
       return handleSetDietProfile(args);
     case "save_nutrition_targets":

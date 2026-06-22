@@ -20,8 +20,7 @@ import type { PantryItem, PantryCategory, PantryLocation } from "@/lib/types";
 import { VALID_PANTRY_CATEGORY } from "@/lib/types";
 import { useLiveBoard } from "@/lib/use-live-board";
 import { deletePantryItem } from "@/lib/nutrition-client";
-import { toISODay, formatDay } from "@/lib/nutrition-format";
-import { addDays } from "@/lib/nutrition-targets";
+import { toISODay, formatDay, addDays } from "@/lib/nutrition-format";
 import { IconFridge, IconPlus, IconTrash, IconWarning } from "@/components/icons";
 import { PantryItemDrawer } from "./pantry-item-drawer";
 
