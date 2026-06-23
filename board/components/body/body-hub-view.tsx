@@ -6,18 +6,22 @@
 // (or the food-log drawer) updating the goal / targets / dietary profile reflects here without a reload.
 
 import { useMemo, useRef, useState } from "react";
-import type { BodyObjective, WeightEntry, NutritionTargetArtifact, DietProfile } from "@/lib/types";
+import type { BodyObjective, BodyProfile, WeightEntry, NutritionTargetArtifact, DietProfile } from "@/lib/types";
 import type { BodyBaseline } from "@/lib/body-baseline";
 import { useLiveBoard } from "@/lib/use-live-board";
 import { getBodyStatus, listWeights } from "@/lib/body-client";
 import { getLatestNutritionTarget, getDietProfile } from "@/lib/nutrition-client";
 import { toISODay } from "@/lib/nutrition-format";
 import { ObjectivePanel } from "@/components/nutrition/objective-panel";
-import { IconChef } from "@/components/icons";
+import { IconChef, IconScale } from "@/components/icons";
 import { DietProfileDrawer } from "./diet-profile-drawer";
+import { BodyProfileDrawer } from "./body-profile-drawer";
+
+const TRAINING_LABEL: Record<string, string> = { novice: "Novice", intermediate: "Intermediate", advanced: "Advanced" };
 
 export function BodyHubView({
   now,
+  profile: ip,
   objective: io,
   baseline: ib,
   latestTarget: il,
@@ -28,6 +32,7 @@ export function BodyHubView({
   version,
 }: {
   now: string;
+  profile: BodyProfile | null;
   objective: BodyObjective | null;
   baseline: BodyBaseline;
   latestTarget: NutritionTargetArtifact | null;
@@ -37,6 +42,7 @@ export function BodyHubView({
   dietProfile: DietProfile;
   version?: number;
 }) {
+  const [profile, setProfile] = useState(ip);
   const [objective, setObjective] = useState(io);
   const [baseline, setBaseline] = useState(ib);
   const [latestTarget, setLatestTarget] = useState(il);
@@ -45,6 +51,7 @@ export function BodyHubView({
   const [sex, setSex] = useState(isx);
   const [dietProfile, setDietProfile] = useState(idp);
   const [drawer, setDrawer] = useState(false);
+  const [identityDrawer, setIdentityDrawer] = useState(false);
   const lastVersion = useRef<number>(version ?? 0);
   const today = useMemo(() => toISODay(new Date(now)), [now]);
 
@@ -53,6 +60,7 @@ export function BodyHubView({
     if (s.status === "fulfilled") {
       setBaseline(s.value.baseline);
       setObjective(s.value.objective);
+      setProfile(s.value.profile);
       setUnit(s.value.profile?.weightUnit ?? "kg");
       setSex(s.value.profile?.sex);
       lastVersion.current = s.value.version;
@@ -71,6 +79,7 @@ export function BodyHubView({
       </div>
       <div className="flex-1 overflow-y-auto p-4">
         <div className="max-w-[760px] mx-auto space-y-6">
+          <IdentityCard profile={profile} ageYears={baseline.ageYears} unit={unit} onEdit={() => setIdentityDrawer(true)} />
           <ObjectivePanel
             objective={objective}
             baseline={baseline}
@@ -85,7 +94,40 @@ export function BodyHubView({
         </div>
       </div>
       {drawer && <DietProfileDrawer profile={dietProfile} onClose={() => setDrawer(false)} onSaved={refetch} />}
+      {identityDrawer && <BodyProfileDrawer profile={profile} onClose={() => setIdentityDrawer(false)} onSaved={refetch} />}
     </div>
+  );
+}
+
+// The identity card — sex · age (from DOB) · height · training status · whether you lift. The
+// single structured home for body identity (Nutrition + Fitness read it cross-add-on); editable here.
+function IdentityCard({ profile, ageYears, unit, onEdit }: { profile: BodyProfile | null; ageYears: number | null; unit: "kg" | "lb"; onEdit: () => void }) {
+  return (
+    <section className="rounded-lg border border-ink-100 bg-white shadow-card overflow-hidden">
+      <div className="px-3.5 py-2.5 flex items-center gap-2 border-b border-ink-50">
+        <IconScale className="w-4 h-4 shrink-0 text-ink-400" />
+        <span className="text-[13px] font-semibold text-ink-900">About you</span>
+        <button onClick={onEdit} className="ml-auto text-[11px] px-2 py-1 rounded-md border border-ink-200 text-ink-600 hover:text-ink-900 hover:bg-ink-50">
+          {profile ? "Edit" : "Set up"}
+        </button>
+      </div>
+      <div className="px-3.5 py-3">
+        {!profile ? (
+          <p className="text-[12px] text-ink-500">
+            Add your sex, date of birth, height, and training status — these feed your BMR/BMI and shape your nutrition + training plans.
+          </p>
+        ) : (
+          <div className="flex items-center gap-x-4 gap-y-1.5 flex-wrap text-[12px] text-ink-700 tabular-nums">
+            <span><span className="text-ink-400">Sex</span> {profile.sex === "male" ? "Male" : "Female"}</span>
+            <span><span className="text-ink-400">Age</span> {ageYears ?? "—"}</span>
+            <span><span className="text-ink-400">Height</span> {profile.heightCm} cm</span>
+            <span><span className="text-ink-400">Training</span> {TRAINING_LABEL[profile.trainingStatus] ?? profile.trainingStatus}</span>
+            <span><span className="text-ink-400">Lifts</span> {profile.resistanceTrains ? "yes" : "no"}</span>
+            <span><span className="text-ink-400">Units</span> {unit}</span>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

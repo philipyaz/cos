@@ -339,7 +339,11 @@ async function handleGetBodyStatus() {
   const { data, errorResult } = await api("GET", "/api/body/status");
   if (errorResult) return errorResult;
   const b = data.baseline;
+  const p = data.profile;
   const lines = ["Body status — physiology FACTS (not a recommendation):"];
+  if (p) {
+    lines.push(`Identity: ${p.sex}, height ${p.heightCm} cm, training status ${p.trainingStatus}, lifts ${p.resistanceTrains ? "yes" : "no"}.`);
+  }
   if (!b.configured) {
     const needs = (b.needs ?? []).join(", ");
     lines.push(`Not fully configured — still need: ${needs || "more data"}.`);

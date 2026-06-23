@@ -42,6 +42,7 @@ export default async function BodyPage() {
       <TopBar crumbs={["Cos", "Body"]} live />
       <BodyHubView
         now={now}
+        profile={profile}
         objective={objective}
         baseline={baseline}
         latestTarget={latestTarget}
