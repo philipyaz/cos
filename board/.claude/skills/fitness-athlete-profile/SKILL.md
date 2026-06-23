@@ -98,10 +98,10 @@ The board rejects anything outside these English enums and **silently drops** un
 ambiguous** rather than guessing.
 
 - **`goal`** ∈ **`VALID_ATHLETE_GOAL`** =
-  `["weight_loss", "sprint_triathlon", "olympic_triathlon", "cycling", "swimming", "running", "general_fitness"]`.
-  (`weight_loss` is a legacy training-focus value; the real body goal is the free-text **body objective** —
-  if the user wants to lose fat / build muscle, set that via `body-profile`, and pick the relevant
-  sport or `general_fitness` here.)
+  `["sprint_triathlon", "olympic_triathlon", "cycling", "swimming", "running", "general_fitness"]`.
+  This is the training FOCUS (sport/event). The body goal — lose fat / build muscle / recomp — is the
+  free-text **body objective**: set that via `body-profile` (`set_body_objective`), and pick the relevant
+  sport or `general_fitness` here. (There is no `weight_loss` value anymore; it was retired in v14.)
 - **`sports[]`** ⊆ **`VALID_ATHLETE_SPORT`** =
   `["cycling_outdoor", "cycling_indoor", "running", "walking", "swimming_pool", "swimming_open_water", "rowing", "skiing_alpine", "skiing_cross_country", "snowboard", "hiking", "climbing", "surfing", "kayaking", "strength_training", "hiit", "yoga", "pilates", "dance", "martial_arts", "boxing", "crossfit", "stretching", "tennis", "padel", "soccer", "basketball", "cycling_indoor_zwift"]`.
 - **`equipment[]`** ⊆ **`VALID_ATHLETE_EQUIPMENT`** =

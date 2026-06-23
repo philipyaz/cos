@@ -486,11 +486,13 @@ export interface HealthEntry {
 // The athlete training goal — drives the AI coach's plan/review. (English value domain;
 // the UI option lists and the route validator both import VALID_ATHLETE_GOAL so the stored
 // vocabulary stays single-sourced and never drifts.)
+// (v14: "weight_loss" is REMOVED — the body objective owns "lose fat" as free text; this enum is
+// training FOCUS only. migrate() normalizes a legacy stored "weight_loss" goal to "general_fitness".)
 export type AthleteGoal =
-  | "weight_loss" | "sprint_triathlon" | "olympic_triathlon"
+  | "sprint_triathlon" | "olympic_triathlon"
   | "cycling" | "swimming" | "running" | "general_fitness";
 export const VALID_ATHLETE_GOAL: AthleteGoal[] = [
-  "weight_loss", "sprint_triathlon", "olympic_triathlon",
+  "sprint_triathlon", "olympic_triathlon",
   "cycling", "swimming", "running", "general_fitness",
 ];
 

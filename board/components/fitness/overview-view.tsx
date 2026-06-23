@@ -41,7 +41,6 @@ const FITNESS_LINKS: { href: string; label: string; sub: string }[] = [
 ];
 
 const GOAL_LABELS: Record<string, string> = {
-  weight_loss: "Weight loss",
   sprint_triathlon: "Sprint triathlon",
   olympic_triathlon: "Olympic triathlon",
   cycling: "Cycling",

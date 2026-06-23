@@ -189,9 +189,10 @@ const GET_DAILY_SUMMARY_TOOL = {
 // the single validator — these enums document the allowed vocabulary for the agent.
 
 const ATHLETE_GOALS = [
-  "weight_loss", "sprint_triathlon", "olympic_triathlon",
+  "sprint_triathlon", "olympic_triathlon",
   "cycling", "swimming", "running", "general_fitness",
 ];
+// (v14: "weight_loss" removed — the body objective owns "lose fat"; this is training FOCUS only.)
 // (v14: the athlete `level` enum is gone — training status lives on the body add-on's bodyProfile.)
 const ATHLETE_SPORTS = [
   "cycling_outdoor", "cycling_indoor", "running", "walking",

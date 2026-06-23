@@ -154,3 +154,14 @@ test("v13→v14: CLOCK-FREE + deterministic — two reads of the same fixture pr
   assert.deepEqual(a.bodyObjective, b.bodyObjective, "bodyObjective is deterministic across reads (no clock)");
   assert.equal(a.bodyProfile?.dateOfBirth, "1998-01-01", "2026 − 28 = 1998");
 });
+
+test("v13→v14: legacy athlete goal 'weight_loss' normalizes to 'general_fitness'", async () => {
+  await seed(
+    JSON.stringify({
+      ...baseV13,
+      athleteProfile: { goal: "weight_loss", sports: [], equipment: [], notes: "", createdAt: "x", updatedAt: "x" },
+    }),
+  );
+  const db = await store.readDB();
+  assert.equal(db.athleteProfile?.goal, "general_fitness", "'weight_loss' retired → 'general_fitness'");
+});

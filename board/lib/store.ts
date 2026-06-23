@@ -200,6 +200,12 @@ export function migrate(raw: unknown): DBShape {
     };
   }
 
+  // v14: retire the legacy training-focus value "weight_loss" (the body objective owns "lose fat" now).
+  // Normalize a stored athlete goal to "general_fitness" WITHOUT mutating raw (shallow clone). Idempotent.
+  if (db.athleteProfile && (db.athleteProfile as { goal?: string }).goal === "weight_loss") {
+    db.athleteProfile = { ...db.athleteProfile, goal: "general_fitness" };
+  }
+
   return db;
 }
 
