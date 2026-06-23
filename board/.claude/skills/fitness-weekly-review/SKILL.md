@@ -114,10 +114,12 @@ Synthesise — don't dump the numbers — into the `save_weekly_review` payload:
 - **`next_week_focus`** — the one thing to prioritise next week.
 - **`avg_form_score`** + **`form_trend`** (optional) — from step 4.
 
-Respect the athlete profile's constraints (goal, level, days available) when you advise —
-read it via `get_athlete_profile({})` if you need it; if there's **no** profile, the review
-is weaker — note it and suggest setting one (the **fitness-athlete-profile** skill / the
-`/fitness` page). **Validate your own JSON** against this shape before saving — the board
+Respect the athlete's constraints when you advise: the **training focus + availability** (goal /
+days) from `get_athlete_profile({})`, and the **body** half from the body MCP — **trainingStatus**
+(novice|intermediate|advanced) via `get_body_profile`, current **weight** + trend via
+`get_body_status`, and the free-text **body goal** via `get_body_objective`. If there's **no**
+profile, the review is weaker — note it and suggest setting one (the **fitness-athlete-profile** +
+**body-profile** skills / the `/fitness` + `/body` pages). **Validate your own JSON** against this shape before saving — the board
 rejects a malformed body, it does not repair it. English vocabulary only.
 
 ### 7. PERSIST
@@ -156,8 +158,9 @@ next week's plan off this review.
   number the board computes; you **read + average + interpret** it, never recompute.
 - **Gate.** A **404** = add-on disabled (enable at **/addons**, then retry). Reads are ungated.
 - **Upsert by ISO week** — re-saving the same week replaces it.
-- **Profile-aware + English enums only;** respect days available / level / goal. No profile →
-  weaker review; note it and point at **fitness-athlete-profile**.
+- **Profile-aware + English enums only;** respect days available + the training focus (athlete
+  profile) and the body **trainingStatus** + weight + free-text body goal (the body MCP). No profile →
+  weaker review; note it and point at **fitness-athlete-profile** + **body-profile**.
 - **Nutrition is a SOFT dep** — empty food log → thin `nutrition` block, not a fault.
 - **NOT MEDICAL ADVICE** — informational estimate; defer injuries / pain / illness / abnormal
   symptoms / pregnancy / under-18 to a physician / physiotherapist / qualified coach.

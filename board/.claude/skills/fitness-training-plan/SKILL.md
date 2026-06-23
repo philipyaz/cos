@@ -5,10 +5,11 @@ description: >
   PLAN for the athlete with deliberate VARIETY / ROTATION (rotate sports, focus,
   and intensity week to week; alternate hard/easy; progressive overload toward the
   goal date), then PERSIST it via `save_training_plan` so it lands on the
-  /fitness/training-plan history feed. It reads the athlete profile (goal, goal
-  date, level, days/week, max session, sports, equipment, weights), the last ~4
-  weeks of actual workouts, the recovery state (HRV / sleep / resting HR / form
-  score), and the LAST few plans — and deliberately varies the new week against
+  /fitness/training-plan history feed. It reads the athlete profile (training
+  focus, goal date, days/week, max session, sports, equipment) AND the body add-on
+  (training status, current weight, the free-text body goal), the last ~4 weeks of
+  actual workouts, the recovery state (HRV / sleep / resting HR / form score), and
+  the LAST few plans — and deliberately varies the new week against
   them so no two weeks look the same. Use when the user says "make me a training
   plan", "plan my week of workouts", "generate this week's training plan", "build
   my weekly training plan", "plan my training", "what should I train this week",
@@ -58,17 +59,29 @@ Generate action **hands off to you**, it does not call a server-side model. So
 
 ## The procedure: FETCH → GENERATE → PERSIST
 
-### 1. FETCH the goal + constraints — `get_athlete_profile {}`
+### 1. FETCH the goal + constraints — `get_athlete_profile {}` + the body add-on
 
-Read the profile singleton: **goal**, **goalDate**, **level**, **daysPerWeek**,
-**maxSessionMinutes**, **sports[]**, **equipment[]**, **currentWeightKg /
-targetWeightKg**, **notes**. These are the hard constraints the plan must respect
-(days available, equipment on hand, session ceiling, the disciplines the athlete
-does).
+Read TWO sources (the body half moved off the athlete profile in v14):
 
-> **No profile → STOP.** If `get_athlete_profile` returns nothing, a plan without a
-> goal is weak — don't guess. Tell the user to set their profile first (point them
-> at the **fitness-athlete-profile** skill / the **/fitness** page) and stop here.
+- **`get_athlete_profile {}`** (fitness MCP) — the **TRAINING FOCUS** + availability: **goal**
+  (the sport/event — e.g. `olympic_triathlon` / `running` / `general_fitness`, NOT the body goal),
+  **goalDate**, **daysPerWeek**, **maxSessionMinutes**, **sports[]**, **equipment[]**, **notes**.
+- **The body add-on** (body MCP) — identity, weight, and the body goal:
+  - **`get_body_profile {}`** → **trainingStatus** (`novice | intermediate | advanced` — the
+    experience level that sets how fast to progress; "novice" replaces the old "beginner"),
+    **heightCm**, **sex**, **resistanceTrains** (do they lift — progressive RT is gated on this).
+  - **`get_body_status {}`** → the FACTS for load context: current + trend **weight**, BMR / TDEE.
+  - **`get_body_objective {}`** → the **FREE-TEXT** body goal (`goalText` — prose like *"lose fat
+    but keep my strength"*; there is **no** pick-list) + `targetWeightKg`.
+
+These are the hard constraints the plan must respect (days available, equipment on hand, session
+ceiling, the disciplines done) plus **how aggressively to progress** (`trainingStatus`) and **what
+the body goal is** (read the free-text `goalText` — don't expect an enum).
+
+> **No profile → STOP.** If `get_athlete_profile` returns nothing, a plan without a training focus
+> is weak — don't guess. Tell the user to set it (the **fitness-athlete-profile** skill / the
+> **/fitness** page); for the body goal / training status / weight, point them at the
+> **body-profile** skill / the **/body** page. Then stop here.
 
 ### 2. FETCH what was actually done lately — `list_health_data { type:"workout", from:<~28d ago> }`
 
@@ -118,8 +131,8 @@ note in `weekly_notes` that future weeks will rotate off it.
 
 ### 5. (soft) FETCH nutrition if weight is a goal — `list_food_log { ... }`
 
-**Only if** the goal is `weight_loss` or `current/target weight` differ meaningfully,
-optionally glance at the Nutrition add-on's food log (`list_food_log`) to tune volume /
+**Only if** the body goal involves fat loss or a target weight (from `get_body_objective` — the
+free-text `goalText` + `targetWeightKg`), optionally glance at the Nutrition add-on's food log (`list_food_log`) to tune volume /
 the easy-vs-hard balance to the energy the athlete's actually fuelling. This is a
 **soft** edge — if Nutrition is off, skip it silently (it's not a fault).
 

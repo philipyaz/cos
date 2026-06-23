@@ -12,7 +12,8 @@ description: >
   today's readiness / "should I train today" → fitness-pre-workout-brief; "how was
   my week" → fitness-weekly-review; sleep-vs-performance → fitness-correlations;
   pushing / logging / reading Apple Watch data → fitness-health-data; setting the
-  goal / level / availability / equipment → fitness-athlete-profile. This skill
+  training focus / availability / equipment → fitness-athlete-profile; setting the
+  body goal / training status / weight / identity → body-profile. This skill
   routes; it does not carry the procedures.
 ---
 
@@ -37,8 +38,13 @@ which they want.
 - **fitness-health-data** — **log / query Apple Watch data** (push canonical
   workout/sleep/HRV/resting-HR/steps/VO2max entries, read summaries + trends) and **push a
   health report to the vault**.
-- **fitness-athlete-profile** — set the **goal / level / weekly availability / equipment /
-  sports** (the profile everything else personalises against).
+- **fitness-athlete-profile** — set the **training focus (sport/event) / weekly availability /
+  equipment / sports** (the training-focus half everything else personalises against).
+- **body-profile** (the `body` add-on) — set/read the **body goal (free text)**, **identity**
+  (sex / DOB / height), **training status** (novice|intermediate|advanced), and **weigh-ins +
+  composition**. The body half moved off the athlete profile in v14: the coaching skills READ it
+  via the `body` MCP (`get_body_profile` / `get_body_status` / `get_body_objective`); send the user
+  here (or **/body**) to SET their goal / training status / weight.
 
 ## Cross-cutting reminders (true for all of the above)
 

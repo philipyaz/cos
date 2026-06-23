@@ -38,7 +38,8 @@ does **NOT** design training plans (**fitness-training-plan**), weekly reviews
 (**fitness-weekly-review**), pre-workout briefs (**fitness-pre-workout-brief**), or
 correlations (**fitness-correlations**), and it does **NOT** create or edit the athlete
 profile (that's the **fitness-athlete-profile** skill). If the user asks for a plan, a review,
-a brief, correlations, or to set their goal/level/sports, hand off to the right sibling skill.
+a brief, correlations, to set their training focus/sports (**fitness-athlete-profile**), or to set
+their body goal / training status / weight (**body-profile**), hand off to the right sibling skill.
 
 > **Gate — the add-on must be ENABLED.** Every WRITE (`push_health_data`,
 > `delete_health_data`) 404s ("Not found — the fitness add-on may be disabled.") when the

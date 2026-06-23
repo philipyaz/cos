@@ -98,11 +98,15 @@ partial data, don't read a flat 50 as "average recovery".
 - **`list_health_data({ type: "workout", from: <48h ago ISO>, to: <today end> })`** — recent
   training **load**: did they already do a hard/long session in the last day or two? Back-to-
   back hard days is a warning even when the score is decent.
-- **`get_athlete_profile({})`** — the goal, level, days/week, **sports[]**, equipment, max
-  session minutes. The recommended session must respect these (a fallback session comes from
-  `sports[]`). **If it returns no profile**, tell the user to set it first (point at the
-  `fitness-athlete-profile` skill / the **/fitness** page) — a brief without a goal is
-  weak — but you can still give a recovery-only read from the score.
+- **`get_athlete_profile({})`** — the training FOCUS (goal=sport/event), days/week, **sports[]**,
+  equipment, max session minutes. The recommended session must respect these (a fallback session
+  comes from `sports[]`). **If it returns no profile**, tell the user to set it first (point at the
+  `fitness-athlete-profile` skill / the **/fitness** page) — a brief without a focus is weak — but
+  you can still give a recovery-only read from the score.
+- **`get_body_profile({})` + `get_body_status({})`** (body MCP) — the **trainingStatus**
+  (novice|intermediate|advanced — how hard to push) and current **weight**; the body goal (fat loss
+  vs build vs maintain) from **`get_body_objective({})`**'s free-text `goalText`. These moved off the
+  athlete profile in v14 — read them here when the session call depends on the body goal / experience.
 
 ### 3. FETCH today's PLANNED session
 
@@ -182,8 +186,8 @@ through. Note that the brief is saved and visible on the **/fitness/pre-workout-
    Favor a light session or rest." }`.
 2. `get_daily_summary({ date: "2026-06-17" })` → slept 5h40 (short), HRV 41 (below baseline);
    `list_health_data({ type: "workout", from: "2026-06-15T00:00:00Z", to: "2026-06-17T23:59:59Z" })`
-   → a hard 75-min ride yesterday; `get_athlete_profile({})` → olympic_triathlon, intermediate,
-   sports running/cycling/swimming, max 90 min.
+   → a hard 75-min ride yesterday; `get_athlete_profile({})` → focus olympic_triathlon,
+   sports running/cycling/swimming, max 90 min; `get_body_profile({})` → trainingStatus intermediate.
 3. `list_coaching_artifacts({ kind: "training_plan", limit: 1 })` → today's planned day = a
    60-min tempo run.
 4. GENERATE → **readiness `caution`** (score 48, sleep sub-score 38 = poor, hard ride
