@@ -20,6 +20,10 @@ import type {
   NutritionGoal,
   ActivityLevel,
   BiologicalSex,
+  AthleteProfile,
+  CoachingArtifact,
+  CoachingArtifactKind,
+  ArtifactSource,
   MessageRecord,
   CaseNote,
   Task,
@@ -37,7 +41,7 @@ import type {
   Priority,
   Actor,
 } from "./types";
-import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, caseKind } from "./types";
+import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, VALID_ARTIFACT_SOURCE, caseKind } from "./types";
 import {
   hierarchyViolation,
   rollupFor,
@@ -101,6 +105,10 @@ const nowISO = (): string => new Date().toISOString();
 // db.nutritionGoal forward when it is an object (the singleton — mirrors db.settings).
 // v11 (MessageRecord.needsAnswer/answeredAt/context — the unanswered-messages flags) is
 // likewise a no-op here: the optionals ride through the messages[] array verbatim.
+// v12 carries db.healthEntries forward when it is an array and db.athleteProfile forward
+// when it is an object (the "fitness" add-on — mirrors db.weights/db.nutritionGoal).
+// v13 carries db.coachingArtifacts forward when it is an array (the "fitness" add-on's
+// polymorphic AI coaching artifacts — mirrors db.healthEntries).
 export function migrate(raw: unknown): DBShape {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
@@ -126,6 +134,10 @@ export function migrate(raw: unknown): DBShape {
   if (Array.isArray(obj.weights)) db.weights = obj.weights as DBShape["weights"];
   // The goal is a SINGLETON object (not an array) — carry it forward like db.settings.
   if (obj.nutritionGoal && typeof obj.nutritionGoal === "object") db.nutritionGoal = obj.nutritionGoal as DBShape["nutritionGoal"];
+  if (Array.isArray(obj.healthEntries)) db.healthEntries = obj.healthEntries as DBShape["healthEntries"];
+  // The athlete profile is a SINGLETON object (not an array) — carry it forward like nutritionGoal.
+  if (obj.athleteProfile && typeof obj.athleteProfile === "object") db.athleteProfile = obj.athleteProfile as DBShape["athleteProfile"];
+  if (Array.isArray(obj.coachingArtifacts)) db.coachingArtifacts = obj.coachingArtifacts as DBShape["coachingArtifacts"];
   if (Array.isArray(obj.pending)) db.pending = obj.pending as DBShape["pending"];
   if (Array.isArray(obj.views)) db.views = obj.views as DBShape["views"];
   if (Array.isArray(obj.labels)) db.labels = obj.labels as DBShape["labels"];
@@ -182,6 +194,12 @@ function validateDB(db: DBShape): void {
   for (const x of db.weights ?? []) {
     if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid weight entry: missing id");
   }
+  for (const x of db.healthEntries ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid health entry: missing id");
+  }
+  for (const x of db.coachingArtifacts ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid coaching artifact: missing id");
+  }
 }
 
 async function ensureFile(): Promise<void> {
@@ -189,7 +207,7 @@ async function ensureFile(): Promise<void> {
     await fs.access(DATA_FILE);
   } catch {
     await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [], foodLogs: [], pantryItems: [], mealPlanEntries: [], weights: [] };
+    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [], foodLogs: [], pantryItems: [], mealPlanEntries: [], weights: [], healthEntries: [], coachingArtifacts: [] };
     await fs.writeFile(DATA_FILE, JSON.stringify(empty, null, 2), "utf8");
   }
 }
@@ -206,6 +224,8 @@ function parseAndMigrate(text: string): DBShape {
   if (!db.pantryItems) db.pantryItems = [];
   if (!db.mealPlanEntries) db.mealPlanEntries = [];
   if (!db.weights) db.weights = []; // nutritionGoal stays optional/absent (a singleton, set on first PUT)
+  if (!db.healthEntries) db.healthEntries = []; // athleteProfile stays optional/absent (a singleton, set on first POST)
+  if (!db.coachingArtifacts) db.coachingArtifacts = [];
   if (!db.pending) db.pending = [];
   if (!db.views) db.views = [];
   if (!db.labels) db.labels = [];
@@ -411,6 +431,14 @@ export function nextWeightId(db: DBShape): string {
   return `WEIGHT-${max + 1}`;
 }
 
+export function nextCoachingArtifactId(db: DBShape): string {
+  const max = (db.coachingArtifacts ?? [])
+    .map((x) => parseInt(x.id.replace(/^[A-Za-z]+-/, ""), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `COACH-${max + 1}`;
+}
+
 export function nextTaskId(caseRec: CaseRecord): string {
   // Highest existing -T<k> + 1 so re-id under merge / after deletes stays unique.
   const max = caseRec.tasks
@@ -494,6 +522,22 @@ export function findWeight(db: DBShape, id: string): WeightEntry | undefined {
 // point per day), so this is how upsertWeight decides update-in-place vs append.
 export function findWeightByDate(db: DBShape, day: string): WeightEntry | undefined {
   return (db.weights ?? []).find((x) => x.date === day);
+}
+
+// ── Coaching artifacts (v13; "fitness" add-on) ─────────────────────────────────
+// Find an artifact by its minted id ("COACH-<n>").
+export function findCoachingArtifact(db: DBShape, id: string): CoachingArtifact | undefined {
+  return (db.coachingArtifacts ?? []).find((x) => x.id === id);
+}
+
+// Find the artifact for a given (kind, periodKey) — the UNIQUE upsert key. This is how
+// upsertCoachingArtifact decides replace-in-place vs append (one artifact per period+kind).
+export function findCoachingArtifactByPeriod(
+  db: DBShape,
+  kind: CoachingArtifactKind,
+  periodKey: string,
+): CoachingArtifact | undefined {
+  return (db.coachingArtifacts ?? []).find((x) => x.kind === kind && x.periodKey === periodKey);
 }
 
 // Reminders linked to a node — reminder.caseId is the single source of truth for
@@ -908,6 +952,90 @@ export function applyGoalPatch(goal: NutritionGoal, patch: Record<string, unknow
   return goal;
 }
 
+// ── Athlete profile singleton (v12; "fitness" add-on) ───────────────────────────
+// Read the athlete training-profile SINGLETON (db.athleteProfile), or undefined when none
+// is set yet. Mirrors getNutritionGoal — the profile is a bare object, not an array.
+export function getAthleteProfile(db: DBShape): AthleteProfile | undefined {
+  return db.athleteProfile;
+}
+
+// Create-or-replace the athlete profile SINGLETON (the POST path). The caller passes
+// already-validated/coerced fields (the route enforces the enums + numeric ranges + the
+// notes cap). createdAt is PRESERVED across a replace (first-set time is sticky, like
+// nutritionGoal); updatedAt is always bumped. Returns the stored profile.
+export function setAthleteProfile(
+  db: DBShape,
+  input: Omit<AthleteProfile, "createdAt" | "updatedAt">,
+): AthleteProfile {
+  const now = nowISO();
+  const profile: AthleteProfile = {
+    ...input,
+    createdAt: db.athleteProfile?.createdAt ?? now, // sticky first-set time across replaces
+    updatedAt: now,
+  };
+  db.athleteProfile = profile;
+  return profile;
+}
+
+// ── Coaching artifacts (v13; "fitness" add-on) ─────────────────────────────────
+// Upsert a coaching artifact BY (kind, periodKey) — the UNIQUE key: there is one artifact
+// per period+kind (re-generating the same week's plan REPLACES it rather than appending a
+// duplicate). On an existing match: replace payload/source/generatedAt, bump updatedAt, keep
+// id + createdAt STICKY (the first-persist identity). Else: mint id via nextCoachingArtifactId,
+// createdAt=updatedAt=now, push. Returns the artifact and whether it was newly created (the
+// route maps created → 201). The caller passes an already-validated input (lib/fitness-artifacts.ts).
+export function upsertCoachingArtifact(
+  db: DBShape,
+  input: {
+    kind: CoachingArtifactKind;
+    periodKey: string;
+    source: ArtifactSource;
+    payload: Record<string, unknown>;
+    generatedAt: string;
+  },
+): { artifact: CoachingArtifact; created: boolean } {
+  if (!db.coachingArtifacts) db.coachingArtifacts = [];
+  const now = nowISO();
+  const existing = findCoachingArtifactByPeriod(db, input.kind, input.periodKey);
+  if (existing) {
+    existing.payload = input.payload;
+    existing.source = input.source;
+    existing.generatedAt = input.generatedAt;
+    existing.updatedAt = now;
+    return { artifact: existing, created: false };
+  }
+  const artifact: CoachingArtifact = {
+    id: nextCoachingArtifactId(db),
+    kind: input.kind,
+    periodKey: input.periodKey,
+    source: input.source,
+    payload: input.payload,
+    generatedAt: input.generatedAt,
+    createdAt: now,
+    updatedAt: now,
+  };
+  db.coachingArtifacts.push(artifact);
+  return { artifact, created: true };
+}
+
+// Merge a partial patch onto a coaching artifact. Present-keys-only: a `payload` object
+// replaces the body, a valid `source` enum updates the author, a `generatedAt` string updates
+// the generation time. Identity (id, createdAt, kind, periodKey) is NEVER changed here — this
+// is the un-validating coercive chokepoint (mirrors applyFoodLogUpdate). Bumps updatedAt.
+export function applyCoachingArtifactUpdate(rec: CoachingArtifact, patch: Record<string, unknown>): CoachingArtifact {
+  if ("payload" in patch && patch.payload && typeof patch.payload === "object" && !Array.isArray(patch.payload)) {
+    rec.payload = patch.payload as Record<string, unknown>;
+  }
+  if ("source" in patch && VALID_ARTIFACT_SOURCE.includes(patch.source as ArtifactSource)) {
+    rec.source = patch.source as ArtifactSource;
+  }
+  if ("generatedAt" in patch && typeof patch.generatedAt === "string" && patch.generatedAt) {
+    rec.generatedAt = patch.generatedAt;
+  }
+  rec.updatedAt = nowISO();
+  return rec;
+}
+
 // ── Activity / notes ─────────────────────────────────────────────────────────
 // Append an audit entry, capping each case to its last 50. Does NOT bump
 // updatedAt (logging is a side-record, not a content change).
@@ -1227,5 +1355,16 @@ export function removeWeight(db: DBShape, id: string): boolean {
   const idx = db.weights.findIndex((x) => x.id === id);
   if (idx === -1) return false;
   db.weights.splice(idx, 1);
+  return true;
+}
+
+// Hard-remove a coaching artifact from db.coachingArtifacts. An artifact has NO outbound
+// links to clean up, so this is a plain splice (mirrors removeFoodLog/removeWeight). Returns
+// whether one was removed.
+export function removeCoachingArtifact(db: DBShape, id: string): boolean {
+  if (!db.coachingArtifacts) return false;
+  const idx = db.coachingArtifacts.findIndex((x) => x.id === id);
+  if (idx === -1) return false;
+  db.coachingArtifacts.splice(idx, 1);
   return true;
 }

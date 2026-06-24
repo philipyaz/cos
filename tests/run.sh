@@ -87,6 +87,26 @@
 #      404s POST /weight + PUT /goal while GET /weight + /goal + /targets stay 200), and
 #      delete. Snapshots+restores cases.json (weights + nutritionGoal + settings.addons
 #      live there → net-zero). Skipped when no board is up.
+#  10h. api-fitness-gate — ONLY if a board is running: the Add-ons GATE contract for
+#      the unified "fitness" add-on (/api/fitness/* + /api/fitness/profile + /api/addons[/:id]). A
+#      DISABLED add-on rejects every WRITE (POST /api/fitness/push, POST /api/fitness/profile) with
+#      404 while its GETs stay 200; PATCH /api/addons/fitness flips the gate live + bumps db.version;
+#      unknown-id 404 + non-boolean-enabled 400. Snapshots+restores cases.json (settings.addons +
+#      healthEntries + athleteProfile live there). Skipped when no board.
+#  10i. api-fitness-push — ONLY if a board is running: a push INGEST → SUMMARIZE round-trip that
+#      kills the split-brain-taxonomy bug — POST /api/fitness/push a realistic HAE payload (sleep +
+#      heart_rate_variability metrics + a workout), then assert GET /api/fitness/summary returns
+#      NON-EMPTY sleep + hrv (reading canonical type "sleep_night"/"hrv" + data.value) and
+#      GET /api/fitness/daily-summary surfaces them. Snapshots+restores cases.json. Skipped when no
+#      board.
+#  10j. api-fitness-coaching — ONLY if a board is running: full CRUD + gate + upsert contract for
+#      the "fitness" add-on's STATEFUL coaching artifacts (/api/fitness/coaching[/:id]
+#      + db.coachingArtifacts). With the add-on ENABLED a POST mints a COACH-<n> artifact
+#      (201, created:true); GET ?kind=training_plan lists it; GET-by-id reads it back; a re-POST
+#      for the SAME (kind, periodKey) UPSERTS (created:false, same id — exactly one row per week,
+#      no duplicate); the GATE (a DISABLED add-on 404s the POST while GET stays 200 — reads open);
+#      DELETE drops the id (a re-GET 404s). Snapshots+restores cases.json (coachingArtifacts +
+#      settings.addons live there). Skipped when no board.
 #  11. api-trust — ONLY if a board is running: drives the guard sender-trust
 #      WHITELIST API via the board's thin PROXY routes (/api/trust[/:email] →
 #      the guard sidecar :8009): GET always-200 online shape, add (default
@@ -653,6 +673,73 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-nutrition-weight: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-nutrition-weight"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10h. api-fitness-gate (only when a board is healthy) --------------------
+# The Add-ons GATE contract for the unified "fitness" add-on (/fitness + /fitness/health). A DISABLED
+# add-on rejects every WRITE (POST /api/fitness/push, POST /api/fitness/profile) with 404 while its
+# GET reads (GET /api/fitness/summary, GET /api/fitness/profile) stay 200; enabling via
+# PATCH /api/addons/fitness flips the gate live AND bumps db.version; an unknown add-on id 404s and
+# a non-boolean enabled 400s. Snapshots + restores board/data/cases.json (settings.addons +
+# healthEntries + athleteProfile live there → net-zero). Skipped when no board.
+echo
+echo "--- [10h] api-fitness-gate (live board) ---------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-gate.mjs"; then
+    echo "api-fitness-gate: PASS"
+  else
+    echo "api-fitness-gate: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-gate"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10i. api-fitness-push (only when a board is healthy) --------------------
+# A round-trip through the fitness-push INGEST → SUMMARIZE pipeline that kills the bug the old
+# test masked: with the add-on ENABLED, POST /api/fitness/push a realistic Health-Auto-Export
+# payload (a sleep_analysis night + a heart_rate_variability series + a workout), then assert
+# GET /api/fitness/summary returns NON-EMPTY sleep {count,avg_hours} + hrv {count,avg_ms} +
+# workout (reading the CANONICAL taxonomy — type "sleep_night"/"hrv", data.value — NOT the
+# legacy "heart_rate_variability"/data.avg_ms shapes), and GET /api/fitness/daily-summary
+# surfaces the same. Snapshots + restores board/data/cases.json (healthEntries + settings.addons
+# live there → net-zero). Skipped when no board.
+echo
+echo "--- [10i] api-fitness-push (live board) ---------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-push.mjs"; then
+    echo "api-fitness-push: PASS"
+  else
+    echo "api-fitness-push: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-push"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10j. api-fitness-coaching (only when a board is healthy) ----------------
+# Full CRUD + gate + upsert contract for the "fitness" add-on's STATEFUL coaching
+# artifacts (/api/fitness/coaching[/:id] + db.coachingArtifacts) with the add-on ENABLED:
+# a POST mints a COACH-<n> artifact (201, created:true); GET ?kind=training_plan lists
+# it (total >= 1); GET-by-id reads it back; a re-POST for the SAME (kind, periodKey) UPSERTS
+# (created:false, same id — the list still holds EXACTLY ONE training_plan for that week, no
+# duplicate); the GATE (a DISABLED add-on 404s the POST while GET stays 200 — reads open);
+# re-enable then DELETE → ok and a re-GET 404s. Snapshots + restores board/data/cases.json
+# (coachingArtifacts + settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10j] api-fitness-coaching (live board) -----------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-coaching.mjs"; then
+    echo "api-fitness-coaching: PASS"
+  else
+    echo "api-fitness-coaching: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-coaching"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."

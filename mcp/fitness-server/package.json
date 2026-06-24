@@ -1,0 +1,11 @@
+{
+  "name": "fitness-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server for the Cos Fitness add-on — ingest Apple Watch HealthKit data (sleep, HRV, steps, workouts, VO2max, resting HR) and query/trend/vault-ingest it.",
+  "bin": { "fitness-mcp": "server.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

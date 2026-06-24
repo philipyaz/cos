@@ -30,6 +30,15 @@ export interface AddonManifest {
     setupSkill: string; // the slash-skill that wires the bridge on a new machine
     tools: string[]; // the MCP tool names this server exposes
   };
+  // OPTIONAL inter-add-on dependencies. A SOFT edge (`required: false`) means this add-on
+  // READS another add-on's core-store data and works BETTER with it, but degrades
+  // gracefully without it — the catalog surfaces it as "works better with <X>", and the
+  // runtime read posture is unchanged (reads stay open; a missing dependency just defaults
+  // to empty). It does NOT auto-enable or hard-gate. A HARD edge (`required: true`) is
+  // reserved for a future case where the dependent is genuinely useless alone. The reads
+  // are NEVER gated on the dependency's isAddonEnabled (that would hide frozen-but-readable
+  // data, violating the "reads stay open" contract).
+  dependsOn?: { id: string; required: boolean }[];
 }
 
 // The first add-on: Nutrition & Chef. It ships four verticals end-to-end — the food log,
@@ -81,8 +90,73 @@ const NUTRITION_ADDON: AddonManifest = {
   },
 };
 
+// The second add-on: Fitness. ONE vertical under a single /fitness surface + /api/fitness
+// prefix — Apple Watch health ingestion + dashboard (/fitness/health), the athlete training
+// profile, and the AI coach (training plan, weekly review, pre-workout brief, correlations) —
+// behind one flag, one bridge, one setup skill. Its data lives in the core store:
+// db.healthEntries (the Apple Watch time-series, the owned ARRAY) plus db.athleteProfile — a
+// SINGLETON object (the training profile), intentionally NOT listed in dataArrays since it is
+// not an array (exactly like nutrition's db.nutritionGoal). The data fields keep their
+// descriptive names (health entries, athlete profile) — the add-on IDENTITY is "fitness", the
+// data it owns is still health/athlete data (mirrors nutrition owning foodLogs/weights). All
+// of it shares the single per-add-on gate (Settings.addons.fitness.enabled). It SOFT-depends
+// on Nutrition: daily-summary + weekly-review read db.foodLogs to fold nutrition into the
+// coaching context, but degrade gracefully when Nutrition is off (see dependsOn).
+const FITNESS_ADDON: AddonManifest = {
+  id: "fitness",
+  title: "Fitness",
+  description: "Ingest Apple Watch health data, keep an athlete profile, and get AI training coaching.",
+  icon: "IconRunner",
+  navItems: [
+    { href: "/fitness", label: "Overview", icon: "IconRunner" },
+    { href: "/fitness/health", label: "Health Data", icon: "IconHeart" },
+    { href: "/fitness/training-plan", label: "Training Plan", icon: "IconCalendar" },
+    { href: "/fitness/weekly-review", label: "Weekly Review", icon: "IconTrend" },
+    { href: "/fitness/pre-workout-brief", label: "Pre-Workout Brief", icon: "IconBolt" },
+    { href: "/fitness/correlations", label: "Correlations", icon: "IconSpark" },
+  ],
+  apiPrefixes: ["/api/fitness"],
+  // Owned db ARRAYS only. db.athleteProfile (the v12 training-profile singleton) is a bare
+  // object, not an array, so it is deliberately omitted here (mirrors db.nutritionGoal). The
+  // v13 db.coachingArtifacts array holds the FOUR stateful AI coaching surfaces (training
+  // plan / weekly review / pre-workout brief / correlations), upserted by (kind, periodKey).
+  dataArrays: ["healthEntries", "coachingArtifacts"],
+  dependsOn: [{ id: "nutrition", required: false }],
+  mcp: {
+    server: "fitness",
+    bridgePortVar: "FITNESS_BRIDGE_PORT",
+    defaultPort: 8011,
+    setupSkill: "fitness-mcp-setup",
+    // Tool names stay health-descriptive (they act on health data), exactly as nutrition's
+    // tools are log_food/read_pantry — a tool name describes its action, not the add-on id.
+    tools: [
+      "push_health_data",
+      "list_health_data",
+      "get_health_summary",
+      "get_daily_summary",
+      "delete_health_data",
+      "get_health_trends",
+      "ingest_health_to_vault",
+      // Athlete profile singleton (add-on-gated set; ungated get) + the two board-computed
+      // signals the coach interprets (form score, sleep/performance correlations; ungated).
+      "get_athlete_profile",
+      "set_athlete_profile",
+      "get_form_score",
+      "get_correlations",
+      // v13 stateful coaching artifacts (add-on-gated writes; ungated reads).
+      "save_training_plan",
+      "save_weekly_review",
+      "save_pre_workout_brief",
+      "save_correlation_report",
+      "list_coaching_artifacts",
+      "get_coaching_artifact",
+      "delete_coaching_artifact",
+    ],
+  },
+};
+
 // The static add-on registry — one entry per add-on. Order is the catalog/display order.
-export const ADDON_REGISTRY: AddonManifest[] = [NUTRITION_ADDON];
+export const ADDON_REGISTRY: AddonManifest[] = [NUTRITION_ADDON, FITNESS_ADDON];
 
 // Every known add-on (the full registry).
 export function listAddons(): AddonManifest[] {

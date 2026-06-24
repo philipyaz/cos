@@ -19,6 +19,7 @@ import {
   IconShield,
   IconArchive,
   IconBook,
+  IconHeart,
   IconStar,
   IconTrash,
   IconChef,
@@ -27,6 +28,9 @@ import {
   IconBolt,
   IconBrand,
   IconChevronRight,
+  IconRunner,
+  IconTrend,
+  IconSpark,
 } from "@/components/icons";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
@@ -38,6 +42,12 @@ const ADDON_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   IconChef,
   IconFridge,
   IconMealPlan,
+  IconHeart,
+  IconRunner,
+  IconCalendar,
+  IconTrend,
+  IconBolt,
+  IconSpark,
 };
 function addonIcon(key: string): ReactNode {
   const Glyph = ADDON_ICONS[key] ?? IconBolt;

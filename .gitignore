@@ -30,11 +30,16 @@ mcp/logs/
 /site/
 .cache/
 
-# Live data stores — whole-folder ignore. NEVER list precise files here: a precise
+# Live data stores — whole-folder ignore. NEVER list precise data files here: a precise
 # pattern (cases.json, prefs.json, …) lets a NEW store type slip through and get
 # committed with real personal data. The apps recreate these dirs on first write
 # (board/lib/store.ts, guard/sidecar.py), so no committed placeholder is needed.
-board/data/
+# `board/data/*` (not the bare dir) + the single negation below is deliberate: every real
+# data file AND subdir (cases.json, prefs.json, backups/, …) stays ignored, while the ONE
+# committed guardrail doc — board/data/CLAUDE.md — travels with the repo so the "don't wipe
+# the live store" warning is present on every machine. Do NOT add other negations here.
+board/data/*
+!board/data/CLAUDE.md
 guard/data/
 
 # config stuff
