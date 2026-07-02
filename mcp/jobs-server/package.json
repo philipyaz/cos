@@ -1,0 +1,11 @@
+{
+  "name": "jobs-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server for the Cos job-matcher: search offers via Exa.ai, store them, score against the vault profile with Claude.",
+  "bin": { "jobs-mcp": "server.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

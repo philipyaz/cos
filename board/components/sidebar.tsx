@@ -19,6 +19,7 @@ import {
   IconShield,
   IconArchive,
   IconBook,
+  IconHeart,
   IconStar,
   IconTrash,
   IconChef,
@@ -27,6 +28,10 @@ import {
   IconBolt,
   IconBrand,
   IconChevronRight,
+  IconRunner,
+  IconTrend,
+  IconSpark,
+  IconBriefcase,
 } from "@/components/icons";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
@@ -134,6 +139,13 @@ export function Sidebar({
     // with the daily drivers (next to Priorities, itself a knowledge dashboard), not in the
     // Review group beside Trash/Backups, even though its page shares their status-card shape.
     { href: "/vault", label: "Vault", icon: <IconBook /> },
+    { href: "/health", label: "Health", icon: <IconHeart /> },
+    { href: "/athlete", label: "Athlete", icon: <IconRunner /> },
+    { href: "/athlete/pre-workout-brief", label: "Brief pre-workout", icon: <IconBolt /> },
+    { href: "/athlete/weekly-review", label: "Bilan semaine", icon: <IconTrend /> },
+    { href: "/athlete/correlations", label: "Correlations", icon: <IconSpark /> },
+    { href: "/jobs", label: "Jobs", icon: <IconBriefcase /> },
+    { href: "/profile", label: "Profil", icon: <IconCircleUser /> },
   ];
 
   const system: Item[] = [
