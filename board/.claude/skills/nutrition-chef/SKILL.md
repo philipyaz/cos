@@ -221,10 +221,17 @@ user asks *"what's in my fridge"* or *"what's going off"*, run `read_pantry` (fi
 `location` / `category` / `expiringBefore` / `lowStock` as asked) and **lead with the
 expiring-soon and low-stock items** — that's the actionable part.
 
-**Removing.** `remove_pantry_item(id)` **hard-removes** the item (no soft-archive). Use
-it when something is used up or thrown out; in approval mode, confirm first. Note that a
-removed item leaves any meal-plan `pantryItemIds` referencing it **dangling — that's
-tolerated**, don't chase the refs.
+**Removing / using up — the rule: a `quantity: 0` item is a BUG, never a state.** When the
+user **finishes / uses up / throws out** an item (*"we're out of milk"*, *"finished the
+eggs"*), **`remove_pantry_item(id)`** it — do **NOT** `update_pantry_item(id, quantity: 0)`.
+A zero-quantity row is a ghost that clutters the pantry; "gone" is *removed*, not *zero*.
+- **Fully consumed → `remove_pantry_item(id)`.** It hard-removes (no soft-archive). In
+  approval mode confirm first. A removed item leaves any meal-plan `pantryItemIds`
+  referencing it **dangling — that's tolerated**, don't chase the refs.
+- **Partially consumed (some left) → `update_pantry_item(id, quantity: <remaining>)`.**
+  Decrement only while there's a positive amount left. The moment it would hit 0, **remove
+  it instead.** (Don't have an exact count? If they say it's *finished*, remove; if they say
+  *running low*, keep it and set `lowStock: true`.)
 
 > **Example.** *"add 2 cans of chickpeas and we're low on olive oil"* (auto mode):
 > `read_pantry` first. Chickpeas absent → `add_pantry_item(name: "Chickpeas", quantity:
@@ -282,9 +289,10 @@ meal:
   plan; description/items from the title + ingredients; estimate calories/macros per
   JOB 1) — a cooked meal is usually a meal eaten, so close the loop, but **offer**, the
   user may have logged it already or be cooking for others;
-- **offer to update the pantry** — the cooked meal consumed its `pantryItemIds`, so
-  decrement `quantity` / flag `lowStock` / `remove_pantry_item` the used-up items (per
-  JOB 2). Surface this; don't silently mutate inventory.
+- **offer to update the pantry** — the cooked meal consumed its `pantryItemIds`, so per
+  JOB 2: **`remove_pantry_item` the items it used UP**, only `update_pantry_item(quantity:
+  <remaining>)` ones with some left, and `lowStock: true` ones now running low. **Never
+  leave a `quantity: 0` row** — used up means *removed*. Surface this; don't silently mutate inventory.
 
 **Reading the plan.** `list_meal_plan(from, to, [slot], [status])` renders a per-day
 agenda (use a `from`/`to` window for "this week"); `get_meal_plan(id)` shows one entry

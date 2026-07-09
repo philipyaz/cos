@@ -263,13 +263,16 @@ const UPDATE_PANTRY_ITEM_TOOL = {
     "Update a pantry item's fields — `PATCH /api/nutrition/pantry/{id}`. " +
     ADDON_GUARDRAIL +
     " Pass only the fields you want to change (any of: name, quantity, unit, category, location, " +
-    "expiresAt, lowStock, note). Set `lowStock` true/false to flag/clear running-low.",
+    "expiresAt, lowStock, note). Set `lowStock` true/false to flag/clear running-low. " +
+    "To record PARTIAL consumption, set `quantity` to the amount STILL LEFT. When an item is " +
+    "USED UP, call `remove_pantry_item` instead — do NOT set `quantity` to 0 (a zero-quantity " +
+    "row is a ghost; 'gone' means removed, not zero).",
   inputSchema: {
     type: "object",
     properties: {
       id: { type: "string", description: "Pantry item id, e.g. 'PANTRY-1'." },
       name: { type: "string", description: "New name (non-empty)." },
-      quantity: { type: "number", description: "New amount on hand." },
+      quantity: { type: "number", description: "New amount STILL ON HAND (use remove_pantry_item, not 0, when used up)." },
       unit: { type: "string", description: "New unit, e.g. 'g', 'cans', 'bunch'." },
       category: { type: "string", enum: PANTRY_CATEGORY, description: "New food category." },
       location: { type: "string", enum: PANTRY_LOCATION, description: "New storage location: fridge | freezer | pantry." },
@@ -286,8 +289,10 @@ const REMOVE_PANTRY_ITEM_TOOL = {
   description:
     "Remove a pantry item by id (e.g. 'PANTRY-1') — `DELETE /api/nutrition/pantry/{id}`. " +
     ADDON_GUARDRAIL +
-    " Pantry items have no soft-archive; this hard-removes the item. (Meal-plan `pantryItemIds` are " +
-    "soft refs — a removed item leaves them dangling, which is tolerated.)",
+    " This is the RIGHT tool when an item is used up / finished / thrown out (NOT " +
+    "`update_pantry_item` with quantity 0). Pantry items have no soft-archive; this hard-removes " +
+    "the item. (Meal-plan `pantryItemIds` are soft refs — a removed item leaves them dangling, " +
+    "which is tolerated.)",
   inputSchema: {
     type: "object",
     properties: {
