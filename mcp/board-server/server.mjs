@@ -811,7 +811,10 @@ async function handleListUnansweredMessages(args) {
 // workstream/case) — the single source of truth for the node<->reminder link.
 
 // Compact one-line render of a reminder (status · due · title · linked caseId ·
-// task progress when present).
+// task progress · created date). The created date is the AGE signal a staleness
+// sweep (the reminders-review skill) reads to spot reminders worth closing — a
+// dateless "review X, decide whether to Y" nudge has no dueAt, so createdAt is
+// the only signal for how long it has been sitting.
 function reminderLine(r) {
   const tasks = Array.isArray(r.tasks) ? r.tasks : [];
   return (
@@ -819,8 +822,35 @@ function reminderLine(r) {
     (r.dueAt ? ` due ${r.dueAt}` : "") +
     ` ${r.id} — ${r.title}` +
     (r.caseId ? ` → ${r.caseId}` : "") +
-    (tasks.length ? ` · ${tasks.filter((t) => t.done).length}/${tasks.length} tasks` : "")
+    (tasks.length ? ` · ${tasks.filter((t) => t.done).length}/${tasks.length} tasks` : "") +
+    (typeof r.createdAt === "string" ? ` · created ${r.createdAt.slice(0, 10)}` : "")
   );
+}
+
+// Full-detail render of a reminder (verbose list mode): the id/status/title header, a
+// one-line meta strip (created · due · domain · link · labels · task progress · completed),
+// the task checklist with done-flags, and the full detail text. This carries everything
+// on the reminder record so a cleanup sweep can triage the whole set from ONE
+// list_reminders call — without a get_reminder per reminder. (Linked emails are the one
+// thing not on the record; those still come from get_reminder.)
+function reminderBlock(r) {
+  const tasks = Array.isArray(r.tasks) ? r.tasks : [];
+  const done = tasks.filter((t) => t.done).length;
+  const meta = [
+    typeof r.createdAt === "string" ? `created ${r.createdAt.slice(0, 10)}` : null,
+    `due ${r.dueAt ? r.dueAt : "—"}`,
+    r.domain || "—",
+    r.caseId ? `→ ${r.caseId}` : "standalone",
+    `labels: ${Array.isArray(r.labels) && r.labels.length ? r.labels.join(", ") : "none"}`,
+    tasks.length ? `tasks ${done}/${tasks.length}` : null,
+    r.completedAt ? `completed ${r.completedAt.slice(0, 10)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const lines = [`${r.id} [${r.status}] — ${r.title}`, `    ${meta}`];
+  for (const t of tasks) lines.push(`    [${t.done ? "x" : " "}] ${t.title}`);
+  if (r.detail) lines.push(`    detail: ${r.detail}`);
+  return lines.join("\n");
 }
 
 async function handleCreateReminder(args) {
@@ -880,6 +910,13 @@ async function handleListReminders(args) {
 
   const reminders = data.reminders ?? [];
   if (!reminders.length) return text("No reminders match.");
+  // verbose: one FULL block per reminder (detail, created/updated, tasks with done-flags,
+  // labels, caseId) so a cleanup sweep triages the whole set in ONE call — no get_reminder
+  // per reminder. Compact one-liners otherwise. (verbose is a render concern — it never
+  // hits the API, which always returns the full records.)
+  if (args.verbose) {
+    return text([`Reminders (${reminders.length}) — full detail:`, ...reminders.map(reminderBlock)].join("\n\n"));
+  }
   const lines = [`Reminders (${reminders.length}):`];
   for (const r of reminders) lines.push(`  - ${reminderLine(r)}`);
   return text(lines.join("\n"));
@@ -897,6 +934,10 @@ async function handleGetReminder(args) {
   const lines = [`${r.id} — ${r.title}`, `Status: ${r.status}`];
   if (r.dueAt) lines.push(`Due: ${r.dueAt}`);
   if (r.domain) lines.push(`Domain: ${r.domain}`);
+  // Surface createdAt/updatedAt so an agent can judge staleness — how long a nudge
+  // has been sitting open — which is the signal the reminders-review sweep acts on.
+  if (r.createdAt) lines.push(`Created: ${r.createdAt}`);
+  if (r.updatedAt && r.updatedAt !== r.createdAt) lines.push(`Updated: ${r.updatedAt}`);
   if (r.completedAt) lines.push(`Completed: ${r.completedAt}`);
   if (Array.isArray(r.labels) && r.labels.length) lines.push(`Labels: ${r.labels.join(", ")}`);
   if (r.detail) lines.push(`\nDetail: ${r.detail}`);
