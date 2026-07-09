@@ -300,8 +300,9 @@ surrounding chat to know **whose court the ball is in**.
 - **In a group**, "whose court" is fuzzier — a trailing message from *someone else*
   rarely means the user owes a reply. Reconcile a group chat onto a case only when it
   carries a real, trackable matter (a decision, a deliverable, a logistics thread), not
-  for every social back-and-forth. When in doubt, a group nudge is a **reminder**, not a
-  case (Step 4).
+  for every social back-and-forth. And a group nudge becomes a **reminder** only when
+  it's a commitment the user owns (the five tests, Step 4) — idle chatter is **neither a
+  case nor a reminder: drop it**.
 
 ## STEP 2 — Dedup first: SEARCH before you create
 
@@ -389,19 +390,33 @@ With the manual-action guard satisfied, reconcile the chat onto its case.
   - **Idempotency:** don't relink a message that's already on the case — check the
     case's linked messages (by `subject` + `from` + `receivedAt`) before linking.
 
-**CASE vs REMINDER — pick the right shape.** A **Case** is a unit of **WORK**: it needs
-analysis, multiple steps, or ongoing tracking (a client onboarding, a negotiation, a
-project). A **Reminder** is a minor **notice / check / do** that doesn't justify a whole
-card — *"plumber said he'll come Thursday, confirm the time"*, *"a friend asked for the
-restaurant name"*, *"pay the deposit before Friday"*. If the message is a one-off nudge
-with no real workstream behind it, make a **reminder, not a case** (and don't spin up a
-case just to hold it). Group chatter especially tends toward reminders. Reminders are
-no longer bare strings: a reminder carries a `title`, `detail`, `dueAt`, `domain`,
-catalog **`labels`**, a short **`tasks`** checklist (`{ title, done? }` items, NOT full
-case Tasks), and **linked messages** — so you can hang several WhatsApp messages about
-one matter onto ONE reminder. **Prefer linking the reminder to a matching case /
-initiative** (`caseId` / `link_reminder`) so that node lists it; only standalone when
-nothing fits.
+**CASE vs REMINDER vs DROP — and mint a reminder SPARINGLY.** A **Case** is a unit of
+**WORK**: analysis, multiple steps, or ongoing tracking (a client onboarding, a
+negotiation, a project). A **Reminder** is a **commitment YOU own** — one concrete
+action, in your court, with a real consequence if you miss it. It is **not** a catch-all
+for "a minor notice" or for group chatter: before you `create_reminder`, it must pass
+**all five tests** — fail any and it is **NOT a reminder → DROP it** (advance the chat's
+cursor, nothing on the board):
+
+1. **Commitment, not notification** — you decided to do it / owe someone; not an alert
+   pushed at you. *A broadcast, a "so-and-so joined", a shared listing, an FYI* → DROP.
+2. **Ball in your court** — waiting on someone (or a group) to reply/decide is a **watch,
+   not a task** → DROP (at most an `add_note` on the case); it returns only as a *dated
+   follow-up you own*. **A message that just needs your reply is NOT a reminder either →
+   leave it to `unanswered-messages`** (*"a friend asked for the restaurant name"*).
+3. **Real, dated consequence** — miss it and money / a slot / a deadline breaks
+   (*"pay the deposit before Friday"*). No stakes and no deadline → DROP.
+4. **Specific next action** — *"confirm the time with the plumber", "send Ana the
+   address"*. NOT *"monitor / be aware of / decide whether to"* — open loops → DROP.
+5. **Ties to a person, money, or a priority you care about** — a discretionary want or a
+   courtesy nice-to-have → DROP.
+
+**Context for a live matter** → `add_note` on that case, not a standalone reminder. When
+all five hold, `create_reminder` carries a `title`, `detail`, `dueAt`, `domain`, catalog
+**`labels`**, a short **`tasks`** checklist (`{ title, done? }` items, NOT full case
+Tasks), and **linked messages** (many messages on one matter → ONE reminder); **prefer
+linking it to a matching case / initiative** (`caseId` / `link_reminder`), standalone
+only when nothing fits.
 
 Then map the chat's current head to board ops:
 
@@ -413,7 +428,8 @@ Then map the chat's current head to board ops:
 | **New matter (no case)** | `create_case` with `domain`, `status`, `summary` (name the resolved entity in it), seed `tasks`, `labels`, and `vaultLinks` (the resolved entity). |
 | **A CONFIRMED appointment / meeting in a message** — a date **and** time both sides have agreed (an inbound *"see you Thu 2pm"* / *"your appointment is confirmed for the 25th"*, **or** the user's own *"yes, Thursday 2pm works"*) | Put it on the **board calendar**: extract `title`, `date` (YYYY-MM-DD), `startTime`/`endTime` (HH:MM), and `location`, then **`create_event`** (via the **`calendar`** MCP) — **search the board** first for the matching case (entity, topic) and set `caseId` when one exists, else create it standalone (no `caseId`) and link it retroactively once a case is seeded. Also `link_message` the originating message to the case (`source: "whatsapp"`; `url: "https://wa.me/<digits>"` for a DM, omit for a group). A later **reschedule / cancel** in chat is an `update_event` / `delete_event` on the **same** event — never a second event. |
 | **A merely PROPOSED time, not yet confirmed** (*"can we meet Thursday?"*, *"does next week work?"*) | **Not a calendar event yet** — it's a reply owed: `add_task` *"Confirm time with …"* and set the lane `todo` (respect a manual lane — Step 3). Create the event **only once the appointment is confirmed** by either side (the row above). |
-| **Message is really a minor notice / check / do (a nudge, not a unit of work)** | `create_reminder` (via the **`board`** MCP) with `title*` (the nudge), optional `dueAt`, optional catalog `labels` (`list_labels` first), and an optional short `tasks` checklist; **search the board** for the matching case / initiative and set `caseId` (or `link_reminder`) so that node lists it — else standalone (no `caseId`); then attach the message **to the reminder itself** with `link_reminder_message` (NOT `link_message`; `source: "whatsapp"`, `url: "https://wa.me/<digits>"` for a DM / omit for a group, and for the user's OWN sent message `outbound: true` + `to` — a reminder auto-derives trust just like a case). A multitude of messages about ONE matter → ONE reminder. |
+| **Message is a commitment YOU own** (passes the five tests above — a specific action, in your court, with a real consequence) | `create_reminder` (via the **`board`** MCP) with `title*` (the nudge), optional `dueAt`, optional catalog `labels` (`list_labels` first), and an optional short `tasks` checklist; **search the board** for the matching case / initiative and set `caseId` (or `link_reminder`) so that node lists it — else standalone (no `caseId`); then attach the message **to the reminder itself** with `link_reminder_message` (NOT `link_message`; `source: "whatsapp"`, `url: "https://wa.me/<digits>"` for a DM / omit for a group, and for the user's OWN sent message `outbound: true` + `to` — a reminder auto-derives trust just like a case). A multitude of messages about ONE matter → ONE reminder. |
+| **Message is a notification / watch / want** (FAILS the five tests — a broadcast / FYI, a shared listing; "waiting on their reply"; idle group chatter; a discretionary want) | **No reminder — DROP.** Advance the chat's cursor and move on. If it's context for a live case, `add_note` it there; if it needs only your reply, that's `unanswered-messages`' job. Never mint a standalone reminder for it. |
 
 > In **approval mode** (Step 0), prepare these calls and confirm — or `propose` —
 > before any case create, lane move, task close, or message link.
@@ -585,11 +601,14 @@ Then **report**, per chat:
   / `set_parent` / `regroup_cases` here.
 - **`list_labels` before labels.** Assign only catalog ids it returns (unknown ids are
   rejected). Labels ≠ freeform `tags`. Same rule for a reminder's `labels`.
-- **Case vs reminder.** A case is a unit of WORK; a minor notice / check / do is a
-  **reminder** — `create_reminder` with `labels`, a short `tasks` checklist, and
-  messages attached via `link_reminder_message` (one reminder, many messages). Group
-  chatter usually wants a reminder, not a case. Prefer `caseId` / `link_reminder` to a
-  matching node; else standalone.
+- **Case vs reminder vs DROP.** A case is a unit of WORK; a **reminder is a commitment
+  you own** that passes the five tests (commitment-not-notification · your court · real
+  dated consequence · specific action · you care). A notification / watch / want — and
+  most **idle group chatter** — **fails** them → **DROP** (`add_note` on a live case if
+  it's context; `unanswered-messages` if it just needs a reply) — never a standalone
+  reminder. When it qualifies: `create_reminder` with `labels`, a short `tasks`
+  checklist, messages via `link_reminder_message` (one reminder, many messages); prefer
+  `caseId` / `link_reminder`.
 - **A confirmed appointment → the board calendar (Step 4).** When a message carries a
   date **and** time both sides have agreed — inbound *or* the user's own *"yes, that
   works"* — put it on the calendar with the **`calendar`** MCP's **`create_event`**
