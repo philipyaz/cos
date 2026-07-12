@@ -1,6 +1,21 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Keep the existing v3-style theme (ink/lane palettes, fonts) under Tailwind v4. */
+@config "../tailwind.config.ts";
+
+/*
+  Tailwind v4 changed the default border color from gray-200 to currentColor.
+  Restore the v3 default so existing bare `border` utilities render unchanged.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: #e5e7eb;
+  }
+}
 
 :root {
   color-scheme: light;
