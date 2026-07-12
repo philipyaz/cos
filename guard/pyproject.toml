@@ -17,7 +17,7 @@ dependencies = [
 # The real model. Heavy + gated (needs the Llama license + an HF token to download).
 # Install only on a host that will actually run the model: `uv sync --extra model`.
 model = [
-  "torch>=2.2",
+  "torch>=2.13.0",
   "transformers>=5.13.1",
 ]
 # httpx powers FastAPI's TestClient (the test exercises the HTTP endpoints, not just
