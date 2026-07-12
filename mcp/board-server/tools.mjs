@@ -740,14 +740,26 @@ const LIST_REMINDERS_TOOL = {
   name: "list_reminders",
   description:
     "List reminders on the board — the lightweight nudges (CHECK/DO items), one compact line each " +
-    "(status · due · title · linked caseId). Read-only. Filter by `status`, by the linked `caseId` " +
-    "(to see a node's reminders), and/or by `domain`. `GET /api/reminders`.",
+    "(status · due · created · title · linked caseId · task progress). Pass `verbose:true` to instead " +
+    "get EACH reminder's FULL content in one call — detail text, created/updated, the task checklist " +
+    "with done-flags, labels, domain, caseId — so a cleanup sweep can judge what's stale across the " +
+    "whole set WITHOUT a get_reminder per reminder (only linked emails still need get_reminder). " +
+    "Read-only. Filter by `status`, by the linked `caseId` (to see a node's reminders), and/or by " +
+    "`domain`. `GET /api/reminders`.",
   inputSchema: {
     type: "object",
     properties: {
       status: { type: "string", enum: REMINDER_STATUS, description: "Restrict to 'open' | 'done' | 'dismissed'." },
       caseId: { type: "string", description: "Only reminders linked to this node id (e.g. 'CASE-3')." },
       domain: { type: "string", enum: CASE_DOMAIN, description: "Restrict to 'work' or 'life'." },
+      verbose: {
+        type: "boolean",
+        description:
+          "When true, render each reminder's FULL record (detail, created/updated, the task checklist " +
+          "with done-flags, labels, domain, caseId) instead of a one-line summary — so a sweep can " +
+          "triage every reminder's content in a single call. Default false. Linked emails still require " +
+          "get_reminder.",
+      },
     },
   },
 };
