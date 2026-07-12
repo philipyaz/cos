@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { readDB } from "@/lib/store";
 import { isAddonEnabled } from "@/lib/addons";
+import { toISODay } from "@/lib/nutrition-format";
 import { TopBar } from "@/components/topbar";
 import { HealthView } from "@/components/fitness/health-view";
 
@@ -30,10 +31,14 @@ export default async function HealthPage() {
   const total = all.length;
   const entries = all.slice(0, 500);
 
+  // SSR clock: compute `today` once on the server and thread it down, so the client view never
+  // calls `new Date()` during render (no SSR/hydration drift, and no impure call in render).
+  const today = toISODay(new Date());
+
   return (
     <>
       <TopBar crumbs={["Cos", "Fitness", "Health"]} live />
-      <HealthView entries={entries} total={total} version={db.version} />
+      <HealthView entries={entries} total={total} version={db.version} today={today} />
     </>
   );
 }

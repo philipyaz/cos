@@ -16,6 +16,7 @@ import type { HealthEntry } from "@/lib/types";
 import { useLiveBoard } from "@/lib/use-live-board";
 import { getFitnessData } from "@/lib/fitness-client";
 import { formatDay, formatTimestampDay, formatTime } from "@/lib/fitness-format";
+import { addDays } from "@/lib/nutrition-format";
 import { IconHeart, IconWarning } from "@/components/icons";
 import { FormScoreWidget } from "@/components/form-score-widget";
 
@@ -85,10 +86,12 @@ export function HealthView({
   entries: initialEntries,
   total: initialTotal,
   version,
+  today,
 }: {
   entries: HealthEntry[];
   total: number;
   version?: number;
+  today: string;
 }) {
   // Live entries list + total, seeded from SSR. The board version we last reconciled to — a
   // ref so the SSE callback always compares against the freshest value (mirrors the views).
@@ -179,6 +182,7 @@ export function HealthView({
             steps={sections.steps}
             vo2max={sections.vo2max}
             restingHr={sections.restingHr}
+            today={today}
           />
           <WorkoutsSection entries={sections.workouts} />
           <SleepSection entries={sections.sleep} />
@@ -313,11 +317,12 @@ function NapSection({ entries }: { entries: HealthEntry[] }) {
   );
 }
 
-function MetricCards({ hrv, steps, vo2max, restingHr }: {
+function MetricCards({ hrv, steps, vo2max, restingHr, today }: {
   hrv: HealthEntry[];
   steps: HealthEntry[];
   vo2max: HealthEntry[];
   restingHr: HealthEntry[];
+  today: string;
 }) {
   const cards: { label: string; value: string; sub: string }[] = [];
 
@@ -342,9 +347,10 @@ function MetricCards({ hrv, steps, vo2max, restingHr }: {
   }
 
   if (steps.length > 0) {
-    // Show today's steps; fall back to yesterday if no data today.
-    const today = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    // Show today's steps; fall back to yesterday if no data today. `today` is the parent's SSR
+    // clock (never `new Date()` during render → no hydration drift, no impure call); `yesterday`
+    // is pure calendar arithmetic off it.
+    const yesterday = addDays(today, -1);
     const todayEntry = steps.find((e) => e.ts === today);
     const latest = todayEntry ?? steps.find((e) => e.ts === yesterday) ?? steps[0];
     const v = extractQty(latest, "value", "count");
