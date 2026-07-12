@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 # dev pytest` fully offline + fast: the hermetic test forces COS_GUARD_CLASSIFIER=
 # heuristic (pure-regex, no torch, no network), so the engine never touches the model.
 dependencies = [
-  "fastapi>=0.110",
+  "fastapi>=0.139.0",
   "uvicorn>=0.29",
 ]
 
@@ -17,13 +17,13 @@ dependencies = [
 # The real model. Heavy + gated (needs the Llama license + an HF token to download).
 # Install only on a host that will actually run the model: `uv sync --extra model`.
 model = [
-  "torch>=2.2",
-  "transformers>=4.40",
+  "torch>=2.13.0",
+  "transformers>=5.13.1",
 ]
 # httpx powers FastAPI's TestClient (the test exercises the HTTP endpoints, not just
 # the engine), so it is a dev dep alongside pytest.
 dev = [
-  "pytest>=8",
+  "pytest>=9.1.1",
   "httpx>=0.27",
 ]
 

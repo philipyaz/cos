@@ -16,9 +16,11 @@ description: >
 This skill **reconciles WhatsApp with the board**. For every chat with recent
 activity — DMs *and* groups, inbound *and* the user's own sent messages — it links
 the message onto the right case, closes or adds tasks, moves the lane, sets labels,
-and keeps **one card per matter**. It writes to the board **only** through the
-**`board`** MCP — never `bash`/`curl` (Cowork's sandbox blocks outbound HTTP; the
-tools exist for exactly this).
+**puts any confirmed appointment on the board calendar** (Step 4), and keeps **one
+card per matter**. It writes **only** through the chief-of-staff MCP tools — the
+**`board`** MCP for cases / tasks / reminders / messages / labels and the
+**`calendar`** MCP for events — never `bash`/`curl` (Cowork's sandbox blocks outbound
+HTTP; the tools exist for exactly this).
 
 This skill is **BOARD-ONLY**. It uses **only the READ tools** of the **`whatsapp`**
 MCP — `search_contacts`, `get_contact`, `list_chats`, `get_chat`, `list_messages`,
@@ -409,7 +411,8 @@ Then map the chat's current head to board ops:
 | **Inbound needs our reply / action** | Ensure a task exists (`add_task` "Reply to …"); set lane `todo` (or `urgent` if time-critical) — **unless** a human set a different lane, then respect it. (This skill does **not** reply on WhatsApp; it only tracks that a reply is owed.) |
 | **The user's own sent reply (`is_from_me: true`)** | The ball is in their court: lane `waiting_for_input`, and `complete_task` on the "reply" task — **unless** a human set the lane. `link_message` with `outbound: true` + `to`. |
 | **New matter (no case)** | `create_case` with `domain`, `status`, `summary` (name the resolved entity in it), seed `tasks`, `labels`, and `vaultLinks` (the resolved entity). |
-| **Meeting / event embedded in a message** | Extract `title` / `date` / `startTime`–`endTime` from the message; **search the board** for the matching case (entity, topic) and **`create_event`** (via the **`calendar`** MCP) with `caseId` set when a case exists — else standalone (no `caseId`), link it retroactively once it seeds a case; `link_message` the originating message to the case (`source: "whatsapp"`; `url: "https://wa.me/<digits>"` for a DM, omit for a group). |
+| **A CONFIRMED appointment / meeting in a message** — a date **and** time both sides have agreed (an inbound *"see you Thu 2pm"* / *"your appointment is confirmed for the 25th"*, **or** the user's own *"yes, Thursday 2pm works"*) | Put it on the **board calendar**: extract `title`, `date` (YYYY-MM-DD), `startTime`/`endTime` (HH:MM), and `location`, then **`create_event`** (via the **`calendar`** MCP) — **search the board** first for the matching case (entity, topic) and set `caseId` when one exists, else create it standalone (no `caseId`) and link it retroactively once a case is seeded. Also `link_message` the originating message to the case (`source: "whatsapp"`; `url: "https://wa.me/<digits>"` for a DM, omit for a group). A later **reschedule / cancel** in chat is an `update_event` / `delete_event` on the **same** event — never a second event. |
+| **A merely PROPOSED time, not yet confirmed** (*"can we meet Thursday?"*, *"does next week work?"*) | **Not a calendar event yet** — it's a reply owed: `add_task` *"Confirm time with …"* and set the lane `todo` (respect a manual lane — Step 3). Create the event **only once the appointment is confirmed** by either side (the row above). |
 | **Message is really a minor notice / check / do (a nudge, not a unit of work)** | `create_reminder` (via the **`board`** MCP) with `title*` (the nudge), optional `dueAt`, optional catalog `labels` (`list_labels` first), and an optional short `tasks` checklist; **search the board** for the matching case / initiative and set `caseId` (or `link_reminder`) so that node lists it — else standalone (no `caseId`); then attach the message **to the reminder itself** with `link_reminder_message` (NOT `link_message`; `source: "whatsapp"`, `url: "https://wa.me/<digits>"` for a DM / omit for a group, and for the user's OWN sent message `outbound: true` + `to` — a reminder auto-derives trust just like a case). A multitude of messages about ONE matter → ONE reminder. |
 
 > In **approval mode** (Step 0), prepare these calls and confirm — or `propose` —
@@ -546,8 +549,8 @@ Then **report**, per chat:
 
 - **BOARD-ONLY, READ-ONLY on WhatsApp.** This skill uses only the `whatsapp` MCP's
   **read** tools and **never** `send_message` / `send_file` / `send_audio_message`. It
-  writes only to the **board** (via the `board` MCP) and delegates knowledge to
-  `/second-brain-ingest`.
+  writes only to the **board** (via the `board` MCP, and the `calendar` MCP for
+  confirmed appointments) and delegates knowledge to `/second-brain-ingest`.
 - **Scan before you load (Step 1.2).** Every message through the `guard` MCP via
   **`scan_email`** with the WhatsApp mapping (`from`=sender phone/JID,
   `subject`=chat name or "WhatsApp DM", `body`=text, `receivedAt`=ts, **`threadId`=chat_jid**,
@@ -587,6 +590,14 @@ Then **report**, per chat:
   messages attached via `link_reminder_message` (one reminder, many messages). Group
   chatter usually wants a reminder, not a case. Prefer `caseId` / `link_reminder` to a
   matching node; else standalone.
+- **A confirmed appointment → the board calendar (Step 4).** When a message carries a
+  date **and** time both sides have agreed — inbound *or* the user's own *"yes, that
+  works"* — put it on the calendar with the **`calendar`** MCP's **`create_event`**
+  (`title*`, `date*` = YYYY-MM-DD, `startTime`/`endTime` = HH:MM, optional `location`),
+  setting `caseId` to the matching case (else standalone, linked once a case exists). A
+  merely *proposed* time is a reply owed (`add_task`), **not** an event; a later
+  reschedule / cancel is `update_event` / `delete_event` on the same event, never a
+  duplicate.
 - **Always set `domain`** (`work` | `life`) on `create_case`.
 - **Scan both directions, across DMs and groups.** Inbound *and* the user's own sent
   (`is_from_me`) — a sent reply moves the case to `waiting_for_input` and closes its
@@ -692,6 +703,21 @@ Then **report**, per chat:
   Finish with `mark_email_replayed({ id })` so it leaves the queue. (Releasing also
   trusted the sender `ifAbsent` — a board/guard side effect; you didn't and don't set
   trust.)
+
+> **7 — A confirmed appointment in a DM → put it on the board calendar.** A client DMs
+> *"confirmed — let's do the review call Thursday the 25th at 2pm, my office at 40 King
+> St"* (or the user themself replies *"yes, Thursday 2pm works"*). The time is **agreed
+> by both sides**, so it's a real appointment, not just a proposal.
+
+- **Step 1.2 first** — `scan_email` on the message returns `clean`. **Search the
+  board** for the client's case; it matches `CASE-12`. **`create_event`** (via the
+  **`calendar`** MCP) `{ title: "Review call — Acme Ltd", date: "2026-06-25", startTime:
+  "14:00", location: "40 King St", caseId: "CASE-12", domain: "work" }`. `link_message`
+  the DM onto `CASE-12` (`source: "whatsapp"`, `url: "https://wa.me/<digits>"`). If the
+  client later DMs *"can we push it to 3pm?"*, that's an **`update_event`** on the same
+  `EVT-id` — **not** a second event. Advance the cursor. (Contrast: an earlier *"are you
+  free Thursday?"* with no agreed time is **not** an event — it's an `add_task` *"Confirm
+  time,"* lane `todo`, until someone confirms.)
 
 ## What's Next
 
