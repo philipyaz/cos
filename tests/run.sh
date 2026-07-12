@@ -74,19 +74,17 @@
 #      date filters, GET-by-id, PATCH persist (an x-actor:agent write round-trips),
 #      the missing-date/slot/description + non-number-calories + bad-slot/bad-health
 #      400s, and delete. Snapshots+restores cases.json. Skipped when no board is up.
-#  10g. api-nutrition-weight — ONLY if a board is running: the v10 weight-loss API
-#      (/api/nutrition/weight[/:id] + /goal + /targets) after enabling the add-on:
-#      create→WEIGHT-<n>+version bump (weightKg + note persist), UPSERT BY DAY (a
+#  10g. api-body-weight — ONLY if a board is running: the v14 weigh-in lifecycle
+#      (/api/body/weight[/:id]) after enabling the "body" add-on:
+#      create→WEIGHT-<n>+version bump (weightKg + note persist), body-composition
+#      (a POST carrying bodyFatPct persists the v14 optionals), UPSERT BY DAY (a
 #      re-POST for the same date is a 200 update, created:false, same id — one point
 #      per day), lb→kg at the boundary (a weightLb-only POST stores canonical kg), list
-#      ASC-by-date + the from/to window, GET-by-id, PATCH persist (an x-actor:agent
-#      write round-trips), PUT/GET the goal singleton, GET /targets → a configured
-#      envelope (numeric dailyCalorieTarget + P/F/C macros + the always-on
-#      not-medical-advice flag), the missing-date / neither-weightKg-nor-weightLb +
-#      bad-goal (bad sex/activity, non-positive age) 400s, the GATE (a DISABLED add-on
-#      404s POST /weight + PUT /goal while GET /weight + /goal + /targets stay 200), and
-#      delete. Snapshots+restores cases.json (weights + nutritionGoal + settings.addons
-#      live there → net-zero). Skipped when no board is up.
+#      ASC-by-date + the half-open from/to window, GET-by-id, PATCH persist (an
+#      x-actor:agent write round-trips), the missing-date / neither-weightKg-nor-weightLb
+#      / both-weights (exactly-one) / out-of-range-bodyFatPct 400s, and delete. The GATE
+#      contract is owned by api-body-gate (10h1). Snapshots+restores cases.json (weights
+#      + settings.addons live there → net-zero). Skipped when no board is up.
 #  10h. api-fitness-gate — ONLY if a board is running: the Add-ons GATE contract for
 #      the unified "fitness" add-on (/api/fitness/* + /api/fitness/profile + /api/addons[/:id]). A
 #      DISABLED add-on rejects every WRITE (POST /api/fitness/push, POST /api/fitness/profile) with
@@ -651,28 +649,26 @@ else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
-# --- 10g. api-nutrition-weight (only when a board is healthy) ----------------
-# The v10 weight-loss API (board/app/api/nutrition/weight[/:id] + /goal + /targets) with the
-# add-on ENABLED: create bumps version + mints a WEIGHT-<n> id (weightKg + note persist);
-# UPSERT BY DAY (a re-POST for the same date is a 200 update, created:false, same id — one
-# point per day); lb→kg at the boundary (a weightLb-only POST stores canonical kg); GET lists
-# it ASC-by-date and the from/to window narrows; GET-by-id; PATCH persists (an x-actor:agent
-# write round-trips); PUT then GET the goal SINGLETON; GET /targets returns a CONFIGURED
-# envelope (numeric dailyCalorieTarget + P/F/C macros + the always-on not-medical-advice
-# flag); the missing-date / neither-weightKg-nor-weightLb + bad-goal (bad sex/activity,
-# non-positive age) writes are rejected with 400; the GATE (a DISABLED add-on 404s POST
-# /weight + PUT /goal while GET /weight + /goal + /targets stay 200); DELETE drops the id.
-# Snapshots + restores board/data/cases.json (weights + nutritionGoal + settings.addons live
-# there → net-zero). Skipped when no board.
+# --- 10g. api-body-weight (only when a board is healthy) --------------------
+# The v14 weigh-in lifecycle (board/app/api/body/weight[/:id]) with the "body" add-on ENABLED:
+# create bumps version + mints a WEIGHT-<n> id (weightKg + note persist); a POST carrying
+# bodyFatPct persists the v14 body-composition optionals; UPSERT BY DAY (a re-POST for the same
+# date is a 200 update, created:false, same id — one point per day); lb→kg at the boundary (a
+# weightLb-only POST stores canonical kg); GET lists it ASC-by-date and the half-open from/to
+# window narrows; GET-by-id; PATCH persists (an x-actor:agent write round-trips); the missing-date
+# / neither-weightKg-nor-weightLb / BOTH-weightKg-and-weightLb (exactly-one) / out-of-range
+# bodyFatPct writes are rejected with 400; DELETE drops the id (a re-GET 404s). The GATE contract
+# itself is owned by api-body-gate.mjs (10h1). Snapshots + restores board/data/cases.json (weights
+# + settings.addons live there → net-zero). Skipped when no board.
 echo
-echo "--- [10g] api-nutrition-weight (live board) -----------------"
+echo "--- [10g] api-body-weight (live board) ----------------------"
 if [ "${BOARD_UP}" -eq 1 ]; then
-  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-weight.mjs"; then
-    echo "api-nutrition-weight: PASS"
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-body-weight.mjs"; then
+    echo "api-body-weight: PASS"
   else
-    echo "api-nutrition-weight: FAIL"
+    echo "api-body-weight: FAIL"
     fail=1
-    fail_reasons="${fail_reasons} api-nutrition-weight"
+    fail_reasons="${fail_reasons} api-body-weight"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
