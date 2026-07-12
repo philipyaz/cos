@@ -23,7 +23,7 @@ model = [
 # httpx powers FastAPI's TestClient (the test exercises the HTTP endpoints, not just
 # the engine), so it is a dev dep alongside pytest.
 dev = [
-  "pytest>=8",
+  "pytest>=9.1.1",
   "httpx>=0.27",
 ]
 
