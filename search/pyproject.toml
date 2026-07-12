@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 # embedder + the brute-force backend need NEITHER, so the offline test suite runs
 # even on an arch where those wheels are absent (the turbo param importorskips).
 dependencies = [
-  "fastapi>=0.110",
+  "fastapi>=0.139.0",
   "uvicorn>=0.51.0",
   "numpy>=1.26",
   "turbovec>=0.7,<0.8",
