@@ -68,6 +68,13 @@ fi
 # Nutrition & Chef add-on (built-in; in-repo mcp/nutrition-server). Gated per-board via
 # Settings.addons — this default only seeds the bridge port for the supergateway HTTP bridge.
 : "${NUTRITION_BRIDGE_PORT:=8007}"
+# Fitness add-on (built-in; in-repo mcp/fitness-server). Gated per-board via Settings.addons —
+# this default only seeds the supergateway HTTP bridge port.
+: "${FITNESS_BRIDGE_PORT:=8011}"
+# Body add-on (built-in; in-repo mcp/body-server). The foundational add-on (body identity / weight /
+# objective) that nutrition + fitness read; gated per-board via Settings.addons (it hard auto-enables
+# under either consumer). This default only seeds the supergateway HTTP bridge port.
+: "${BODY_BRIDGE_PORT:=8012}"
 
 # --- 3. Override defaults with the real machine config (once cos-setup has written it) ---------
 if [ -f "$REPO_ROOT/config/cos.env" ]; then
@@ -91,6 +98,8 @@ fi
 : "${WHATSAPP_MCP_BRIDGE_URL:=http://localhost:$WHATSAPP_MCP_BRIDGE_PORT}"
 : "${WHATSAPP_GO_URL:=http://localhost:$WHATSAPP_GO_PORT}"
 : "${NUTRITION_BRIDGE_URL:=http://localhost:$NUTRITION_BRIDGE_PORT}"
+: "${FITNESS_BRIDGE_URL:=http://localhost:$FITNESS_BRIDGE_PORT}"
+: "${BODY_BRIDGE_URL:=http://localhost:$BODY_BRIDGE_PORT}"
 
 # --- 5. Export for child processes ------------------------------------------------------------
 export REPO_ROOT BREW_PREFIX NODE_BIN UV_BIN SUPERGATEWAY_BIN LAUNCH_AGENTS_DIR COWORK_CONFIG
@@ -103,3 +112,5 @@ export SEARCH_SIDECAR_PORT GUARD_SIDECAR_PORT SEARCH_SIDECAR_URL GUARD_SIDECAR_U
 export COS_GUARD_MODEL COS_GUARD_THRESHOLD
 export WHATSAPP_MCP_DIR WHATSAPP_MCP_BRIDGE_PORT WHATSAPP_GO_PORT WHATSAPP_MCP_BRIDGE_URL WHATSAPP_GO_URL
 export NUTRITION_BRIDGE_PORT NUTRITION_BRIDGE_URL
+export FITNESS_BRIDGE_PORT FITNESS_BRIDGE_URL
+export BODY_BRIDGE_PORT BODY_BRIDGE_URL

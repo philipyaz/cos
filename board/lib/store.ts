@@ -17,9 +17,18 @@ import type {
   PantryItem,
   MealPlanEntry,
   WeightEntry,
-  NutritionGoal,
   ActivityLevel,
   BiologicalSex,
+  AthleteProfile,
+  CoachingArtifact,
+  CoachingArtifactKind,
+  ArtifactSource,
+  BodyProfile,
+  BodyObjective,
+  DietProfile,
+  NutritionTargetArtifact,
+  NutritionTargetKind,
+  TrainingStatus,
   MessageRecord,
   CaseNote,
   Task,
@@ -37,7 +46,7 @@ import type {
   Priority,
   Actor,
 } from "./types";
-import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, caseKind } from "./types";
+import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, VALID_ARTIFACT_SOURCE, VALID_TRAINING_STATUS, caseKind } from "./types";
 import {
   hierarchyViolation,
   rollupFor,
@@ -101,6 +110,10 @@ const nowISO = (): string => new Date().toISOString();
 // db.nutritionGoal forward when it is an object (the singleton — mirrors db.settings).
 // v11 (MessageRecord.needsAnswer/answeredAt/context — the unanswered-messages flags) is
 // likewise a no-op here: the optionals ride through the messages[] array verbatim.
+// v12 carries db.healthEntries forward when it is an array and db.athleteProfile forward
+// when it is an object (the "fitness" add-on — mirrors db.weights/db.nutritionGoal).
+// v13 carries db.coachingArtifacts forward when it is an array (the "fitness" add-on's
+// polymorphic AI coaching artifacts — mirrors db.healthEntries).
 export function migrate(raw: unknown): DBShape {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
@@ -124,12 +137,74 @@ export function migrate(raw: unknown): DBShape {
   if (Array.isArray(obj.pantryItems)) db.pantryItems = obj.pantryItems as DBShape["pantryItems"];
   if (Array.isArray(obj.mealPlanEntries)) db.mealPlanEntries = obj.mealPlanEntries as DBShape["mealPlanEntries"];
   if (Array.isArray(obj.weights)) db.weights = obj.weights as DBShape["weights"];
-  // The goal is a SINGLETON object (not an array) — carry it forward like db.settings.
-  if (obj.nutritionGoal && typeof obj.nutritionGoal === "object") db.nutritionGoal = obj.nutritionGoal as DBShape["nutritionGoal"];
+  // v14: db.nutritionGoal is NO LONGER carried forward — it is the read-only source the v14
+  // synthesis below transforms into db.bodyProfile + db.bodyObjective, then dropped on next write
+  // (downgrade-safe: obj.nutritionGoal on disk stays untouched until the store is next written).
+  if (Array.isArray(obj.healthEntries)) db.healthEntries = obj.healthEntries as DBShape["healthEntries"];
+  // The athlete profile is a SINGLETON object (not an array) — carry it forward like nutritionGoal.
+  if (obj.athleteProfile && typeof obj.athleteProfile === "object") db.athleteProfile = obj.athleteProfile as DBShape["athleteProfile"];
+  if (Array.isArray(obj.coachingArtifacts)) db.coachingArtifacts = obj.coachingArtifacts as DBShape["coachingArtifacts"];
   if (Array.isArray(obj.pending)) db.pending = obj.pending as DBShape["pending"];
   if (Array.isArray(obj.views)) db.views = obj.views as DBShape["views"];
   if (Array.isArray(obj.labels)) db.labels = obj.labels as DBShape["labels"];
   if (obj.settings && typeof obj.settings === "object") db.settings = obj.settings as DBShape["settings"];
+
+  // ── v14 carry-forward + synthesis ("body" add-on + nutrition redesign) ──────────────────────
+  // v14 files already carry these singletons/arrays — take them verbatim (idempotent).
+  if (obj.bodyProfile && typeof obj.bodyProfile === "object") db.bodyProfile = obj.bodyProfile as DBShape["bodyProfile"];
+  if (obj.bodyObjective && typeof obj.bodyObjective === "object") db.bodyObjective = obj.bodyObjective as DBShape["bodyObjective"];
+  if (obj.dietProfile && typeof obj.dietProfile === "object") db.dietProfile = obj.dietProfile as DBShape["dietProfile"];
+  if (Array.isArray(obj.nutritionTargets)) db.nutritionTargets = obj.nutritionTargets as DBShape["nutritionTargets"];
+
+  // Synthesize the body identity + objective from the LEGACY db.nutritionGoal. Clock-free
+  // (frozen anchors — never nowISO()), idempotent (skip when already present), write-new-keys-only
+  // (the legacy obj.nutritionGoal / obj.athleteProfile are READ but never mutated).
+  const BODY_DOB_ANCHOR_YEAR = 2026;                       // frozen ship-year — fabricates DOB from a legacy age
+  const BODY_OBJECTIVE_ANCHOR = "2026-01-01T00:00:00.000Z"; // frozen ISO fallback when a legacy record has no timestamp
+  const legacyGoal = (obj.nutritionGoal && typeof obj.nutritionGoal === "object")
+    ? (obj.nutritionGoal as Record<string, unknown>) : null;
+  const legacyAth = (obj.athleteProfile && typeof obj.athleteProfile === "object")
+    ? (obj.athleteProfile as Record<string, unknown>) : null;
+
+  // bodyProfile ← legacy goal identity (sex/heightCm) + fabricated DOB + deduped fitness level.
+  if (!db.bodyProfile && legacyGoal
+      && VALID_BIOLOGICAL_SEX.includes(legacyGoal.sex as BiologicalSex)
+      && typeof legacyGoal.age === "number" && typeof legacyGoal.heightCm === "number") {
+    const birthYear = BODY_DOB_ANCHOR_YEAR - Math.round(legacyGoal.age as number);
+    const lvl = legacyAth?.level;
+    const sports = Array.isArray(legacyAth?.sports) ? (legacyAth!.sports as unknown[]).map(String) : [];
+    db.bodyProfile = {
+      sex: legacyGoal.sex as BiologicalSex,
+      dateOfBirth: `${birthYear}-01-01`,                  // fabricated from age (clock-free)
+      heightCm: legacyGoal.heightCm as number,
+      trainingStatus: (lvl === "intermediate" || lvl === "advanced") ? (lvl as TrainingStatus) : "novice", // "beginner"→"novice"
+      resistanceTrains: sports.some((s) => ["strength_training", "crossfit", "hiit"].includes(s)),
+      weightUnit: legacyGoal.weightUnit === "lb" ? "lb" : "kg",
+      createdAt: typeof legacyGoal.createdAt === "string" ? legacyGoal.createdAt : BODY_OBJECTIVE_ANCHOR,
+      updatedAt: typeof legacyGoal.updatedAt === "string" ? legacyGoal.updatedAt : BODY_OBJECTIVE_ANCHOR,
+    };
+  }
+  // bodyObjective ← legacy loss-only goal, rendered as a free-text goalText (the agent rewrites it).
+  if (!db.bodyObjective && legacyGoal && VALID_ACTIVITY_LEVEL.includes(legacyGoal.activity as ActivityLevel)) {
+    const tgt = typeof legacyGoal.targetWeightKg === "number" ? legacyGoal.targetWeightKg : null;
+    const rate = typeof legacyGoal.rateKgPerWeek === "number" ? Math.abs(legacyGoal.rateKgPerWeek) : null;
+    const targetClause = tgt != null ? ` to a target of ${tgt} kg` : "";
+    const rateClause = rate ? ` at about ${rate} kg per week` : "";
+    db.bodyObjective = {
+      goalText: `Lose weight${targetClause}${rateClause}. (Imported from your previous weight-loss goal — edit this in your own words anytime.)`,
+      targetWeightKg: tgt,
+      targetDate: null,
+      activity: legacyGoal.activity as ActivityLevel,
+      createdAt: typeof legacyGoal.createdAt === "string" ? legacyGoal.createdAt : BODY_OBJECTIVE_ANCHOR,
+      updatedAt: typeof legacyGoal.updatedAt === "string" ? legacyGoal.updatedAt : BODY_OBJECTIVE_ANCHOR,
+    };
+  }
+
+  // v14: retire the legacy training-focus value "weight_loss" (the body objective owns "lose fat" now).
+  // Normalize a stored athlete goal to "general_fitness" WITHOUT mutating raw (shallow clone). Idempotent.
+  if (db.athleteProfile && (db.athleteProfile as { goal?: string }).goal === "weight_loss") {
+    db.athleteProfile = { ...db.athleteProfile, goal: "general_fitness" };
+  }
 
   return db;
 }
@@ -182,6 +257,15 @@ function validateDB(db: DBShape): void {
   for (const x of db.weights ?? []) {
     if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid weight entry: missing id");
   }
+  for (const x of db.healthEntries ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid health entry: missing id");
+  }
+  for (const x of db.coachingArtifacts ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid coaching artifact: missing id");
+  }
+  for (const x of db.nutritionTargets ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid nutrition target: missing id");
+  }
 }
 
 async function ensureFile(): Promise<void> {
@@ -189,7 +273,7 @@ async function ensureFile(): Promise<void> {
     await fs.access(DATA_FILE);
   } catch {
     await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [], foodLogs: [], pantryItems: [], mealPlanEntries: [], weights: [] };
+    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [], foodLogs: [], pantryItems: [], mealPlanEntries: [], weights: [], healthEntries: [], coachingArtifacts: [], nutritionTargets: [] };
     await fs.writeFile(DATA_FILE, JSON.stringify(empty, null, 2), "utf8");
   }
 }
@@ -206,6 +290,9 @@ function parseAndMigrate(text: string): DBShape {
   if (!db.pantryItems) db.pantryItems = [];
   if (!db.mealPlanEntries) db.mealPlanEntries = [];
   if (!db.weights) db.weights = []; // nutritionGoal stays optional/absent (a singleton, set on first PUT)
+  if (!db.healthEntries) db.healthEntries = []; // athleteProfile stays optional/absent (a singleton, set on first POST)
+  if (!db.coachingArtifacts) db.coachingArtifacts = [];
+  if (!db.nutritionTargets) db.nutritionTargets = []; // agent-authored targets (v14); the three v14 singletons stay optional/absent until first set
   if (!db.pending) db.pending = [];
   if (!db.views) db.views = [];
   if (!db.labels) db.labels = [];
@@ -411,6 +498,14 @@ export function nextWeightId(db: DBShape): string {
   return `WEIGHT-${max + 1}`;
 }
 
+export function nextCoachingArtifactId(db: DBShape): string {
+  const max = (db.coachingArtifacts ?? [])
+    .map((x) => parseInt(x.id.replace(/^[A-Za-z]+-/, ""), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `COACH-${max + 1}`;
+}
+
 export function nextTaskId(caseRec: CaseRecord): string {
   // Highest existing -T<k> + 1 so re-id under merge / after deletes stays unique.
   const max = caseRec.tasks
@@ -494,6 +589,22 @@ export function findWeight(db: DBShape, id: string): WeightEntry | undefined {
 // point per day), so this is how upsertWeight decides update-in-place vs append.
 export function findWeightByDate(db: DBShape, day: string): WeightEntry | undefined {
   return (db.weights ?? []).find((x) => x.date === day);
+}
+
+// ── Coaching artifacts (v13; "fitness" add-on) ─────────────────────────────────
+// Find an artifact by its minted id ("COACH-<n>").
+export function findCoachingArtifact(db: DBShape, id: string): CoachingArtifact | undefined {
+  return (db.coachingArtifacts ?? []).find((x) => x.id === id);
+}
+
+// Find the artifact for a given (kind, periodKey) — the UNIQUE upsert key. This is how
+// upsertCoachingArtifact decides replace-in-place vs append (one artifact per period+kind).
+export function findCoachingArtifactByPeriod(
+  db: DBShape,
+  kind: CoachingArtifactKind,
+  periodKey: string,
+): CoachingArtifact | undefined {
+  return (db.coachingArtifacts ?? []).find((x) => x.kind === kind && x.periodKey === periodKey);
 }
 
 // Reminders linked to a node — reminder.caseId is the single source of truth for
@@ -813,13 +924,18 @@ export function applyMealPlanUpdate(rec: MealPlanEntry, patch: Record<string, un
 // route handles the lb→kg conversion at its boundary so storage stays canonical kg).
 export function upsertWeight(
   db: DBShape,
-  input: { date: string; weightKg: number; note?: string },
+  input: { date: string; weightKg: number; bodyFatPct?: number; leanMassKg?: number; waistCm?: number; note?: string },
 ): { entry: WeightEntry; created: boolean } {
   if (!db.weights) db.weights = [];
   const now = nowISO();
   const existing = findWeightByDate(db, input.date);
   if (existing) {
+    // Upsert-by-day replaces the day's fields with what was passed (same contract as `note`):
+    // a comp-less re-log of a day clears that day's comp fields (the route decides partial vs full).
     existing.weightKg = input.weightKg;
+    existing.bodyFatPct = toOptionalNumber(input.bodyFatPct);
+    existing.leanMassKg = toOptionalNumber(input.leanMassKg);
+    existing.waistCm = toOptionalNumber(input.waistCm);
     existing.note = toOptionalString(input.note);
     existing.updatedAt = now;
     return { entry: existing, created: false };
@@ -828,6 +944,9 @@ export function upsertWeight(
     id: nextWeightId(db),
     date: input.date,
     weightKg: input.weightKg,
+    bodyFatPct: toOptionalNumber(input.bodyFatPct),
+    leanMassKg: toOptionalNumber(input.leanMassKg),
+    waistCm: toOptionalNumber(input.waistCm),
     note: toOptionalString(input.note),
     createdAt: now,
     updatedAt: now,
@@ -848,64 +967,102 @@ export function applyWeightUpdate(rec: WeightEntry, patch: Record<string, unknow
   if ("weightKg" in patch && typeof patch.weightKg === "number" && Number.isFinite(patch.weightKg)) {
     rec.weightKg = patch.weightKg;
   }
+  // v14 body-comp optionals — present-keys-only (PATCH), so a comp field only changes when sent.
+  if ("bodyFatPct" in patch) rec.bodyFatPct = toOptionalNumber(patch.bodyFatPct);
+  if ("leanMassKg" in patch) rec.leanMassKg = toOptionalNumber(patch.leanMassKg);
+  if ("waistCm" in patch) rec.waistCm = toOptionalNumber(patch.waistCm);
   if ("note" in patch) rec.note = toOptionalString(patch.note);
   rec.updatedAt = nowISO();
   return rec;
 }
 
-// Read the goal/profile SINGLETON, or undefined when none is set yet.
-export function getNutritionGoal(db: DBShape): NutritionGoal | undefined {
-  return db.nutritionGoal;
+// NOTE (v14 hard-cut): getNutritionGoal / setNutritionGoal / applyGoalPatch are REMOVED. The legacy
+// db.nutritionGoal is no longer a live concept — body identity + the free-text objective replace it
+// (see getBodyProfile / getBodyObjective below). migrate() still READS a legacy obj.nutritionGoal
+// (as a bare Record) to synthesize the v14 singletons, but nothing writes or serves it anymore.
+
+// ── Athlete profile singleton (v12; "fitness" add-on) ───────────────────────────
+// Read the athlete training-profile SINGLETON (db.athleteProfile), or undefined when none
+// is set yet. Mirrors getNutritionGoal — the profile is a bare object, not an array.
+export function getAthleteProfile(db: DBShape): AthleteProfile | undefined {
+  return db.athleteProfile;
 }
 
-// Create-or-replace the goal SINGLETON (the PUT path). The caller passes already-
-// validated/coerced fields (the route enforces the enums + required numerics). createdAt
-// is PRESERVED across a replace (first-set time is sticky, like the other records);
-// updatedAt is always bumped. Optional rateKgPerWeek/weightUnit fall back to their
-// defaults (0.5 / "kg") when absent so the stored singleton is always complete.
-export function setNutritionGoal(
+// Create-or-replace the athlete profile SINGLETON (the POST path). The caller passes
+// already-validated/coerced fields (the route enforces the enums + numeric ranges + the
+// notes cap). createdAt is PRESERVED across a replace (first-set time is sticky, like
+// nutritionGoal); updatedAt is always bumped. Returns the stored profile.
+export function setAthleteProfile(
   db: DBShape,
-  input: {
-    sex: BiologicalSex;
-    age: number;
-    heightCm: number;
-    activity: ActivityLevel;
-    targetWeightKg: number;
-    rateKgPerWeek?: number;
-    weightUnit?: "kg" | "lb";
-  },
-): NutritionGoal {
+  input: Omit<AthleteProfile, "createdAt" | "updatedAt">,
+): AthleteProfile {
   const now = nowISO();
-  const goal: NutritionGoal = {
-    sex: input.sex,
-    age: input.age,
-    heightCm: input.heightCm,
-    activity: input.activity,
-    targetWeightKg: input.targetWeightKg,
-    rateKgPerWeek: typeof input.rateKgPerWeek === "number" && Number.isFinite(input.rateKgPerWeek) ? input.rateKgPerWeek : 0.5,
-    weightUnit: input.weightUnit === "lb" ? "lb" : "kg",
-    createdAt: db.nutritionGoal?.createdAt ?? now, // sticky first-set time across replaces
+  const profile: AthleteProfile = {
+    ...input,
+    createdAt: db.athleteProfile?.createdAt ?? now, // sticky first-set time across replaces
     updatedAt: now,
   };
-  db.nutritionGoal = goal;
-  return goal;
+  db.athleteProfile = profile;
+  return profile;
 }
 
-// Merge a partial patch onto the EXISTING goal singleton (the PATCH path; the route
-// 404s when no goal is set yet). The single un-validating coercive chokepoint for the
-// goal: enums are validated against their VALID_ arrays (out-of-enum ignored), required
-// numerics are only written when finite + positive (never blanked to a nonsense value),
-// and weightUnit accepts only "kg"|"lb". Identity (createdAt) is never changed.
-export function applyGoalPatch(goal: NutritionGoal, patch: Record<string, unknown>): NutritionGoal {
-  if ("sex" in patch && VALID_BIOLOGICAL_SEX.includes(patch.sex as BiologicalSex)) goal.sex = patch.sex as BiologicalSex;
-  if ("age" in patch && typeof patch.age === "number" && Number.isFinite(patch.age) && patch.age > 0) goal.age = patch.age;
-  if ("heightCm" in patch && typeof patch.heightCm === "number" && Number.isFinite(patch.heightCm) && patch.heightCm > 0) goal.heightCm = patch.heightCm;
-  if ("activity" in patch && VALID_ACTIVITY_LEVEL.includes(patch.activity as ActivityLevel)) goal.activity = patch.activity as ActivityLevel;
-  if ("targetWeightKg" in patch && typeof patch.targetWeightKg === "number" && Number.isFinite(patch.targetWeightKg) && patch.targetWeightKg > 0) goal.targetWeightKg = patch.targetWeightKg;
-  if ("rateKgPerWeek" in patch && typeof patch.rateKgPerWeek === "number" && Number.isFinite(patch.rateKgPerWeek) && patch.rateKgPerWeek > 0) goal.rateKgPerWeek = patch.rateKgPerWeek;
-  if ("weightUnit" in patch && (patch.weightUnit === "kg" || patch.weightUnit === "lb")) goal.weightUnit = patch.weightUnit;
-  goal.updatedAt = nowISO();
-  return goal;
+// ── Coaching artifacts (v13; "fitness" add-on) ─────────────────────────────────
+// Upsert a coaching artifact BY (kind, periodKey) — the UNIQUE key: there is one artifact
+// per period+kind (re-generating the same week's plan REPLACES it rather than appending a
+// duplicate). On an existing match: replace payload/source/generatedAt, bump updatedAt, keep
+// id + createdAt STICKY (the first-persist identity). Else: mint id via nextCoachingArtifactId,
+// createdAt=updatedAt=now, push. Returns the artifact and whether it was newly created (the
+// route maps created → 201). The caller passes an already-validated input (lib/fitness-artifacts.ts).
+export function upsertCoachingArtifact(
+  db: DBShape,
+  input: {
+    kind: CoachingArtifactKind;
+    periodKey: string;
+    source: ArtifactSource;
+    payload: Record<string, unknown>;
+    generatedAt: string;
+  },
+): { artifact: CoachingArtifact; created: boolean } {
+  if (!db.coachingArtifacts) db.coachingArtifacts = [];
+  const now = nowISO();
+  const existing = findCoachingArtifactByPeriod(db, input.kind, input.periodKey);
+  if (existing) {
+    existing.payload = input.payload;
+    existing.source = input.source;
+    existing.generatedAt = input.generatedAt;
+    existing.updatedAt = now;
+    return { artifact: existing, created: false };
+  }
+  const artifact: CoachingArtifact = {
+    id: nextCoachingArtifactId(db),
+    kind: input.kind,
+    periodKey: input.periodKey,
+    source: input.source,
+    payload: input.payload,
+    generatedAt: input.generatedAt,
+    createdAt: now,
+    updatedAt: now,
+  };
+  db.coachingArtifacts.push(artifact);
+  return { artifact, created: true };
+}
+
+// Merge a partial patch onto a coaching artifact. Present-keys-only: a `payload` object
+// replaces the body, a valid `source` enum updates the author, a `generatedAt` string updates
+// the generation time. Identity (id, createdAt, kind, periodKey) is NEVER changed here — this
+// is the un-validating coercive chokepoint (mirrors applyFoodLogUpdate). Bumps updatedAt.
+export function applyCoachingArtifactUpdate(rec: CoachingArtifact, patch: Record<string, unknown>): CoachingArtifact {
+  if ("payload" in patch && patch.payload && typeof patch.payload === "object" && !Array.isArray(patch.payload)) {
+    rec.payload = patch.payload as Record<string, unknown>;
+  }
+  if ("source" in patch && VALID_ARTIFACT_SOURCE.includes(patch.source as ArtifactSource)) {
+    rec.source = patch.source as ArtifactSource;
+  }
+  if ("generatedAt" in patch && typeof patch.generatedAt === "string" && patch.generatedAt) {
+    rec.generatedAt = patch.generatedAt;
+  }
+  rec.updatedAt = nowISO();
+  return rec;
 }
 
 // ── Activity / notes ─────────────────────────────────────────────────────────
@@ -1227,5 +1384,230 @@ export function removeWeight(db: DBShape, id: string): boolean {
   const idx = db.weights.findIndex((x) => x.id === id);
   if (idx === -1) return false;
   db.weights.splice(idx, 1);
+  return true;
+}
+
+// Hard-remove a coaching artifact from db.coachingArtifacts. An artifact has NO outbound
+// links to clean up, so this is a plain splice (mirrors removeFoodLog/removeWeight). Returns
+// whether one was removed.
+export function removeCoachingArtifact(db: DBShape, id: string): boolean {
+  if (!db.coachingArtifacts) return false;
+  const idx = db.coachingArtifacts.findIndex((x) => x.id === id);
+  if (idx === -1) return false;
+  db.coachingArtifacts.splice(idx, 1);
+  return true;
+}
+
+// ── Body identity + objective singletons (v14; "body" add-on) ───────────────────
+// Read the body-identity SINGLETON (db.bodyProfile), or undefined when none is set. Mirrors
+// getAthleteProfile/getNutritionGoal — a bare object, not an array. The gate lives in the routes.
+export function getBodyProfile(db: DBShape): BodyProfile | undefined {
+  return db.bodyProfile;
+}
+
+// Create-or-replace the body-identity SINGLETON (the PUT path). createdAt is sticky across a
+// replace (first-set time), updatedAt always bumped. The caller passes already-validated fields.
+export function setBodyProfile(db: DBShape, input: Omit<BodyProfile, "createdAt" | "updatedAt">): BodyProfile {
+  const now = nowISO();
+  const profile: BodyProfile = {
+    ...input,
+    weightUnit: input.weightUnit === "lb" ? "lb" : "kg",
+    createdAt: db.bodyProfile?.createdAt ?? now, // sticky first-set time across replaces
+    updatedAt: now,
+  };
+  db.bodyProfile = profile;
+  return profile;
+}
+
+// Merge a partial patch onto the EXISTING body profile (the PATCH path; the route 404s when none).
+// The single un-validating coercive chokepoint: enums validate against their VALID_ arrays
+// (out-of-enum ignored), numerics only written when finite + positive (never blanked). Identity
+// (createdAt) is never changed. Mirrors applyGoalPatch.
+export function applyBodyProfilePatch(profile: BodyProfile, patch: Record<string, unknown>): BodyProfile {
+  if ("sex" in patch && VALID_BIOLOGICAL_SEX.includes(patch.sex as BiologicalSex)) profile.sex = patch.sex as BiologicalSex;
+  if ("dateOfBirth" in patch && typeof patch.dateOfBirth === "string" && patch.dateOfBirth) profile.dateOfBirth = patch.dateOfBirth;
+  if ("heightCm" in patch && typeof patch.heightCm === "number" && Number.isFinite(patch.heightCm) && patch.heightCm > 0) profile.heightCm = patch.heightCm;
+  if ("trainingStatus" in patch && VALID_TRAINING_STATUS.includes(patch.trainingStatus as TrainingStatus)) profile.trainingStatus = patch.trainingStatus as TrainingStatus;
+  if ("resistanceTrains" in patch) profile.resistanceTrains = Boolean(patch.resistanceTrains);
+  if ("weightUnit" in patch && (patch.weightUnit === "kg" || patch.weightUnit === "lb")) profile.weightUnit = patch.weightUnit;
+  profile.updatedAt = nowISO();
+  return profile;
+}
+
+// Read the body-objective SINGLETON (db.bodyObjective), or undefined when none is set yet.
+export function getBodyObjective(db: DBShape): BodyObjective | undefined {
+  return db.bodyObjective;
+}
+
+// Create-or-replace the body-objective SINGLETON (the PUT path). The objective is FREE TEXT + one
+// anchor: the caller passes goalText (route-capped) + targetWeightKg|null + targetDate|null + a
+// valid activity. createdAt sticky, updatedAt bumped.
+export function setBodyObjective(db: DBShape, input: Omit<BodyObjective, "createdAt" | "updatedAt">): BodyObjective {
+  const now = nowISO();
+  const objective: BodyObjective = {
+    goalText: input.goalText,
+    targetWeightKg: input.targetWeightKg,
+    targetDate: input.targetDate,
+    activity: input.activity,
+    createdAt: db.bodyObjective?.createdAt ?? now, // sticky first-set time across replaces
+    updatedAt: now,
+  };
+  db.bodyObjective = objective;
+  return objective;
+}
+
+// Merge a partial patch onto the EXISTING body objective (the PATCH path). goalText coerces to a
+// string (null → ""); targetWeightKg accepts a positive number OR null (explicit clear); targetDate
+// a string OR null; activity validates against VALID_ARRAY. Identity (createdAt) never changed.
+export function applyBodyObjectivePatch(objective: BodyObjective, patch: Record<string, unknown>): BodyObjective {
+  if ("goalText" in patch) objective.goalText = patch.goalText == null ? "" : String(patch.goalText);
+  if ("targetWeightKg" in patch) {
+    objective.targetWeightKg =
+      typeof patch.targetWeightKg === "number" && Number.isFinite(patch.targetWeightKg) && patch.targetWeightKg > 0
+        ? patch.targetWeightKg
+        : null; // any non-positive / null / non-number explicitly clears the anchor
+  }
+  if ("targetDate" in patch) objective.targetDate = typeof patch.targetDate === "string" && patch.targetDate ? patch.targetDate : null;
+  if ("activity" in patch && VALID_ACTIVITY_LEVEL.includes(patch.activity as ActivityLevel)) objective.activity = patch.activity as ActivityLevel;
+  objective.updatedAt = nowISO();
+  return objective;
+}
+
+// ── Dietary profile singleton (v14; "nutrition" add-on) ─────────────────────────
+// Coerce a free-string list field: keep strings, trim, drop empties, dedupe, cap count + length.
+const toStringList = (v: unknown, maxItems = 50, maxLen = 120): string[] =>
+  Array.isArray(v)
+    ? Array.from(
+        new Set(
+          v
+            .filter((s): s is string => typeof s === "string")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((s) => s.slice(0, maxLen)),
+        ),
+      ).slice(0, maxItems)
+    : [];
+
+// Read the dietary-profile SINGLETON (db.dietProfile), or undefined when none is set yet. The
+// philosophy DEFAULT is injected by the GET route (not here) so "" stays distinguishable from "never set".
+export function getDietProfile(db: DBShape): DietProfile | undefined {
+  return db.dietProfile;
+}
+
+// Create-or-replace the dietary-profile SINGLETON (the PUT path = full replace for the UI Save).
+// Lists coerced/trimmed/deduped; notes/philosophy capped. Missing fields default to empty (full
+// replace). createdAt sticky, updatedAt bumped.
+export function setDietProfile(
+  db: DBShape,
+  input: { allergies?: unknown; dietType?: unknown; notes?: unknown; philosophy?: unknown },
+): DietProfile {
+  const now = nowISO();
+  const profile: DietProfile = {
+    allergies: toStringList(input.allergies),
+    dietType: toStringList(input.dietType),
+    notes: typeof input.notes === "string" ? input.notes.slice(0, 2000) : "",
+    philosophy: typeof input.philosophy === "string" ? input.philosophy.slice(0, 24000) : "",
+    createdAt: db.dietProfile?.createdAt ?? now, // sticky first-set time across replaces
+    updatedAt: now,
+  };
+  db.dietProfile = profile;
+  return profile;
+}
+
+// Merge a partial patch onto the EXISTING dietary profile (the PATCH-merge path used by the MCP
+// set_diet_profile tool). PRESENT-KEYS-ONLY; a list field is whole-array replace-if-present /
+// leave-if-absent (NEVER element-merge) so a partial PATCH can never silently drop an allergen.
+export function applyDietProfilePatch(profile: DietProfile, patch: Record<string, unknown>): DietProfile {
+  if ("allergies" in patch) profile.allergies = toStringList(patch.allergies);
+  if ("dietType" in patch) profile.dietType = toStringList(patch.dietType);
+  if ("notes" in patch) profile.notes = patch.notes == null ? "" : String(patch.notes).slice(0, 2000);
+  if ("philosophy" in patch) profile.philosophy = patch.philosophy == null ? "" : String(patch.philosophy).slice(0, 24000);
+  profile.updatedAt = nowISO();
+  return profile;
+}
+
+// ── Agent-authored nutrition targets (v14; "nutrition" add-on) ──────────────────
+// A 1:1 clone of the coaching-artifact helpers applied to db.nutritionTargets. The board NEVER
+// computes a recommendation — the agent authors the payload and writes it via save_nutrition_targets.
+export function nextNutritionTargetId(db: DBShape): string {
+  const max = (db.nutritionTargets ?? [])
+    .map((x) => parseInt(x.id.replace(/^[A-Za-z]+-/, ""), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `NTARGET-${max + 1}`;
+}
+
+export function findNutritionTarget(db: DBShape, id: string): NutritionTargetArtifact | undefined {
+  return (db.nutritionTargets ?? []).find((x) => x.id === id);
+}
+
+// Find the target for a given (kind, periodKey) — the UNIQUE upsert key (one per period+kind).
+export function findNutritionTargetByPeriod(
+  db: DBShape,
+  kind: NutritionTargetKind,
+  periodKey: string,
+): NutritionTargetArtifact | undefined {
+  return (db.nutritionTargets ?? []).find((x) => x.kind === kind && x.periodKey === periodKey);
+}
+
+// Upsert a nutrition-targets artifact BY (kind, periodKey): re-authoring the same day REPLACES it
+// (keeping id + createdAt sticky) rather than appending. Returns the artifact + whether newly created
+// (route maps created → 201). Mirrors upsertCoachingArtifact.
+export function upsertNutritionTarget(
+  db: DBShape,
+  input: {
+    kind: NutritionTargetKind;
+    periodKey: string;
+    source: ArtifactSource;
+    payload: Record<string, unknown>;
+    generatedAt: string;
+  },
+): { artifact: NutritionTargetArtifact; created: boolean } {
+  if (!db.nutritionTargets) db.nutritionTargets = [];
+  const now = nowISO();
+  const existing = findNutritionTargetByPeriod(db, input.kind, input.periodKey);
+  if (existing) {
+    existing.payload = input.payload;
+    existing.source = input.source;
+    existing.generatedAt = input.generatedAt;
+    existing.updatedAt = now;
+    return { artifact: existing, created: false };
+  }
+  const artifact: NutritionTargetArtifact = {
+    id: nextNutritionTargetId(db),
+    kind: input.kind,
+    periodKey: input.periodKey,
+    source: input.source,
+    payload: input.payload,
+    generatedAt: input.generatedAt,
+    createdAt: now,
+    updatedAt: now,
+  };
+  db.nutritionTargets.push(artifact);
+  return { artifact, created: true };
+}
+
+// Merge a partial patch onto a nutrition-targets artifact. Present-keys-only; identity (id,
+// createdAt, kind, periodKey) is NEVER changed. Mirrors applyCoachingArtifactUpdate.
+export function applyNutritionTargetUpdate(rec: NutritionTargetArtifact, patch: Record<string, unknown>): NutritionTargetArtifact {
+  if ("payload" in patch && patch.payload && typeof patch.payload === "object" && !Array.isArray(patch.payload)) {
+    rec.payload = patch.payload as Record<string, unknown>;
+  }
+  if ("source" in patch && VALID_ARTIFACT_SOURCE.includes(patch.source as ArtifactSource)) {
+    rec.source = patch.source as ArtifactSource;
+  }
+  if ("generatedAt" in patch && typeof patch.generatedAt === "string" && patch.generatedAt) {
+    rec.generatedAt = patch.generatedAt;
+  }
+  rec.updatedAt = nowISO();
+  return rec;
+}
+
+// Hard-remove a nutrition-targets artifact. Plain splice (mirrors removeCoachingArtifact).
+export function removeNutritionTarget(db: DBShape, id: string): boolean {
+  if (!db.nutritionTargets) return false;
+  const idx = db.nutritionTargets.findIndex((x) => x.id === id);
+  if (idx === -1) return false;
+  db.nutritionTargets.splice(idx, 1);
   return true;
 }

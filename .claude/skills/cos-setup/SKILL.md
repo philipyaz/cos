@@ -69,8 +69,8 @@ are only needed if you run those optional add-ons (Steps 3.4 / 3.5 / 3.6).
   **only** these public values — **no secrets**. The config split is deliberate, four files under
   `config/`:
   - **`cos.env`** — machine paths + ports for the **skills/setup** (this step). Public, gitignored.
-  - **`secrets.env`** — the `ANTHROPIC_API_KEY` (step 3). The loader does **not** source it; only
-    the vault bridge's launch wrapper does.
+  - **`secrets.env`** — the `ANTHROPIC_API_KEY` (step 3). The loader does **not** source it; the
+    vault bridge's own launch wrapper (`launch.sh`) does.
   - **`settings.json`** — board/app prefs incl. `principalEmail` (step 0).
   - **`auto-sync.json`** — the ingest router's auto-sync switch.
 - **Idempotent** — never overwrites an existing `cos.env` (delete the file to regenerate, e.g. if

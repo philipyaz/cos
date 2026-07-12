@@ -74,19 +74,37 @@
 #      date filters, GET-by-id, PATCH persist (an x-actor:agent write round-trips),
 #      the missing-date/slot/description + non-number-calories + bad-slot/bad-health
 #      400s, and delete. Snapshots+restores cases.json. Skipped when no board is up.
-#  10g. api-nutrition-weight — ONLY if a board is running: the v10 weight-loss API
-#      (/api/nutrition/weight[/:id] + /goal + /targets) after enabling the add-on:
-#      create→WEIGHT-<n>+version bump (weightKg + note persist), UPSERT BY DAY (a
+#  10g. api-body-weight — ONLY if a board is running: the v14 weigh-in lifecycle
+#      (/api/body/weight[/:id]) after enabling the "body" add-on:
+#      create→WEIGHT-<n>+version bump (weightKg + note persist), body-composition
+#      (a POST carrying bodyFatPct persists the v14 optionals), UPSERT BY DAY (a
 #      re-POST for the same date is a 200 update, created:false, same id — one point
 #      per day), lb→kg at the boundary (a weightLb-only POST stores canonical kg), list
-#      ASC-by-date + the from/to window, GET-by-id, PATCH persist (an x-actor:agent
-#      write round-trips), PUT/GET the goal singleton, GET /targets → a configured
-#      envelope (numeric dailyCalorieTarget + P/F/C macros + the always-on
-#      not-medical-advice flag), the missing-date / neither-weightKg-nor-weightLb +
-#      bad-goal (bad sex/activity, non-positive age) 400s, the GATE (a DISABLED add-on
-#      404s POST /weight + PUT /goal while GET /weight + /goal + /targets stay 200), and
-#      delete. Snapshots+restores cases.json (weights + nutritionGoal + settings.addons
-#      live there → net-zero). Skipped when no board is up.
+#      ASC-by-date + the half-open from/to window, GET-by-id, PATCH persist (an
+#      x-actor:agent write round-trips), the missing-date / neither-weightKg-nor-weightLb
+#      / both-weights (exactly-one) / out-of-range-bodyFatPct 400s, and delete. The GATE
+#      contract is owned by api-body-gate (10h1). Snapshots+restores cases.json (weights
+#      + settings.addons live there → net-zero). Skipped when no board is up.
+#  10h. api-fitness-gate — ONLY if a board is running: the Add-ons GATE contract for
+#      the unified "fitness" add-on (/api/fitness/* + /api/fitness/profile + /api/addons[/:id]). A
+#      DISABLED add-on rejects every WRITE (POST /api/fitness/push, POST /api/fitness/profile) with
+#      404 while its GETs stay 200; PATCH /api/addons/fitness flips the gate live + bumps db.version;
+#      unknown-id 404 + non-boolean-enabled 400. Snapshots+restores cases.json (settings.addons +
+#      healthEntries + athleteProfile live there). Skipped when no board.
+#  10i. api-fitness-push — ONLY if a board is running: a push INGEST → SUMMARIZE round-trip that
+#      kills the split-brain-taxonomy bug — POST /api/fitness/push a realistic HAE payload (sleep +
+#      heart_rate_variability metrics + a workout), then assert GET /api/fitness/summary returns
+#      NON-EMPTY sleep + hrv (reading canonical type "sleep_night"/"hrv" + data.value) and
+#      GET /api/fitness/daily-summary surfaces them. Snapshots+restores cases.json. Skipped when no
+#      board.
+#  10j. api-fitness-coaching — ONLY if a board is running: full CRUD + gate + upsert contract for
+#      the "fitness" add-on's STATEFUL coaching artifacts (/api/fitness/coaching[/:id]
+#      + db.coachingArtifacts). With the add-on ENABLED a POST mints a COACH-<n> artifact
+#      (201, created:true); GET ?kind=training_plan lists it; GET-by-id reads it back; a re-POST
+#      for the SAME (kind, periodKey) UPSERTS (created:false, same id — exactly one row per week,
+#      no duplicate); the GATE (a DISABLED add-on 404s the POST while GET stays 200 — reads open);
+#      DELETE drops the id (a re-GET 404s). Snapshots+restores cases.json (coachingArtifacts +
+#      settings.addons live there). Skipped when no board.
 #  11. api-trust — ONLY if a board is running: drives the guard sender-trust
 #      WHITELIST API via the board's thin PROXY routes (/api/trust[/:email] →
 #      the guard sidecar :8009): GET always-200 online shape, add (default
@@ -631,28 +649,132 @@ else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
-# --- 10g. api-nutrition-weight (only when a board is healthy) ----------------
-# The v10 weight-loss API (board/app/api/nutrition/weight[/:id] + /goal + /targets) with the
-# add-on ENABLED: create bumps version + mints a WEIGHT-<n> id (weightKg + note persist);
-# UPSERT BY DAY (a re-POST for the same date is a 200 update, created:false, same id — one
-# point per day); lb→kg at the boundary (a weightLb-only POST stores canonical kg); GET lists
-# it ASC-by-date and the from/to window narrows; GET-by-id; PATCH persists (an x-actor:agent
-# write round-trips); PUT then GET the goal SINGLETON; GET /targets returns a CONFIGURED
-# envelope (numeric dailyCalorieTarget + P/F/C macros + the always-on not-medical-advice
-# flag); the missing-date / neither-weightKg-nor-weightLb + bad-goal (bad sex/activity,
-# non-positive age) writes are rejected with 400; the GATE (a DISABLED add-on 404s POST
-# /weight + PUT /goal while GET /weight + /goal + /targets stay 200); DELETE drops the id.
-# Snapshots + restores board/data/cases.json (weights + nutritionGoal + settings.addons live
-# there → net-zero). Skipped when no board.
+# --- 10g. api-body-weight (only when a board is healthy) --------------------
+# The v14 weigh-in lifecycle (board/app/api/body/weight[/:id]) with the "body" add-on ENABLED:
+# create bumps version + mints a WEIGHT-<n> id (weightKg + note persist); a POST carrying
+# bodyFatPct persists the v14 body-composition optionals; UPSERT BY DAY (a re-POST for the same
+# date is a 200 update, created:false, same id — one point per day); lb→kg at the boundary (a
+# weightLb-only POST stores canonical kg); GET lists it ASC-by-date and the half-open from/to
+# window narrows; GET-by-id; PATCH persists (an x-actor:agent write round-trips); the missing-date
+# / neither-weightKg-nor-weightLb / BOTH-weightKg-and-weightLb (exactly-one) / out-of-range
+# bodyFatPct writes are rejected with 400; DELETE drops the id (a re-GET 404s). The GATE contract
+# itself is owned by api-body-gate.mjs (10h1). Snapshots + restores board/data/cases.json (weights
+# + settings.addons live there → net-zero). Skipped when no board.
 echo
-echo "--- [10g] api-nutrition-weight (live board) -----------------"
+echo "--- [10g] api-body-weight (live board) ----------------------"
 if [ "${BOARD_UP}" -eq 1 ]; then
-  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-weight.mjs"; then
-    echo "api-nutrition-weight: PASS"
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-body-weight.mjs"; then
+    echo "api-body-weight: PASS"
   else
-    echo "api-nutrition-weight: FAIL"
+    echo "api-body-weight: FAIL"
     fail=1
-    fail_reasons="${fail_reasons} api-nutrition-weight"
+    fail_reasons="${fail_reasons} api-body-weight"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10h. api-fitness-gate (only when a board is healthy) --------------------
+# The Add-ons GATE contract for the unified "fitness" add-on (/fitness + /fitness/health). A DISABLED
+# add-on rejects every WRITE (POST /api/fitness/push, POST /api/fitness/profile) with 404 while its
+# GET reads (GET /api/fitness/summary, GET /api/fitness/profile) stay 200; enabling via
+# PATCH /api/addons/fitness flips the gate live AND bumps db.version; an unknown add-on id 404s and
+# a non-boolean enabled 400s. Snapshots + restores board/data/cases.json (settings.addons +
+# healthEntries + athleteProfile live there → net-zero). Skipped when no board.
+echo
+echo "--- [10h] api-fitness-gate (live board) ---------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-gate.mjs"; then
+    echo "api-fitness-gate: PASS"
+  else
+    echo "api-fitness-gate: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-gate"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10h1. api-body-gate (only when a board is healthy) ----------------------
+# The Add-ons GATE contract for the foundational "body" add-on, PLUS the two v14 provider invariants:
+# enabling a consumer (nutrition/fitness) AUTO-ENABLES body, and disabling body while a hard consumer
+# is on → 409. A DISABLED body rejects every WRITE (PUT /api/body/{profile,objective}, POST
+# /api/body/weight) with 404 while GETs stay 200. Snapshots + restores cases.json. Skipped when no board.
+echo
+echo "--- [10h1] api-body-gate (live board) -----------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-body-gate.mjs"; then
+    echo "api-body-gate: PASS"
+  else
+    echo "api-body-gate: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-body-gate"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10h2. api-nutrition-diet-profile (only when a board is healthy) ---------
+# The v14 nutrition surfaces: the dietary PROFILE (allergies/dietType/notes + the default-when-empty
+# diet-views philosophy; PATCH-merge keeps the safety allergy list) and the AGENT-AUTHORED daily-
+# targets feed (save attributed source:agent, the board-computed `warnings` sibling incl. the
+# low-calorie safety warn, the { items, total } history feed + ?latest). Snapshots + restores
+# cases.json. Skipped when no board.
+echo
+echo "--- [10h2] api-nutrition-diet-profile (live board) ----------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-diet-profile.mjs"; then
+    echo "api-nutrition-diet-profile: PASS"
+  else
+    echo "api-nutrition-diet-profile: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-diet-profile"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10i. api-fitness-push (only when a board is healthy) --------------------
+# A round-trip through the fitness-push INGEST → SUMMARIZE pipeline that kills the bug the old
+# test masked: with the add-on ENABLED, POST /api/fitness/push a realistic Health-Auto-Export
+# payload (a sleep_analysis night + a heart_rate_variability series + a workout), then assert
+# GET /api/fitness/summary returns NON-EMPTY sleep {count,avg_hours} + hrv {count,avg_ms} +
+# workout (reading the CANONICAL taxonomy — type "sleep_night"/"hrv", data.value — NOT the
+# legacy "heart_rate_variability"/data.avg_ms shapes), and GET /api/fitness/daily-summary
+# surfaces the same. Snapshots + restores board/data/cases.json (healthEntries + settings.addons
+# live there → net-zero). Skipped when no board.
+echo
+echo "--- [10i] api-fitness-push (live board) ---------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-push.mjs"; then
+    echo "api-fitness-push: PASS"
+  else
+    echo "api-fitness-push: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-push"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10j. api-fitness-coaching (only when a board is healthy) ----------------
+# Full CRUD + gate + upsert contract for the "fitness" add-on's STATEFUL coaching
+# artifacts (/api/fitness/coaching[/:id] + db.coachingArtifacts) with the add-on ENABLED:
+# a POST mints a COACH-<n> artifact (201, created:true); GET ?kind=training_plan lists
+# it (total >= 1); GET-by-id reads it back; a re-POST for the SAME (kind, periodKey) UPSERTS
+# (created:false, same id — the list still holds EXACTLY ONE training_plan for that week, no
+# duplicate); the GATE (a DISABLED add-on 404s the POST while GET stays 200 — reads open);
+# re-enable then DELETE → ok and a re-GET 404s. Snapshots + restores board/data/cases.json
+# (coachingArtifacts + settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10j] api-fitness-coaching (live board) -----------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-coaching.mjs"; then
+    echo "api-fitness-coaching: PASS"
+  else
+    echo "api-fitness-coaching: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-coaching"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."

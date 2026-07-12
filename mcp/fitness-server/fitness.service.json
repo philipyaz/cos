@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "name": "fitness",
+  "kind": "bridge",
+  "runtime": "bridge",
+  "addon": "fitness",
+  "portVar": "FITNESS_BRIDGE_PORT",
+  "stdio": ["${NODE_BIN}", "${REPO_ROOT}/mcp/fitness-server/server.mjs"],
+  "env": { "CRM_BASE_URL": "${BOARD_URL}" },
+  "idleExit": true,
+  "clients": ["claude-code", "cowork"],
+  "probe": { "type": "httpListen" }
+}

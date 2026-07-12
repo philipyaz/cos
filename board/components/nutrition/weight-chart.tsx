@@ -15,8 +15,8 @@
 // fixed VIEWBOX and the SVG scales to its container via width/height 100%.
 
 import type { WeightEntry } from "@/lib/types";
-import type { DayAdherence, AdherenceStatus } from "@/lib/nutrition-targets";
-import { addDays, EWMA_ALPHA } from "@/lib/nutrition-targets";
+import type { DayAdherence, AdherenceStatus } from "@/lib/nutrition-format";
+import { addDays, EWMA_ALPHA } from "@/lib/nutrition-format";
 
 // Fixed drawing surface (viewBox units; the SVG itself is responsive). Generous left/right
 // gutters leave room for the two axes' tick labels; the bottom gutter holds the day ticks.

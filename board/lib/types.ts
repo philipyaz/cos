@@ -101,7 +101,29 @@ export const VALID_BIOLOGICAL_SEX: BiologicalSex[] = ["male", "female"];
 // context — a still-owed reply is the same message carrying a status flag) — additive
 // optionals, read-compatible, migrate() is a no-op (the messages[] array rides through
 // verbatim); an absent needsAnswer === not flagged. Unanswered === needsAnswer && !answeredAt.
-export const SCHEMA_VERSION = 11;
+// v12 adds the Fitness add-on data: db.healthEntries (HealthEntry[], the Apple
+// Watch time-series) AND db.athleteProfile (a SINGLETON AthleteProfile object, NOT an
+// array) — purely additive; old v11 files read unchanged (healthEntries defaults to [],
+// athleteProfile absent === no profile set). New enums: HealthEntryType, AthleteGoal,
+// AthleteLevel. migrate() carries db.healthEntries forward when it is an array and
+// db.athleteProfile forward when it is an object (mirroring db.weights and db.nutritionGoal).
+// v13 makes the "fitness" add-on's AI coaching artifacts STATEFUL: db.coachingArtifacts
+// (CoachingArtifact[], ONE polymorphic array for all four kinds — training_plan, weekly_review,
+// pre_workout_brief, correlations) — purely additive; old v12 files read unchanged
+// (coachingArtifacts defaults to []). New enums: CoachingArtifactKind, ArtifactSource.
+// migrate() carries db.coachingArtifacts forward when it is an array (mirroring db.healthEntries).
+// v14 introduces the "body" add-on (the single owner of body identity) + a context-first
+// nutrition redesign. NEW state: db.bodyProfile (BodyProfile SINGLETON — sex/DOB/height/
+// trainingStatus/resistanceTrains), db.bodyObjective (BodyObjective SINGLETON — a FREE-TEXT
+// goal + a target-weight anchor; NO picker/enum), db.dietProfile (DietProfile SINGLETON —
+// allergies/dietType/notes + the free-text "views on diet" philosophy), and db.nutritionTargets
+// (NutritionTargetArtifact[] — the AGENT-authored daily calorie/macro targets, mirroring
+// db.coachingArtifacts). db.weights is RE-HOMED to the "body" add-on (manifest ownership only;
+// rows/keys untouched) and gains optional body-comp fields. migrate() SYNTHESIZES bodyProfile +
+// bodyObjective from the legacy db.nutritionGoal (clock-free, idempotent) and STOPS carrying
+// nutritionGoal forward (dropped on next write; the legacy goal route + engine are removed). New
+// enums: TrainingStatus, NutritionTargetKind. Old engine board/lib/nutrition-targets.ts is retired.
+export const SCHEMA_VERSION = 14;
 
 // Who performed a mutation — drives activity attribution + note authorship.
 export type Actor = "human" | "agent" | "system";
@@ -407,28 +429,241 @@ export interface WeightEntry {
   id: string; // "WEIGHT-<n>" minted like FOOD-<n>/CASE-<n> ids
   date: string; // ISO calendar day "YYYY-MM-DD" — UNIQUE per day (the upsert key)
   weightKg: number; // canonical storage unit is ALWAYS kilograms
+  // ── v14 body-composition optionals (absent === not measured that day; old rows read unchanged) ──
+  bodyFatPct?: number; // % body fat (drives FFM + recomp tracking)
+  leanMassKg?: number; // fat-free mass (FFM); if absent but bodyFatPct present, FFM is DERIVED at read time
+  waistCm?: number; // waist circumference — the primary scale-independent recomp signal
   note?: string; // optional freeform note
   createdAt: string;
   updatedAt: string;
 }
 
-// The user's weight-loss goal + body profile — a SINGLETON (db.nutritionGoal, NOT an
-// array): there is exactly one current goal at a time, so it lives as a bare object keyed
-// by nothing (set/replace, never minted with an id). It supplies the physiological inputs
-// the targets engine needs (sex/age/heightCm/activity feed BMR→TDEE) plus the user's
-// chosen target weight + loss rate. `rateKgPerWeek` is the DESIRED loss rate (default 0.5);
-// the engine CLAMPS it by safety guardrails (≤1%/wk, ≤1.0 kg/wk) before deriving a deficit.
-// `weightUnit` is a DISPLAY/entry preference only — storage stays kilograms regardless.
-export interface NutritionGoal {
-  sex: BiologicalSex; // BMR sex constant input
-  age: number; // years — BMR input
-  heightCm: number; // centimetres — BMR + BMI input
-  activity: ActivityLevel; // TDEE activity multiplier (see ACTIVITY_FACTOR)
-  targetWeightKg: number; // the goal weight (canonical kg)
-  rateKgPerWeek: number; // desired loss rate; default 0.5; clamped by the engine guardrails
-  weightUnit?: "kg" | "lb"; // DISPLAY/entry preference only (storage stays kg). default "kg"
-  createdAt: string;
+// NOTE (v14 hard-cut): the legacy `NutritionGoal` SINGLETON is REMOVED. Body identity
+// (db.bodyProfile) + the free-text objective (db.bodyObjective) replace it. The v14 migration
+// still reads a legacy on-disk nutritionGoal (as a bare object) to synthesize those two, then
+// drops it on the next write — but it is no longer a typed, served, or written shape.
+
+// ── Fitness add-on records (v12) ──────────────────────────────────────────────
+// The "fitness" add-on stores its data in the CORE store (cases.json) alongside the
+// nutrition records — db.healthEntries (the Apple Watch time-series) and db.athleteProfile
+// (the singleton training profile). The data fields keep their descriptive names (health
+// entries, athlete profile); the add-on IDENTITY is "fitness". Both ride the same mutate()
+// chokepoint + version counter (so they get SSE live-update, the off-site backup, and actor
+// attribution for free) and are gated by Settings.addons.fitness (a disabled add-on's data
+// stays on disk + readable, only its WRITES are refused — see lib/addons.ts).
+
+// The canonical health-entry taxonomy — ONE source of truth shared by the ingest route
+// (board/app/api/fitness/push), the store helpers (board/lib/fitness.ts), every consumer
+// (daily-summary, the fitness scoring/AI routes), and MIRRORED — with a lockstep comment —
+// in the fitness MCP server (mcp/fitness-server/server.mjs). These are the KNOWN types; the
+// ingest route also stores unmapped Health Auto Export metric names verbatim (so a new HAE
+// export never loses data), hence HealthEntry.type is a plain string, not this union.
+export type HealthEntryType =
+  | "workout"      // a logged workout; data.{activity,duration_min,calories?,avg_hr?,distance_km?,...}; ts = full ISO start
+  | "sleep_night"  // the night's main sleep; data.value = hours, data.metadata.{deep,rem,core,awake,...}; ts = "YYYY-MM-DD"
+  | "sleep_nap"    // a daytime nap; same shape as sleep_night; ts = "YYYY-MM-DD"
+  | "hrv"          // heart-rate variability; data.value = ms (per-day avg); ts = "YYYY-MM-DD"
+  | "resting_hr"   // resting heart rate; data.value = bpm (per-day avg); ts = "YYYY-MM-DD"
+  | "steps"        // step count; data.value = steps (per-day sum); ts = "YYYY-MM-DD"
+  | "vo2max";      // VO2 max; data.value = mL/kg/min (per-day latest); ts = "YYYY-MM-DD"
+export const VALID_HEALTH_ENTRY_TYPE: HealthEntryType[] = [
+  "workout", "sleep_night", "sleep_nap", "hrv", "resting_hr", "steps", "vo2max",
+];
+
+// One health measurement. `id` is an EXTERNALLY-KEYED dedup id (the HAE workout id, or a
+// minted "<metric>_<day>" / "sleep_nap_<day>_<hour>" — re-pushing the same id is a no-op),
+// NOT a minted CASE-<n>-style id. Per-day metric aggregates carry their value in
+// `data.value` (+ optional `data.metadata`); workouts carry the rich `data.*` shape. `ts`
+// is a full ISO timestamp for workouts and a date-only "YYYY-MM-DD" for metric aggregates.
+export interface HealthEntry {
+  id: string;        // externally-keyed dedup id (HAE id or "<metric>_<day>")
+  ts: string;        // ISO-8601 (workouts) or "YYYY-MM-DD" (per-day metric aggregates)
+  type: string;      // a HealthEntryType, or an unmapped HAE metric name stored verbatim
+  data: Record<string, unknown>; // metric: { value, source?, metadata? } · workout: { activity, duration_min, ... }
+  pushedAt: string;  // ISO-8601 — when the board received the entry
+}
+
+// The athlete training goal — drives the AI coach's plan/review. (English value domain;
+// the UI option lists and the route validator both import VALID_ATHLETE_GOAL so the stored
+// vocabulary stays single-sourced and never drifts.)
+// (v14: "weight_loss" is REMOVED — the body objective owns "lose fat" as free text; this enum is
+// training FOCUS only. migrate() normalizes a legacy stored "weight_loss" goal to "general_fitness".)
+export type AthleteGoal =
+  | "sprint_triathlon" | "olympic_triathlon"
+  | "cycling" | "swimming" | "running" | "general_fitness";
+export const VALID_ATHLETE_GOAL: AthleteGoal[] = [
+  "sprint_triathlon", "olympic_triathlon",
+  "cycling", "swimming", "running", "general_fitness",
+];
+
+// NOTE (v14 dedup): the athlete `level` enum is REMOVED — training experience is now the body
+// add-on's `BodyProfile.trainingStatus` (novice|intermediate|advanced), read cross-add-on. Likewise
+// the athlete's current/target weight moved to the body add-on (db.weights latest / bodyObjective).
+
+// The sports an athlete trains (advisory tags the AI coach reads). English value domain,
+// single-sourced for the route validator + the UI multiselect.
+export const VALID_ATHLETE_SPORT: string[] = [
+  // Cardio / endurance
+  "cycling_outdoor", "cycling_indoor", "running", "walking",
+  "swimming_pool", "swimming_open_water", "rowing",
+  "skiing_alpine", "skiing_cross_country", "snowboard", "hiking",
+  "climbing", "surfing", "kayaking",
+  // Strength / flexibility
+  "strength_training", "hiit", "yoga", "pilates", "dance",
+  "martial_arts", "boxing", "crossfit", "stretching",
+  // Other
+  "tennis", "padel", "soccer", "basketball", "cycling_indoor_zwift",
+];
+
+// The training equipment the athlete has access to (advisory; the AI coach tailors plans
+// to it). English value domain, single-sourced for the route validator + the UI.
+export const VALID_ATHLETE_EQUIPMENT: string[] = [
+  "road_bike", "home_trainer", "pull_up_bar", "dumbbells",
+  "kettlebell", "resistance_bands", "treadmill", "rowing_machine",
+  "elliptical", "jump_rope", "bodyweight",
+  "pool_access", "gym_access",
+];
+
+// The athlete training-profile SINGLETON (db.athleteProfile, NOT an array) — mirrors
+// db.nutritionGoal: exactly one current profile, a bare object set/replaced (never minted
+// with an id). Owned by the "fitness" add-on; feeds the AI coaching routes (training plan,
+// weekly review, pre-workout brief). Weights are kilograms (canonical, like WeightEntry).
+// The athlete training-profile SINGLETON — the TRAINING-FOCUS half (the body half — identity /
+// weight / objective — moved to the body add-on in v14). `goal` is a training-FOCUS tag (sport/event),
+// NOT the body objective: the canonical "what's my body goal" is the free-text db.bodyObjective. The
+// coach reads training status from db.bodyProfile.trainingStatus, current weight from db.weights, and
+// the target from db.bodyObjective — cross-add-on, ungated — NOT from here.
+export interface AthleteProfile {
+  goal: AthleteGoal;             // training FOCUS (sport/event), not the body objective
+  goalDate: string;              // ISO "YYYY-MM-DD" target date, or "" when none set
+  daysPerWeek: number | null;    // 1..7 sessions per week, or null
+  maxSessionMinutes: number | null;
+  sports: string[];              // ⊆ VALID_ATHLETE_SPORT
+  equipment: string[];           // ⊆ VALID_ATHLETE_EQUIPMENT
+  notes: string;                 // freeform context for the coach (capped at the route)
+  createdAt: string;             // sticky first-set time (preserved across replaces)
   updatedAt: string;
+}
+
+// ── Fitness AI coaching artifacts (v13; "fitness" add-on) ──────────────────────
+// The "fitness" add-on's FOUR AI coaching surfaces — a weekly training plan, a weekly
+// review, a daily pre-workout brief, and a sleep/performance correlation report — were
+// generated on demand and thrown away. v12 makes them STATEFUL: persisted on the core
+// store in ONE polymorphic array (db.coachingArtifacts), creatable by an EXTERNAL agent
+// (Claude Cowork) over the add-on-gated HTTP POST + MCP WITHOUT the board's Anthropic key,
+// and navigable as history in the UI. Owned by the "fitness" add-on, gated by
+// Settings.addons.fitness (a disabled add-on's data stays on disk + readable, only its
+// WRITES are refused — see lib/addons.ts). The four kinds share ONE record, distinguished
+// by `kind`; `payload` holds the kind-specific canonical body verbatim.
+
+// Which of the four coaching surfaces an artifact is. ONE source of truth shared by the
+// route validator (lib/fitness-artifacts.ts), the persistence API (lib/fitness.ts), the
+// HTTP routes, and MIRRORED in the fitness MCP server (mcp/fitness-server/server.mjs).
+export type CoachingArtifactKind = "training_plan" | "weekly_review" | "pre_workout_brief" | "correlations";
+export const VALID_COACHING_ARTIFACT_KIND: CoachingArtifactKind[] = [
+  "training_plan", "weekly_review", "pre_workout_brief", "correlations",
+];
+
+// Who authored an artifact: "agent" (Claude Cowork over the add-on gate), "human" (a manual
+// UI/API write), or "board" (the board's own on-demand generate routes persisting their output).
+export type ArtifactSource = "agent" | "human" | "board";
+export const VALID_ARTIFACT_SOURCE: ArtifactSource[] = ["agent", "human", "board"];
+
+// One coaching artifact. `id` is minted "COACH-<n>" (like CASE-<n>). UNIQUE per
+// (kind, periodKey): the periodKey is the ISO week ("2026-W25") for plan/review, a
+// "YYYY-MM-DD" day for a brief, and "<from>_<to>" for a correlation report — re-persisting
+// the same (kind, periodKey) UPSERTS (replaces payload/source/generatedAt, keeps id +
+// createdAt sticky). `payload` is the kind-specific canonical body stored verbatim (the
+// existing generate route's output). `generatedAt` is the model-generation time (payload's
+// own generated_at when present, else createdAt); createdAt is the sticky first-persist time.
+export interface CoachingArtifact {
+  id: string;            // minted "COACH-<n>"
+  kind: CoachingArtifactKind;
+  periodKey: string;     // UNIQUE per (kind, periodKey): ISO week / "YYYY-MM-DD" / "<from>_<to>"
+  source: ArtifactSource;
+  payload: Record<string, unknown>; // the kind-specific canonical body (verbatim)
+  generatedAt: string;   // ISO; payload.generated_at if present else createdAt
+  createdAt: string;     // ISO; sticky first-persist time (preserved across upsert)
+  updatedAt: string;     // ISO; bumped on every upsert
+}
+
+// ── Body add-on records (v14) ──────────────────────────────────────────────────
+// The "body" add-on is the SINGLE OWNER of body identity, the weight+composition series
+// (db.weights, re-homed off nutrition), and the user's objective. It hard-auto-enables when
+// nutrition OR fitness is on so both can always READ identity. Its data rides the same
+// mutate() chokepoint + version counter and is gated by Settings.addons.body (a disabled
+// add-on's data stays on disk + readable; only its WRITES are refused — see lib/addons.ts).
+
+// Resistance-training experience — the deduped successor to the fitness add-on's AthleteLevel
+// ("novice" replaces "beginner", the strength-coaching term). Governs how fast muscle gain /
+// recomp is realistic; read by the agent (it is NOT consumed by a component engine).
+export type TrainingStatus = "novice" | "intermediate" | "advanced";
+export const VALID_TRAINING_STATUS: TrainingStatus[] = ["novice", "intermediate", "advanced"];
+
+// The body-identity SINGLETON (db.bodyProfile, NOT an array) — mirrors db.nutritionGoal /
+// db.athleteProfile: exactly one current profile, a bare object set/replaced (never minted with
+// an id). Stores DATE-OF-BIRTH (not age) so age is DERIVED fresh at read time and never goes
+// stale. trainingStatus + resistanceTrains are slow-moving identity traits the agent reads.
+export interface BodyProfile {
+  sex: BiologicalSex;             // BMR sex constant (physiological input)
+  dateOfBirth: string;           // ISO "YYYY-MM-DD" — age DERIVED at read time, never stored
+  heightCm: number;              // BMR + BMI input
+  trainingStatus: TrainingStatus; // novice|intermediate|advanced — the deduped fitness `level`
+  resistanceTrains: boolean;      // does the user lift at all? (the agent gates muscle/recomp talk on it)
+  weightUnit?: "kg" | "lb";       // DISPLAY/entry preference only (storage stays kg). re-homed from NutritionGoal. default "kg"
+  createdAt: string;             // sticky first-set time (preserved across replaces)
+  updatedAt: string;
+}
+
+// The body-objective SINGLETON (db.bodyObjective, NOT an array) — the user's explicit objective,
+// FREE TEXT + ONE structured anchor. There is NO `kind`/`tag`/`direction`/`rateKgPerWeek` enum and
+// NO picker: the user describes their goal in prose; the only structured field is the target weight.
+// The AGENT reads goalText + targetWeightKg and AUTHORS the nutrition-targets artifact — this record
+// never drives a component engine switch. Owned by "body"; consumed (read) by nutrition + fitness.
+export interface BodyObjective {
+  goalText: string;               // FREE TEXT — "describe your objectives in your own words"; route-capped 2000; may be ""
+  targetWeightKg: number | null;  // the ONE structured numeric anchor; null === no scale target (recomp/maintain/"eat better")
+  targetDate: string | null;      // optional ISO "YYYY-MM-DD" deadline, or null
+  activity: ActivityLevel;        // TDEE PAL multiplier (the one TDEE input with no home on identity)
+  createdAt: string;             // sticky first-set time (preserved across replaces)
+  updatedAt: string;
+}
+
+// ── Nutrition dietary profile + agent-authored targets (v14; "nutrition" add-on) ───────────────
+// The dietary profile SINGLETON (db.dietProfile, NOT an array) — the user's food constraints AND
+// the customizable "views on diet" methodology context. ONE record, ONE endpoint. `allergies` is
+// the one structured SAFETY list (honored by the SKILLS before planning/logging — the component
+// only stores + serves it deterministically, it never enforces). Everything soft folds into free
+// text. `philosophy` is the diet-views context the GET route fills with DEFAULT_DIET_PHILOSOPHY
+// (board/lib/diet-philosophy-default.ts) when unset; a vegan/keto/halal user overrides it.
+export interface DietProfile {
+  allergies: string[];   // SAFETY — e.g. ["peanuts","shellfish"]; the skills must read+honor these (never a component guard)
+  dietType: string[];    // regime tags — ["vegan"] | ["halal","no-pork"] | ["keto"]. Free strings, NOT an enum.
+  notes: string;         // FREE TEXT (route-capped 2000) — intolerances, foods avoided, non-allergy issues, cuisines, prefs
+  philosophy: string;    // FREE TEXT (route-capped 24000) — "our views on diet"; GET returns DEFAULT_DIET_PHILOSOPHY when ""
+  createdAt: string;     // sticky first-set time (preserved across replaces)
+  updatedAt: string;
+}
+
+// Which agent-authored nutrition-target surface an artifact is. ONE kind in v1 (daily targets);
+// add a weekly kind later when a consumer exists. Mirrors CoachingArtifactKind.
+export type NutritionTargetKind = "daily_targets";
+export const VALID_NUTRITION_TARGET_KIND: NutritionTargetKind[] = ["daily_targets"];
+
+// One AGENT-AUTHORED nutrition-targets artifact (db.nutritionTargets) — a 1:1 clone of
+// CoachingArtifact applied to nutrition. The board NEVER computes a recommendation: the agent GETs
+// the goal + the physiology baseline + the diet profile, computes the daily calories/macros in its
+// own context, and writes them back here; the board validates the shape, attributes, versions, and
+// serves. UNIQUE per (kind, periodKey) — daily → "YYYY-MM-DD" — re-persisting the same period UPSERTS.
+export interface NutritionTargetArtifact {
+  id: string;            // minted "NTARGET-<n>"
+  kind: NutritionTargetKind;
+  periodKey: string;     // UNIQUE per (kind, periodKey); daily → "YYYY-MM-DD"
+  source: ArtifactSource; // reuse "agent"|"human"|"board" — normally "agent"
+  payload: Record<string, unknown>; // the agent-authored body, verbatim: { daily_calories, protein_g, fat_g, carbs_g, basis, stance?, rationale, ... }
+  generatedAt: string;   // ISO; payload.generated_at if present else createdAt
+  createdAt: string;     // ISO; sticky first-persist time (preserved across upsert)
+  updatedAt: string;     // ISO; bumped on every upsert
 }
 
 // ── Guard sender-trust whitelist (lives in the guard SIDECAR, not this store) ──
@@ -748,8 +983,14 @@ export interface DBShape {
   foodLogs?: FoodLogEntry[]; // Nutrition & Chef food-log entries (v9); owned by the "nutrition" add-on
   pantryItems?: PantryItem[]; // Nutrition & Chef pantry items (v9); owned by the "nutrition" add-on
   mealPlanEntries?: MealPlanEntry[]; // Nutrition & Chef meal-plan entries (v9); owned by the "nutrition" add-on
-  weights?: WeightEntry[]; // Nutrition weigh-in time-series (v10); owned by the "nutrition" add-on
-  nutritionGoal?: NutritionGoal; // Nutrition goal/profile SINGLETON (v10); owned by the "nutrition" add-on (NOT an array)
+  weights?: WeightEntry[]; // Weigh-in + body-composition time-series; RE-HOMED to the "body" add-on (v14; was "nutrition" in v10)
+  bodyProfile?: BodyProfile; // Body identity SINGLETON (v14); owned by the "body" add-on (NOT an array)
+  bodyObjective?: BodyObjective; // Body objective SINGLETON (v14) — free-text goal + target anchor; owned by the "body" add-on (NOT an array)
+  dietProfile?: DietProfile; // Dietary profile SINGLETON (v14) — allergies/dietType/notes/philosophy; owned by the "nutrition" add-on (NOT an array)
+  nutritionTargets?: NutritionTargetArtifact[]; // Agent-authored daily nutrition targets (v14); owned by the "nutrition" add-on
+  healthEntries?: HealthEntry[]; // Apple Watch health time-series (v12); owned by the "fitness" add-on
+  athleteProfile?: AthleteProfile; // Athlete training-profile SINGLETON (v12); owned by the "fitness" add-on (NOT an array)
+  coachingArtifacts?: CoachingArtifact[]; // Fitness AI coaching artifacts (v13); ONE polymorphic array (all four kinds); owned by the "fitness" add-on
   pending?: PendingMutation[]; // approval queue
   views?: SavedView[]; // saved views
   labels?: LabelDef[]; // the active label catalog (installed bundles + custom labels)

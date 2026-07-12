@@ -135,3 +135,21 @@ migrates older files up to the current version on read (`store.ts` `migrate()`).
   predicate `needsAnswer && !answeredAt` (`board/lib/inbox.ts` `selectUnansweredMessages`), filled by the
   `/unanswered-messages` sweep and the board MCP tools, and cleared the moment you reply. Full design:
   [Unanswered messages](../features/unanswered-messages.md).
+- **v13 → v14 — the Body add-on + the context-first nutrition redesign.** Introduces the foundational
+  **[Body](../features/body.md)** add-on as the single owner of body identity (`db.bodyProfile` —
+  sex / date-of-birth / height / training status / resistance-trains), the weight + body-composition
+  series (`db.weights`, **re-homed** off nutrition, now carrying optional body-fat % / lean mass / waist),
+  and a **free-text** objective (`db.bodyObjective` — `goalText` + a `targetWeightKg` anchor, **no**
+  pick-list). On the nutrition side it adds `db.dietProfile` (allergies / dietType / notes / the
+  "views on diet" philosophy) and `db.nutritionTargets[]` (the **agent-authored** daily targets,
+  modelled on `coachingArtifacts`). **`migrate()` is clock-free + idempotent:** it **synthesizes**
+  `bodyProfile` + a prose `bodyObjective` from the legacy `db.nutritionGoal` (the date of birth is
+  fabricated from the legacy `age` via a frozen anchor year, so no `new Date()` is ever read), keeps
+  `db.weights` verbatim (ownership moves to `body` — a manifest change only), and **stops carrying
+  `db.nutritionGoal` forward** (it is dropped on the next write — downgrade-safe on read). The
+  deterministic nutrition targets **engine** (`board/lib/nutrition-targets.ts`) is **retired** — the
+  board no longer computes a recommendation; the agent authors it. The Fitness `AthleteProfile` **drops**
+  its duplicated `level` / `currentWeightKg` / `targetWeightKg` (training status now lives on
+  `bodyProfile`, weight/target on the body add-on). **New enums:** `TrainingStatus`,
+  `NutritionTargetKind`; **removed:** `AthleteLevel`, `NutritionGoal`. Body **hard auto-enables** under
+  Nutrition or Fitness. Full design: [Body](../features/body.md) + [Nutrition](../features/nutrition.md).

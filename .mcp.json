@@ -27,6 +27,14 @@
     "nutrition": {
       "type": "http",
       "url": "http://localhost:8007/mcp"
+    },
+    "fitness": {
+      "type": "http",
+      "url": "http://localhost:8011/mcp"
+    },
+    "body": {
+      "type": "http",
+      "url": "http://localhost:8012/mcp"
     }
   }
 }

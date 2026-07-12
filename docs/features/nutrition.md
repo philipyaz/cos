@@ -30,10 +30,12 @@ add-on inherits the board's machinery for free: the monotonic **`version`** coun
 live-refresh** (an agent's MCP write lands on the read-only view without a reload), the timestamped
 **daily backup** (the data rides `cases.json`, so it is snapshotted whole), and the **actor
 attribution** (`human` from the UI, `agent` from the MCP). The schema bump to **v9** (these three
-arrays) and then **v10** (the [weight-loss](#weight-loss-the-goal-the-weigh-in-log-and-the-targets-engine)
-`db.weights[]` series + the `db.nutritionGoal` singleton) is **purely additive** — old files read
-unchanged, the arrays default to `[]`, and a board with the add-on disabled is indistinguishable from
-a pre-add-on board. (See [Add-ons](../architecture/addons.md) for why this is the whole point.)
+arrays), and later **v14** (the [dietary profile + agent-authored targets](#the-dietary-profile-and-the-agent-authored-targets-v14)
+`db.dietProfile` + `db.nutritionTargets[]`), is **purely additive** — old files read unchanged, the
+arrays default to `[]`, and a board with the add-on disabled is indistinguishable from a pre-add-on
+board. (The v10 weight series + loss-only goal moved to the **[Body add-on](body.md)** in v14 — see
+[migration](../reference/migration.md). See [Add-ons](../architecture/addons.md) for why this is the
+whole point.)
 
 ## The data model — simple by design
 
@@ -93,170 +95,87 @@ Two relational decisions are worth holding apart:
   check runs inside `mutate()` (the events-route precedent), so an unknown id is rejected with a
   `400`, never silently dangled. Setting `eventId: null` (or `""`) **unlinks**.
 
-## Weight loss — the goal, the weigh-in log, and the targets engine
+## The dietary profile and the agent-authored targets (v14)
 
-The three verticals above are a **diary**: they record what happened. The **weight-loss
-perspective** (schema **v10**, again **purely additive** — old v9 files read unchanged, the
-new `db.weights` array defaults to `[]` and `db.nutritionGoal` is simply absent until you set
-one) adds the missing half: a **plan to measure against**. You tell Cos a goal (a target
-weight + your profile), you log your weigh-ins, and a **pure engine** turns the goal, the
-weight series, and the existing food log into one render-ready *"how am I doing"* envelope —
-a daily calorie target, protein-first macros, an ETA, per-day adherence, and a stack of
-**safety guardrails**.
+The three verticals above are a **diary**: they record what happened. The v14 redesign adds the
+missing half — *what should I eat, and what can't I?* — but it does it the **agent-native** way: the
+board stores **constraints + queryable context**, and the **agent** is the intelligence. There is **no
+nutrition engine** anymore. (The old deterministic `nutrition-targets.ts` — BMR → deficit → macros — is
+**retired**; weight + body identity moved to the **[Body add-on](body.md)**.)
 
 !!! warning "Informational, not medical advice"
-    This is an **estimate**, not medical guidance. The targets engine **always** emits a
-    leading `not-medical-advice` flag, and every surface that renders it repeats the same
-    framing: consult a clinician or registered dietitian for medical conditions,
-    pregnancy/breastfeeding, an eating-disorder history, or if under 18. The guardrails below
-    (rate cap, calorie floor, BMI bound) are conservative defaults, not a substitute for
-    professional advice.
+    The targets the agent authors are **estimates**, not medical guidance. The skill carries that
+    framing and surfaces the board's `warnings` (e.g. a below-floor calorie note); defer medical
+    conditions, pregnancy/breastfeeding, an eating-disorder history, or a user under 18 to a clinician
+    or registered dietitian.
 
-### The two new records
+### The dietary profile — `db.dietProfile`
 
-The weight-loss data is two pieces, both defined in
-[`board/lib/types.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/types.ts):
-
-**`WeightEntry` (`WEIGHT-<n>`)** — a dated weigh-in, stored in `db.weights[]`, minted like
-`FOOD-<n>`. The canonical storage unit is **always kilograms**; pounds are a display/entry
-convenience converted at the route boundary.
+One nutrition-owned **singleton** (`db.dietProfile`), reached via **`/api/nutrition/diet-profile`** and
+the `get_diet_profile` / `set_diet_profile` MCP pair. It holds the user's food constraints **and** the
+diet methodology, all in one record:
 
 | Field | Type | Notes |
 |---|---|---|
-| `date` | `string` | ISO day `YYYY-MM-DD` — **UNIQUE per day** (it is the upsert key). **Required.** |
-| `weightKg` | `number` | the weigh-in, **always in kg**. **Required** (the store stores kg only). |
-| `note` | `string?` | optional |
+| `allergies` | `string[]` | the **SAFETY** list — e.g. `["peanuts", "shellfish"]`. |
+| `dietType` | `string[]` | regime tags — `["vegan"]`, `["halal", "no-pork"]`, `["keto"]`. Free strings, **no enum**. |
+| `notes` | `string` | free text: intolerances, foods avoided, non-allergy issues (*"gluten bloats me"*), preferences. |
+| `philosophy` | `string` | the free-text **"views on diet"** methodology the agent applies when authoring targets. |
 
-**`NutritionGoal`** — a **singleton** (`db.nutritionGoal`, not an array, so it is intentionally
-**not** in the add-on's `dataArrays`). It is the profile the engine needs to compute targets:
+**Allergies are enforced by SKILL DISCIPLINE, not the component.** The board's job is to **store and
+serve** the exact allergy list deterministically; **honoring** it is the agent's. The
+[`nutrition-chef`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/nutrition-chef/SKILL.md)
+skill has a **mandatory stop-gate**: it reads `get_diet_profile` *first* and **never** plans, suggests,
+or builds a meal containing a listed allergen — and if the read fails it stops and asks. This is the one
+place the component deliberately does **not** add a guard (a substring scan would give false confidence
+and can't prove a free-text recipe is allergen-free); the safety lives in the skill.
 
-| Field | Type | Notes |
-|---|---|---|
-| `sex` | `BiologicalSex` | `male` \| `female` — drives the Mifflin-St Jeor sex constant + the calorie floor. **Required.** |
-| `age` | `number` | years. **Required (> 0).** |
-| `heightCm` | `number` | centimetres. **Required (> 0).** |
-| `activity` | `ActivityLevel` | `sedentary` \| `light` \| `moderate` \| `very_active` \| `extra_active` — the TDEE activity factor (1.2 → 1.9). **Required.** |
-| `targetWeightKg` | `number` | the goal weight, kg. **Required (> 0).** |
-| `rateKgPerWeek` | `number` | desired loss rate; **default `0.5`**, clamped by the guardrails. |
-| `weightUnit` | `"kg"` \| `"lb"` | **display/entry preference only** — storage stays kg. Default `"kg"`. |
+**The `philosophy` default ships, but is overridable.** When the field is empty, the GET route returns a
+study-grounded **default methodology** (the "Daily Nutrition Targets for Any Body-Composition Objective"
+memo — maintenance as the hub, per-objective offsets, protein-first macros, training-status rate caps,
+the energy-availability floor, recomp-off-body-composition). A vegan / keto / "my coach's plan" user
+overwrites it with one `set_diet_profile`; the default is **not persisted** by the migration, so
+"cleared" stays distinguishable from "never set". This is the contested *dietary judgment* moved out of
+code and into **queryable context** — exactly where it belongs.
 
-### The targets engine — `nutrition-targets.ts`
+### The agent-authored targets — `db.nutritionTargets`
 
-The intelligence is a **pure, I/O-free** module,
-[`board/lib/nutrition-targets.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/nutrition-targets.ts),
-modelled on `selectors.ts`: it imports only from `./types`, has **no `new Date()`** (the caller
-passes `today` as a `YYYY-MM-DD` string), and never throws — `computeNutritionTargets({ goal,
-weights, foodLogs, today })` is **always resolvable**. When the goal or a current weight is
-missing, the numeric fields come back `null` and a `needs: ["goal" | "weight"]` list says what
-to configure, but the informational flags still resolve. Every helper
-(`mifflinStJeorBMR`, `tdeeFromBMR`, `bmi`, `weightTrendKg`, `measuredTdee`, `macroTargets`) is
-exported individually so it can be unit-tested. The chain is:
+The daily calorie/macro targets are an **agent-authored artifact**, modelled 1:1 on how the
+[Fitness](fitness.md) coach persists a training plan (the `save_training_plan` law). The board **never
+computes a recommendation**. The agent runs **FETCH → AUTHOR → PERSIST**:
 
-1. **BMR → TDEE (the formula estimate).** Basal metabolic rate via **Mifflin-St Jeor** (the
-   current clinical standard): `10·kg + 6.25·cm − 5·age + (male ? +5 : −161)`. Scaled by the
-   activity factor (`ACTIVITY_FACTOR[activity]`, 1.2–1.9) to **TDEE** — estimated maintenance
-   calories.
-2. **The 7700 kcal/kg seeded deficit.** A 1 kg change ≈ **7700 kcal** (`KCAL_PER_KG`, the
-   classic "3500 kcal/lb" seed). The desired weekly loss rate implies a daily deficit of
-   `rate · 7700 / 7`, subtracted from maintenance to get the daily calorie target.
-3. **The measured-TDEE feedback loop.** The seed is first-order; real metabolism adapts, so the
-   engine **corrects it against reality** when the data is rich enough. Over a 14-day window
-   (`MEASURED_WINDOW_DAYS`), with **≥ 10 logged food days** *and* **≥ 2 weigh-ins spanning ≥ 10
-   days** (`MEASURED_MIN_DAYS`), measured maintenance is `meanIntake − (ΔweightKg · 7700) /
-   spanDays`. (Lost weight ⇒ Δ < 0 ⇒ the subtraction *adds* energy ⇒ true maintenance is higher
-   than intake, as expected.) When it fires, `basis` flips from `"estimated"` to `"measured"`
-   and the deficit is computed off the measured number instead of the formula. Too little data
-   and it returns `null` and the formula stands.
-4. **Protein-first macros.** Protein is set per-kg (`1.8 g/kg`) biased toward the lower of
-   current weight and `targetWeight + 5 kg`, to **preserve lean mass in a deficit**; fat is
-   `0.8 g/kg` of current weight with a **floor of 20% of calories** (essential fats + satiety);
-   carbs are whatever calories remain (protein 4, carb 4, fat 9 kcal/g).
-5. **The weight trend (EWMA).** Raw weigh-ins are noisy (water weight), so progress + ETA run
-   off an **exponentially-weighted moving average** (`EWMA_ALPHA = 0.25`) over the series, not
-   the latest scale reading. ETA = remaining-kg ÷ effective-rate, projected to a calendar date.
+1. **FETCH** the inputs — `get_body_objective` (the free-text goal + target, from the **body** MCP),
+   `get_body_status` (the physiology **facts** — BMR / TDEE / BMI / trend / fat-free mass), `get_diet_profile`
+   (the constraints + the `philosophy`), and the recent food log.
+2. **AUTHOR** the numbers itself, applying the philosophy to the goal + the facts.
+3. **PERSIST** with `save_nutrition_targets` → `db.nutritionTargets` (upsert by day): a
+   `NutritionTargetArtifact` (`NTARGET-<n>`) whose `payload` holds `{ daily_calories, protein_g, fat_g,
+   carbs_g, stance, rationale, … }` verbatim. The board **validates the shape**, attributes it
+   `source: "agent"`, versions it (it lands live on the `/nutrition/log` + `/body` panels), and serves
+   it back as a history feed.
 
-#### Worked example (for intuition)
+The one surviving deterministic safety check — the sex **calorie floor** (`1500` male / `1200` female)
+— runs in the route layer (it needs the profile's sex) and is returned as a **sibling `warnings` field**
+on the save response, **never folded into the agent-authored payload** (so the attribution stays
+honest).
 
-Take a profile of **male, 35 y, 180 cm, currently 90 kg, moderate activity**, with a **target of
-80 kg at 0.5 kg/week**, and not yet enough data for the measured loop (so `basis: "estimated"`):
-
-| Step | Computation | Result |
-|---|---|---|
-| BMR | `10·90 + 6.25·180 − 5·35 + 5` | **1855 kcal** |
-| TDEE (maintenance) | `1855 × 1.55` (moderate) | **2875 kcal** |
-| Rate-implied deficit | `0.5 × 7700 / 7` | **550 kcal/day** |
-| Deficit cap (25% of maintenance) | `2875 × 0.25` = 719 | 550 < 719 → **not capped** |
-| **Daily calorie target** | `2875 − 550` | **2325 kcal** |
-| Macros (protein-first) | `1.8 × min(90, 85)`; fat `0.8 × 90`; carbs remainder | **P 153 g / F 72 g / C 266 g** |
-| BMI now → target | `90 / 1.8²` → `80 / 1.8²` | **27.8 → 24.7** |
-| ETA | `10 kg remaining ÷ 0.5 kg/wk` | **20 weeks** |
-
-Every output is rounded only at the boundary: integer kcal/grams, **1 dp** for trend / remaining
-/ BMI / ETA-weeks.
-
-### The per-day adherence flags
-
-The envelope's `adherence[]` is one row per **distinct logged food day, newest first**, scoring
-that day's total against the daily target: `under` (≤ 60% of target), `on_track` (≤ target),
-`over` (≤ 115%), `well_over` (beyond). It is the "which days went sideways" read — the operator
-skill leads with the `over` / `well_over` days. `todayCalories` / `todayRemaining` give the same
-for *today* specifically.
-
-### The safety guardrails
-
-The engine clamps aggressiveness and **always** flags it, so an over-ambitious goal can't quietly
-produce a crash diet. `flags[]` is a `{ id, level, message }` list; the `not-medical-advice`
-**info** flag always leads, then **warn** flags fire only when a clamp actually bit:
-
-- **Rate cap** — the weekly loss rate is capped at **≤ 1% of body weight** *and* **≤ 1.0 kg/week**
-  (whichever is smaller). The envelope's `rateKgPerWeek` is the **effective (clamped)** rate; when
-  it had to be reduced below what you asked for, a `rate-capped` warn states the capped rate.
-- **Deficit / calorie floor** — the deficit never exceeds **25% of maintenance**, and the daily
-  target never drops below a hard **calorie floor** (`1500` male / `1200` female). When either
-  clamp reduces the deficit, a `deficit-capped` warn fires.
-- **BMI bound** — a target weight whose BMI is **below 18.5** (`MIN_HEALTHY_BMI`) trips a
-  `target-below-bmi` warn suggesting a higher target.
-- **Not medical advice** — the always-on `not-medical-advice` info flag (see the warning above),
-  emitted on every result regardless of data.
-
-### The new endpoints — `/api/nutrition/{weight,goal,targets}`
-
-Three new route prefixes join the existing trio, following the **same idioms exactly**
-(`force-dynamic`; **reads ungated** so a disabled add-on stays viewable; **writes gated** behind
-`assertAddonEnabled(db, "nutrition")` **inside `mutate()`** + `resolveActor`; `BadRequest → 400`,
-`NotFound → 404`, `VersionConflict → 409`; a `version` on every body):
+### The new endpoints + MCP tools
 
 | Method + route | What it does |
 |---|---|
-| `GET /api/nutrition/weight?from=&to=` | weigh-ins sorted **ascending** by date over a half-open `[from, to)` day window. **Ungated.** |
-| `POST /api/nutrition/weight` | **upsert by day** — the single add-or-update endpoint. Body `{date, weightKg? \| weightLb?, note?}` (`weightLb` ⇒ `weightKg = lb × 0.45359237` at the route boundary). Existing day → update (keep `id`/`createdAt`), **`200`**; new day → mint `WEIGHT-<n>`, **`201`**. **Gated.** |
-| `GET /api/nutrition/weight/[id]` | one entry (`404` if missing). **Ungated.** |
-| `PATCH /api/nutrition/weight/[id]` | edit `{date?, weightKg?, note?}` (a `date` change must not collide with another day's entry — the route enforces it). **Gated.** |
-| `DELETE /api/nutrition/weight/[id]` | hard-remove. **Gated.** |
-| `GET /api/nutrition/goal` | the singleton goal, or `null`. **Ungated.** |
-| `PUT /api/nutrition/goal` | upsert the goal singleton (validates `sex`/`activity` enums, `age`/`heightCm`/`targetWeightKg` > 0; defaults `rateKgPerWeek = 0.5`, `weightUnit = "kg"`). **Gated.** |
-| `PATCH /api/nutrition/goal` | partial update of the existing goal (**`404`** when none is set yet). **Gated.** |
-| `GET /api/nutrition/targets` | the full `NutritionTargets` envelope — `computeNutritionTargets` over `db.nutritionGoal` / `db.weights` / `db.foodLogs` with `today` = the server's local day. **Ungated** (the engine is clockless; the route supplies `today`). |
+| `GET · PUT · PATCH /api/nutrition/diet-profile` | the dietary profile. GET **ungated** (returns the default philosophy when unset); PUT = full replace, PATCH = present-keys merge. Writes gated. |
+| `POST /api/nutrition/targets` | save an agent-authored daily target (upsert by day); returns `{ artifact, version, created, warnings }`. **Gated.** |
+| `GET /api/nutrition/targets` | the history feed `{ items, total, version }` (newest first); `?latest=daily_targets` → the latest single artifact. **Ungated.** |
+| `PATCH · DELETE /api/nutrition/targets/[id]` | edit / hard-remove a target. **Gated.** |
 
-### The 5 new MCP tools
-
-The `nutrition` MCP grows from 14 to **19 tools** — the weight-loss five, same thin-`fetch`-wrapper
-archetype (reads ungated, writes gated, every write attributed `agent`):
-
-| Tool | Maps to | Notes |
-|---|---|---|
-| `log_weight {date, weightKg? \| weightLb?, note?}` | `POST /weight` | **upsert by day**; require **exactly one** of `weightKg` / `weightLb`. |
-| `list_weights {from?, to?}` | `GET /weight` | a per-date list (newest last) with the EWMA trend. |
-| `get_nutrition_goal {}` | `GET /goal` | read the goal/profile singleton. |
-| `set_nutrition_goal {sex, age, heightCm, activity, targetWeightKg, rateKgPerWeek?, weightUnit?}` | `PUT /goal` | upsert the goal. |
-| `get_nutrition_targets {}` | `GET /targets` | the agent-facing **"how am I doing"** read — current/trend/target weight, BMR/TDEE/measured, the daily calorie target + P/F/C macros, the deficit, the ETA, then the guardrail flags, then the **off-track days**. |
-
-The manifest ([`board/lib/addons.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/addons.ts))
-adds `"weights"` to `dataArrays` and the five tool names to `mcp.tools`; `nutritionGoal` stays out
-of `dataArrays` because it is a singleton object, not an array. The operator side of this lives in
-the [`nutrition-chef`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/nutrition-chef/SKILL.md)
-skill, which carries the same not-medical-advice framing and defers medical conditions to a
-professional.
+The `nutrition` MCP exposes `get_diet_profile` / `set_diet_profile` (the MERGE write — a sent list
+*replaces* that list) and `save_nutrition_targets` / `list_nutrition_targets` / `get_nutrition_targets`
+(the last re-pointed at the latest authored artifact). The old weight + goal tools (`log_weight`,
+`list_weights`, `get_nutrition_goal`, `set_nutrition_goal`) are **gone** — weigh-ins moved to the
+**[body](body.md)** MCP (`log_weight`), and the loss-only goal became the body add-on's **free-text
+objective** (`set_body_objective`). The operator skill is
+[`nutrition-chef`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/nutrition-chef/SKILL.md);
+the goal/identity/weight live in [`body-profile`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/body-profile/SKILL.md).
 
 ## The opt-in calendar link
 
@@ -312,7 +231,8 @@ server's archetype. It never shells out to `curl`, makes **no LLM calls**, and a
 `actor: "agent"` (the `x-actor: agent` header **and** `{ actor: "agent" }` in the body). It exposes
 **14 diary tools** for the three verticals below (the read tools ungated and the write tools gated
 behind the add-on flag) plus the
-[5 weight-loss tools](#the-5-new-mcp-tools) documented above — **19 in all**:
+[5 v14 tools](#the-new-endpoints-mcp-tools) (the dietary profile + the agent-authored targets)
+documented above — **19 in all**:
 
 | Vertical | Reads | Writes (gated) |
 |---|---|---|

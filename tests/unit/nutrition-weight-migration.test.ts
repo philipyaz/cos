@@ -92,9 +92,9 @@ test("migration: a v9 fixture (no weights / no nutritionGoal) reads clean as v10
   assert.equal(db.cases[0]?.id, "CASE-1", "the pre-v10 case survives");
 });
 
-test("migration: a v10 fixture round-trips — db.weights series + the db.nutritionGoal singleton survive readDB", async () => {
+test("migration: a v10 fixture migrates to v14 — weights survive (re-homed), the legacy goal becomes bodyProfile+bodyObjective, nutritionGoal is dropped", async () => {
   const v10 = {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: 10,
     version: 42,
     cases: [],
     messages: [],
@@ -139,19 +139,29 @@ test("migration: a v10 fixture round-trips — db.weights series + the db.nutrit
   const db = await store.readDB();
 
   assert.equal(db.schemaVersion, SCHEMA_VERSION);
-  assert.equal(db.version, 42, "version preserved on a v10 round-trip");
-  // The weigh-in series survives in order with its fields intact.
-  assert.equal(db.weights?.length, 2, "both weigh-ins survive the round-trip");
+  assert.equal(db.version, 42, "version preserved through the v14 migration");
+  // The weigh-in series survives in order with its fields intact (re-homed to the body add-on,
+  // manifest-only — same key, same rows).
+  assert.equal(db.weights?.length, 2, "both weigh-ins survive the migration");
   assert.equal(db.weights?.[0]?.id, "WEIGHT-1");
   assert.equal(db.weights?.[0]?.weightKg, 90.5, "canonical kg preserved");
   assert.equal(db.weights?.[0]?.note, "morning", "the optional note rides through");
   assert.equal(db.weights?.[1]?.id, "WEIGHT-2");
-  // The goal SINGLETON (a bare object, not an array) survives intact.
-  assert.ok(db.nutritionGoal && typeof db.nutritionGoal === "object", "the goal singleton is an object");
-  assert.equal(Array.isArray(db.nutritionGoal), false, "…NOT an array (it is a singleton)");
-  assert.equal(db.nutritionGoal?.sex, "male");
-  assert.equal(db.nutritionGoal?.heightCm, 180, "the BMR/BMI height input survives");
-  assert.equal(db.nutritionGoal?.targetWeightKg, 80);
-  assert.equal(db.nutritionGoal?.rateKgPerWeek, 0.5, "the desired loss rate survives (engine clamps at compute time)");
-  assert.equal(db.nutritionGoal?.weightUnit, "kg", "the display-unit preference survives");
+  // The legacy nutritionGoal is NO LONGER carried forward — it is the source the v14 synthesis
+  // transforms, then dropped on the next write (downgrade-safe on read).
+  assert.equal(db.nutritionGoal, undefined, "legacy nutritionGoal is dropped post-v14 (transformed)");
+  // bodyProfile synthesized: sex/heightCm copied, DOB FABRICATED from age=35 via the frozen 2026 anchor.
+  assert.ok(db.bodyProfile && typeof db.bodyProfile === "object", "bodyProfile synthesized from the legacy goal");
+  assert.equal(db.bodyProfile?.sex, "male");
+  assert.equal(db.bodyProfile?.heightCm, 180, "the BMR/BMI height input survives");
+  assert.equal(db.bodyProfile?.dateOfBirth, "1991-01-01", "DOB fabricated clock-free: 2026 − 35 = 1991");
+  assert.equal(db.bodyProfile?.trainingStatus, "novice", "no athlete level present → novice default");
+  assert.equal(db.bodyProfile?.resistanceTrains, false, "no strength sports → resistanceTrains false");
+  assert.equal(db.bodyProfile?.weightUnit, "kg", "the display-unit preference is re-homed onto bodyProfile");
+  // bodyObjective synthesized: activity copied, target carried, the goal becomes FREE-TEXT prose.
+  assert.ok(db.bodyObjective && typeof db.bodyObjective === "object", "bodyObjective synthesized from the legacy goal");
+  assert.equal(db.bodyObjective?.activity, "moderate", "the TDEE activity multiplier is carried onto the objective");
+  assert.equal(db.bodyObjective?.targetWeightKg, 80, "the target-weight anchor survives");
+  assert.equal(db.bodyObjective?.targetDate, null);
+  assert.match(db.bodyObjective?.goalText ?? "", /Lose weight/, "the legacy loss goal becomes free-text goalText");
 });
