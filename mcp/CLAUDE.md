@@ -230,8 +230,9 @@ manager (`cos-services.mjs`), the probes (`ensure-bridges.sh` reads `--probe-lis
 (`gen-cowork-config.mjs`). The setup **skills** install by calling those generators — they no longer
 sed a template or hand-merge Cowork. So a service's plist content is edited in exactly one place: its
 descriptor (+ `config/load-config.sh` for the port/path values). The macOS `gen-launchd --install`
-path itself has not yet been exercised end-to-end on a real machine — verify a full setup pass before
-relying on it.
+path has been validated end-to-end on a real machine (add-on bridge install); a descriptor-driven
+FULL setup pass on a fresh machine is still unverified — do one full pass before relying on it for
+first-run setup.
 
 For the actual runbooks — do **not** duplicate them here:
 
