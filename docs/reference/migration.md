@@ -85,6 +85,16 @@ The on-disk store carries a `schemaVersion` (`board/lib/types.ts`, `SCHEMA_VERSI
 migrates older files up to the current version on read (`store.ts` `migrate()`). All bumps to date are
 **additive + back-compatible** — an older file always reads fine, with any new field defaulting empty.
 
+**The safe direction is one-way: code ≥ store.** The reverse — a board whose code is *older* than the
+file on disk — is the one configuration that can destroy data: `migrate()` only knows the collections
+of *its* version, so a write from old code would persist the reduced shape and silently drop every
+newer collection. The store therefore **fails closed** (`store.ts` `SchemaAheadError`): when the
+on-disk `schemaVersion` is ahead of the code's `SCHEMA_VERSION`, every write — any route, any caller —
+is refused with `503 { error: "store-newer-than-code", disk, code, fix: "git pull" }`, while reads
+keep serving as a **named degraded mode** (the reduced view; the SSE stream broadcasts
+`degradedRead: true` and the board shows a full-width banner). The fix is always on the machine,
+never the data: update the code (`git pull`) and restart the board.
+
 - **v3 → v4 — `db.events[]` (calendar events).** Adds the optional `db.events?: CalendarEvent[]`
   array (calendar appointments; an event's `caseId` is the single source of truth for the case↔event
   link). **Purely additive:** old v3 files still read unchanged — a missing `events` defaults to `[]`,

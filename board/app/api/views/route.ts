@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { readDB, mutate } from "@/lib/store";
+import { storeErrorToResponse } from "@/lib/route-helpers";
 import type { DBShape, SavedView } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -26,18 +27,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Hold the live db reference so we can read its post-write version (writeDB
   // bumps db.version in place after the mutate body returns).
-  let dbRef: DBShape | undefined;
-  const view = await mutate((db) => {
-    dbRef = db;
-    if (!db.views) db.views = [];
-    const v: SavedView = {
-      id: `VIEW-${db.views.length + 1}`,
-      name: String(body.name).trim(),
-      query: String(body.query),
-    };
-    db.views.push(v);
-    return v;
-  });
+  try {
+    let dbRef: DBShape | undefined;
+    const view = await mutate((db) => {
+      dbRef = db;
+      if (!db.views) db.views = [];
+      const v: SavedView = {
+        id: `VIEW-${db.views.length + 1}`,
+        name: String(body.name).trim(),
+        query: String(body.query),
+      };
+      db.views.push(v);
+      return v;
+    });
 
-  return NextResponse.json({ view, version: dbRef!.version }, { status: 201 });
+    return NextResponse.json({ view, version: dbRef!.version }, { status: 201 });
+  } catch (e) {
+    const mapped = storeErrorToResponse(e);
+    if (mapped) return mapped;
+    throw e;
+  }
 }

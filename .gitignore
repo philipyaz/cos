@@ -67,3 +67,8 @@ output/
 # (gitignore never UNtracks files already tracked in THIS private repo — see the note above.)
 /vault/*
 !/vault/example-vault/
+
+# tests/run.sh throwaway board sandbox — must live inside the repo root (Next 16
+# Turbopack rejects a node_modules symlink pointing outside the workspace root),
+# recreated per run and removed by the suite's EXIT trap.
+/.cos-test-board/

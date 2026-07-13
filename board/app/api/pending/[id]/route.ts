@@ -13,6 +13,7 @@ import {
   nextCaseId,
   NotFoundError,
 } from "@/lib/store";
+import { storeErrorToResponse } from "@/lib/route-helpers";
 import {
   VALID_CASE_STATUS,
   VALID_DOMAIN,
@@ -191,9 +192,10 @@ export async function POST(
 
     return NextResponse.json({ pending: result.pending, case: result.case, version: dbRef!.version });
   } catch (e) {
-    if (e instanceof NotFoundError) {
-      return NextResponse.json({ error: e.message }, { status: 404 });
-    }
+    // Shared store-layer mapping FIRST (chiefly SchemaAheadError → 503) so the
+    // generic Error → 400 below can't downgrade a fail-closed write refusal.
+    const mapped = storeErrorToResponse(e);
+    if (mapped) return mapped;
     if (e instanceof ConflictError) {
       return NextResponse.json({ error: e.message }, { status: 409 });
     }

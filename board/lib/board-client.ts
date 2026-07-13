@@ -58,9 +58,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     }
   }
   if (!res.ok) {
+    // Prefer a human `detail` over the machine `error` slug when both are sent
+    // (the schema-guard 503 does: error:"store-newer-than-code" for agents,
+    // detail carrying the git-pull remediation for the toast).
     const msg =
       body && typeof body === "object" && "error" in body
-        ? String((body as { error: unknown }).error)
+        ? String((body as { detail?: unknown; error: unknown }).detail ?? (body as { error: unknown }).error)
         : typeof body === "string" && body
           ? body
           : `Request failed (${res.status})`;
@@ -969,6 +972,45 @@ export function subscribeToLiveStatus(cb: (s: LiveStatus) => void): () => void {
   };
 }
 
+// ── Store schema status (the degraded-read guard) ─────────────────────────────
+// Mirrors the LiveStatus singleton above: the SSE payload carries degradedRead —
+// true when the store file on disk was written by NEWER code than this build
+// (its raw schemaVersion > the code's SCHEMA_VERSION). Reads then serve a
+// REDUCED view and every write is refused with a 503; the SchemaAheadBanner
+// subscribes here to say so. Module-level so any open stream feeds it.
+export interface SchemaStatus {
+  degradedRead: boolean;
+  diskSchemaVersion: number | null; // the raw on-disk version, when known
+}
+
+let schemaStatus: SchemaStatus = { degradedRead: false, diskSchemaVersion: null };
+const schemaStatusListeners = new Set<(s: SchemaStatus) => void>();
+
+function setSchemaStatus(next: SchemaStatus): void {
+  if (
+    next.degradedRead === schemaStatus.degradedRead &&
+    next.diskSchemaVersion === schemaStatus.diskSchemaVersion
+  ) {
+    return;
+  }
+  schemaStatus = next;
+  for (const cb of schemaStatusListeners) cb(schemaStatus);
+}
+
+// Current schema status (seeds the banner's state on mount).
+export function getSchemaStatus(): SchemaStatus {
+  return schemaStatus;
+}
+
+// Subscribe to schema-status changes. Returns an unsubscribe. Fires only on
+// change (callers seed from getSchemaStatus()); safe before any stream is open.
+export function subscribeToSchemaStatus(cb: (s: SchemaStatus) => void): () => void {
+  schemaStatusListeners.add(cb);
+  return () => {
+    schemaStatusListeners.delete(cb);
+  };
+}
+
 // ── Live updates ─────────────────────────────────────────────────────────────
 // Subscribe to the board's SSE stream. `onChange(version)` fires on every
 // `change` event (and the initial `hello`); the caller compares the version to
@@ -985,7 +1027,19 @@ export function subscribeToBoard(onChange: (version: number) => void): () => voi
 
   const handle = (ev: MessageEvent): void => {
     try {
-      const data = JSON.parse(ev.data) as { version?: number };
+      const data = JSON.parse(ev.data) as {
+        version?: number;
+        degradedRead?: boolean;
+        diskSchemaVersion?: number;
+      };
+      // Feed the schema singleton from any frame that carries the flag, so the
+      // banner tracks the guard live off whichever stream is open.
+      if (typeof data.degradedRead === "boolean") {
+        setSchemaStatus({
+          degradedRead: data.degradedRead,
+          diskSchemaVersion: typeof data.diskSchemaVersion === "number" ? data.diskSchemaVersion : null,
+        });
+      }
       if (typeof data.version === "number") onChange(data.version);
     } catch {
       // ignore malformed frames — heartbeats are comments and never reach here

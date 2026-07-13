@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import fsSync from "node:fs";
-import { DATA_FILE } from "@/lib/store";
+import { DATA_FILE, rawSchemaVersionOf } from "@/lib/store";
+import { SCHEMA_VERSION } from "@/lib/types";
 
 // SSE keeps a long-lived connection open, so this route must never be
 // statically optimized and must run on the Node runtime (we use fs.watch).
@@ -9,17 +10,38 @@ export const runtime = "nodejs";
 
 const encoder = new TextEncoder();
 
-// Cheap version read straight off disk — we only need db.version for the SSE
-// payload, so we parse the JSON without going through the full migrate/validate
-// pipeline (and tolerate a transient mid-write parse error by returning -1).
-async function readVersion(): Promise<number> {
-  try {
-    const raw = await fs.readFile(DATA_FILE, "utf8");
-    const v = (JSON.parse(raw) as { version?: unknown }).version;
-    return typeof v === "number" ? v : 0;
-  } catch {
-    return -1; // mid-write / transient; caller skips emitting on -1
+// The per-event payload: the write counter, plus the schema-guard status the
+// degraded-read banner listens for — degradedRead is true when the file on disk
+// was written by NEWER code than this build (raw schemaVersion, read BEFORE any
+// migrate, > SCHEMA_VERSION): reads then serve a REDUCED view and writes 503.
+interface StreamStatus {
+  version: number;
+  degradedRead: boolean;
+  diskSchemaVersion: number;
+}
+
+// Cheap status read straight off disk — we only need version + the RAW
+// schemaVersion for the SSE payload, so we parse the JSON without going through
+// the full migrate/validate pipeline. Mirrors readDB's .bak fallback: when the
+// primary is corrupt, the board is SERVING (and guarding writes off) the .bak's
+// state, so the stream must report THAT file's status rather than go silent —
+// otherwise the store 503s every write while the banner never appears. Returns
+// null only when neither file is readable (mid-write / transient; caller skips).
+async function readStatus(): Promise<StreamStatus | null> {
+  for (const file of [DATA_FILE, `${DATA_FILE}.bak`]) {
+    try {
+      const obj = JSON.parse(await fs.readFile(file, "utf8")) as { version?: unknown };
+      const diskSchemaVersion = rawSchemaVersionOf(obj);
+      return {
+        version: typeof obj.version === "number" ? obj.version : 0,
+        degradedRead: diskSchemaVersion > SCHEMA_VERSION,
+        diskSchemaVersion,
+      };
+    } catch {
+      // unreadable/corrupt — try the fallback file
+    }
   }
+  return null;
 }
 
 // Live board feed. Emits:
@@ -64,16 +86,18 @@ export async function GET(req: Request): Promise<Response> {
         }
       };
 
-      // Greet with the current version so the client can sync its baseline.
-      sendEvent("hello", { version: await readVersion() });
+      // Greet with the current status so the client can sync its baseline (a
+      // null read — mid-write race on open — degrades to a bare hello; the
+      // first change event re-syncs).
+      sendEvent("hello", (await readStatus()) ?? { version: -1 });
 
       // Watch the live file; collapse the write burst with a short debounce.
       try {
         watcher = fsSync.watch(DATA_FILE, () => {
           if (debounce) clearTimeout(debounce);
           debounce = setTimeout(async () => {
-            const version = await readVersion();
-            if (version >= 0) sendEvent("change", { version });
+            const status = await readStatus();
+            if (status) sendEvent("change", status);
           }, 150);
         });
       } catch {

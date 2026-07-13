@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
 import { CommandPalette } from "@/components/command-palette";
-import { readDB } from "@/lib/store";
+import { SchemaAheadBanner } from "@/components/schema-ahead-banner";
+import { readDB, diskSchemaVersion } from "@/lib/store";
 import { ADDON_REGISTRY, isAddonEnabled } from "@/lib/addons";
 import type { AddonNavGroup } from "@/lib/board-client";
 
@@ -21,9 +22,14 @@ export const dynamic = "force-dynamic";
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   let unreadCount = 0;
   let addonGroups: AddonNavGroup[] = [];
+  // SSR seed for the schema-guard banner: correct on first paint (the SSE frames
+  // keep it live after mount — see SchemaAheadBanner). Passed raw and
+  // unconditionally; the banner derives degraded-ness itself.
+  let diskSchema: number | null = null;
   try {
     const db = await readDB();
     unreadCount = db.messages.filter((m) => !m.read).length;
+    diskSchema = diskSchemaVersion(db);
     // The enabled add-ons, grouped — the SSR seed for the sidebar's "Add-ons" section
     // (correct first paint, no flash before the live refetch). One group per enabled
     // add-on (its title/icon as the collapsible header + its nav items nested).
@@ -40,6 +46,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en">
       <body className="font-sans text-ink-900 antialiased">
+        {/* Degraded-read guard banner — a fixed overlay; renders nothing normally. */}
+        <SchemaAheadBanner initialDiskSchemaVersion={diskSchema} />
         <div className="flex h-screen w-screen overflow-hidden bg-ink-50">
           <Sidebar unreadCount={unreadCount} addonGroups={addonGroups} />
           <main className="flex-1 flex flex-col min-w-0 bg-white border-l border-ink-100">
