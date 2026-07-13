@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { readDB, mutate } from "@/lib/store";
+import { storeErrorToResponse } from "@/lib/route-helpers";
 import type { DBShape, PendingMutation } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -48,23 +49,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Field 'summary' is required." }, { status: 400 });
   }
 
-  let dbRef: DBShape | undefined;
-  const pending = await mutate((db): PendingMutation => {
-    dbRef = db;
-    if (!db.pending) db.pending = [];
-    const p: PendingMutation = {
-      id: `P-${db.pending.length + 1}`,
-      proposedAt: new Date().toISOString(),
-      actor: "agent",
-      verb: String(body.verb).trim(),
-      target: typeof body.target === "string" ? body.target : undefined,
-      payload: body.payload && typeof body.payload === "object" ? body.payload : {},
-      summary: String(body.summary).trim(),
-      status: "pending",
-    };
-    db.pending.push(p);
-    return p;
-  });
+  try {
+    let dbRef: DBShape | undefined;
+    const pending = await mutate((db): PendingMutation => {
+      dbRef = db;
+      if (!db.pending) db.pending = [];
+      const p: PendingMutation = {
+        id: `P-${db.pending.length + 1}`,
+        proposedAt: new Date().toISOString(),
+        actor: "agent",
+        verb: String(body.verb).trim(),
+        target: typeof body.target === "string" ? body.target : undefined,
+        payload: body.payload && typeof body.payload === "object" ? body.payload : {},
+        summary: String(body.summary).trim(),
+        status: "pending",
+      };
+      db.pending.push(p);
+      return p;
+    });
 
-  return NextResponse.json({ pending, version: dbRef!.version }, { status: 201 });
+    return NextResponse.json({ pending, version: dbRef!.version }, { status: 201 });
+  } catch (e) {
+    const mapped = storeErrorToResponse(e);
+    if (mapped) return mapped;
+    throw e;
+  }
 }

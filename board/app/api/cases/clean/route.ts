@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { mutate, findCase, cleanCases } from "@/lib/store";
+import { storeErrorToResponse } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -22,17 +23,23 @@ export async function POST(req: NextRequest) {
   }
   const ids = body.ids as string[];
 
-  const { removed, messagesDeleted, version } = await mutate((db) => {
-    // Policy guard: only purge ids that exist AND are in the `done` lane. This is
-    // what makes "Clean" structurally incapable of deleting a non-done case even if
-    // the client sends a stale/wrong list.
-    const doneIds = ids.filter((id) => {
-      const c = findCase(db, id);
-      return c !== undefined && c.status === "done";
+  try {
+    const { removed, messagesDeleted, version } = await mutate((db) => {
+      // Policy guard: only purge ids that exist AND are in the `done` lane. This is
+      // what makes "Clean" structurally incapable of deleting a non-done case even if
+      // the client sends a stale/wrong list.
+      const doneIds = ids.filter((id) => {
+        const c = findCase(db, id);
+        return c !== undefined && c.status === "done";
+      });
+      const { cases, messages } = cleanCases(db, doneIds);
+      return { removed: cases, messagesDeleted: messages, version: db.version };
     });
-    const { cases, messages } = cleanCases(db, doneIds);
-    return { removed: cases, messagesDeleted: messages, version: db.version };
-  });
 
-  return NextResponse.json({ ok: true, removed, messagesDeleted, version });
+    return NextResponse.json({ ok: true, removed, messagesDeleted, version });
+  } catch (e) {
+    const mapped = storeErrorToResponse(e);
+    if (mapped) return mapped;
+    throw e;
+  }
 }

@@ -145,7 +145,10 @@ export function makeBoardApi(entityWord, crmBaseUrl) {
     if (res.status === 409) {
       return { errorResult: err(data.error ?? `Version conflict — the ${entityWord} changed underneath this write.`) };
     }
-    if (!res.ok) return { errorResult: err(`Board returned ${res.status}: ${data.error ?? "unknown error"}`) };
+    // Prefer a human `detail` over the machine `error` slug when both are sent —
+    // the schema-guard 503 carries its git-pull remediation there, and the agent
+    // must see it (the slug alone is not actionable).
+    if (!res.ok) return { errorResult: err(`Board returned ${res.status}: ${data.detail ?? data.error ?? "unknown error"}`) };
     return { data };
   };
 }

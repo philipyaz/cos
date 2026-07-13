@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { mutate, nextCaseId, appendTask, logActivity } from "@/lib/store";
+import { storeErrorToResponse } from "@/lib/route-helpers";
 import {
   VALID_CASE_STATUS,
   VALID_DOMAIN,
@@ -104,39 +105,45 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ? (ov.priority as Priority)
       : tpl.priority;
 
-  let dbRef: DBShape | undefined;
-  const caseRec = await mutate((db): CaseRecord => {
-    dbRef = db;
-    const id = nextCaseId(db);
-    const now = new Date().toISOString();
+  try {
+    let dbRef: DBShape | undefined;
+    const caseRec = await mutate((db): CaseRecord => {
+      dbRef = db;
+      const id = nextCaseId(db);
+      const now = new Date().toISOString();
 
-    const rec: CaseRecord = {
-      id,
-      title: typeof ov.title === "string" && ov.title.trim() ? ov.title.trim() : tpl.name,
-      summary: typeof ov.summary === "string" ? ov.summary : tpl.description,
-      status,
-      domain,
-      tags: Array.isArray(ov.tags) ? ov.tags.map(String) : tpl.tags,
-      vaultLinks: Array.isArray(ov.vaultLinks) ? ov.vaultLinks.map(String) : undefined,
-      tasks: [],
-      messageIds: [],
-      createdAt: now,
-      updatedAt: now,
-      eta: typeof ov.eta === "string" ? ov.eta : undefined,
-      dueAt: typeof ov.dueAt === "string" ? ov.dueAt : undefined,
-      startDate: typeof ov.startDate === "string" ? ov.startDate : undefined,
-      priority,
-    };
+      const rec: CaseRecord = {
+        id,
+        title: typeof ov.title === "string" && ov.title.trim() ? ov.title.trim() : tpl.name,
+        summary: typeof ov.summary === "string" ? ov.summary : tpl.description,
+        status,
+        domain,
+        tags: Array.isArray(ov.tags) ? ov.tags.map(String) : tpl.tags,
+        vaultLinks: Array.isArray(ov.vaultLinks) ? ov.vaultLinks.map(String) : undefined,
+        tasks: [],
+        messageIds: [],
+        createdAt: now,
+        updatedAt: now,
+        eta: typeof ov.eta === "string" ? ov.eta : undefined,
+        dueAt: typeof ov.dueAt === "string" ? ov.dueAt : undefined,
+        startDate: typeof ov.startDate === "string" ? ov.startDate : undefined,
+        priority,
+      };
 
-    for (const t of tpl.tasks) {
-      appendTask(rec, { title: t.title, detail: t.detail, owner: t.owner, status: "open" });
-    }
-    rec.updatedAt = now; // appendTask touched it; pin to creation time
+      for (const t of tpl.tasks) {
+        appendTask(rec, { title: t.title, detail: t.detail, owner: t.owner, status: "open" });
+      }
+      rec.updatedAt = now; // appendTask touched it; pin to creation time
 
-    logActivity(rec, actor, "created", `from template ${tpl.id}`);
-    db.cases.unshift(rec);
-    return rec;
-  });
+      logActivity(rec, actor, "created", `from template ${tpl.id}`);
+      db.cases.unshift(rec);
+      return rec;
+    });
 
-  return NextResponse.json({ case: caseRec, version: dbRef!.version }, { status: 201 });
+    return NextResponse.json({ case: caseRec, version: dbRef!.version }, { status: 201 });
+  } catch (e) {
+    const mapped = storeErrorToResponse(e);
+    if (mapped) return mapped;
+    throw e;
+  }
 }

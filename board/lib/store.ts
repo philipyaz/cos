@@ -90,6 +90,66 @@ export class VersionConflictError extends Error {}
 // outside the lock; this is for validity that depends on db state.
 export class BadRequestError extends Error {}
 
+// FAIL-CLOSED schema guard: the on-disk store was written by NEWER code (its
+// schemaVersion is ahead of this build's SCHEMA_VERSION). migrate() only knows
+// the collections of ITS version, so a write from this process would persist the
+// reduced in-memory shape and silently destroy every newer collection (the
+// 2026-07-12 incident: schema-8 code wiped 7 add-on keys off a schema-14 store).
+// Reads keep serving (a REDUCED view — a named degraded mode, see isSchemaAhead);
+// every write path throws this instead. Routes map it to a 503 via
+// storeErrorToResponse. The fix is always on the machine, never the data:
+// update the code (git pull) and restart the board.
+export class SchemaAheadError extends Error {
+  readonly disk: number;
+  readonly code: number;
+  constructor(disk: number) {
+    super(
+      `store is newer than this code: on-disk schemaVersion ${disk} > code SCHEMA_VERSION ${SCHEMA_VERSION} — ` +
+        `writes refused to prevent silent data loss. Update this machine (git pull) and restart the board.`,
+    );
+    this.disk = disk;
+    this.code = SCHEMA_VERSION;
+  }
+}
+
+// The raw schemaVersion of the file a DBShape was ACTUALLY loaded from (primary
+// or the .bak fallback — they can differ), captured BEFORE migrate() stamps the
+// code's SCHEMA_VERSION over it. Carried as a NON-ENUMERABLE symbol property so
+// it rides the db object through readDB() → mutate() → writeDB() but can never
+// be serialized into the store file (JSON.stringify skips symbol keys).
+const DISK_SCHEMA = Symbol("diskSchemaVersion");
+
+// The raw schemaVersion of an already-parsed store object — the ONE definition
+// of "what version is this file" (the write guard, readDB's tagging, and the
+// SSE stream's degradedRead flag all use it, so they can never disagree). A
+// missing/non-numeric schemaVersion reads as 0: a legacy file is by definition
+// older than the code.
+export function rawSchemaVersionOf(raw: unknown): number {
+  return raw && typeof raw === "object" && typeof (raw as { schemaVersion?: unknown }).schemaVersion === "number"
+    ? (raw as { schemaVersion: number }).schemaVersion
+    : 0;
+}
+
+function tagDiskSchema(db: DBShape, v: number): DBShape {
+  Object.defineProperty(db, DISK_SCHEMA, { value: v, enumerable: false, configurable: true });
+  return db;
+}
+
+// The tagged raw disk version, or SCHEMA_VERSION for an untagged db (one built
+// in memory by code — necessarily the code's own shape, so safe to write).
+export function diskSchemaVersion(db: DBShape): number {
+  const v = (db as unknown as Record<symbol, unknown>)[DISK_SCHEMA];
+  return typeof v === "number" ? v : SCHEMA_VERSION;
+}
+
+// True when the loaded store is AHEAD of this code — reads still serve, but as a
+// named DEGRADED mode: migrate() has dropped every collection this build doesn't
+// know about, so callers (the SSE stream, the UI banner) must say so rather than
+// present the reduced view as complete.
+export function isSchemaAhead(db: DBShape): boolean {
+  return diskSchemaVersion(db) > SCHEMA_VERSION;
+}
+
 const nowISO = (): string => new Date().toISOString();
 
 // ── Migration ──────────────────────────────────────────────────────────────
@@ -279,8 +339,11 @@ async function ensureFile(): Promise<void> {
 }
 
 // Parse + migrate + validate a file's text; throws on bad JSON or bad shape.
+// Tags the result with the file's RAW schemaVersion (read before migrate()
+// stamps SCHEMA_VERSION over it) so the write-path guard can compare honestly.
 function parseAndMigrate(text: string): DBShape {
-  const db = migrate(JSON.parse(text));
+  const raw: unknown = JSON.parse(text);
+  const db = tagDiskSchema(migrate(raw), rawSchemaVersionOf(raw));
   validateDB(db);
   // In-memory guarantees downstream code relies on: these arrays are present.
   if (!db.events) db.events = [];
@@ -308,12 +371,28 @@ export async function readDB(): Promise<DBShape> {
   try {
     return parseAndMigrate(raw);
   } catch (primaryErr) {
+    let db: DBShape;
     try {
       const bak = await fs.readFile(`${DATA_FILE}.bak`, "utf8");
-      return parseAndMigrate(bak);
+      db = parseAndMigrate(bak);
     } catch {
       throw primaryErr;
     }
+    // The .bak rescue must never LOWER the schema guard: a schema-AHEAD primary
+    // that parses as JSON but fails THIS build's validation (a future build
+    // restructured a collection) would otherwise come back tagged with the older
+    // .bak's version — and the next write would clobber the newer primary (the
+    // reverse of the incident the guard exists to stop). When the primary's raw
+    // schemaVersion is extractable and higher, the recovered db carries THAT
+    // version, keeping writes refused. A primary that doesn't even parse is
+    // corruption, not newer data — recovery-by-write stays allowed.
+    try {
+      const primarySchema = rawSchemaVersionOf(JSON.parse(raw));
+      if (primarySchema > diskSchemaVersion(db)) tagDiskSchema(db, primarySchema);
+    } catch {
+      // unparseable primary — plain corruption; keep the .bak's own tag
+    }
+    return db;
   }
 }
 
@@ -367,7 +446,26 @@ async function pruneBackups(): Promise<void> {
 // file (rename is atomic on POSIX — a reader sees either the old or the new
 // complete file, never a partial one).
 export async function writeDB(db: DBShape): Promise<void> {
+  // Fast fail on the tag captured at readDB time (whichever file was actually
+  // loaded, primary or .bak) — mutate() already threw for the normal path; this
+  // covers direct writeDB callers, with the exact version the data came from.
+  if (isSchemaAhead(db)) throw new SchemaAheadError(diskSchemaVersion(db));
   await ensureFile();
+  // Authoritative last check against the file this write is about to REPLACE.
+  // The tag alone is not enough: any clone of the db object drops it (spread /
+  // structuredClone skip non-enumerable symbol properties), and it is read-time
+  // state — another process (a NEWER build sharing this store) may have written
+  // between our readDB and this call. Reading the CURRENT file's raw version
+  // closes both holes. An unparseable current file does NOT block the write:
+  // overwriting corruption with known-good state is the designed .bak-recovery
+  // flow.
+  try {
+    const current = rawSchemaVersionOf(JSON.parse(await fs.readFile(DATA_FILE, "utf8")));
+    if (current > SCHEMA_VERSION) throw new SchemaAheadError(current);
+  } catch (e) {
+    if (e instanceof SchemaAheadError) throw e;
+    // missing/unreadable/corrupt current file — proceed (recovery semantics)
+  }
   db.schemaVersion = SCHEMA_VERSION;
   // NOTE: db.version is bumped at the START of mutate() (one place), so by the
   // time a write reaches here the version already reflects this write. Routes
@@ -407,6 +505,10 @@ let chain: Promise<unknown> = Promise.resolve();
 export async function mutate<T>(fn: (db: DBShape) => T | Promise<T>): Promise<T> {
   const run = chain.then(async () => {
     const db = await readDB();
+    // FAIL CLOSED before fn() ever runs: a store written by newer code must not
+    // be mutated by this build (migrate() has already dropped the collections
+    // this code doesn't know — persisting would wipe them). Routes → 503.
+    if (isSchemaAhead(db)) throw new SchemaAheadError(diskSchemaVersion(db));
     // Bump the monotonic version up-front so anything fn() reads/returns sees the
     // final post-write value. This makes every route's `db.version` match what the
     // SSE stream broadcasts after the file lands (writeDB no longer bumps). An

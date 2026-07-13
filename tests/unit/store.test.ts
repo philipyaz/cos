@@ -1165,3 +1165,163 @@ test("readDB: a corrupt cases.json with NO .bak rethrows the parse error", async
 
   await assert.rejects(storeDisk.readDB(), (err: unknown) => err instanceof Error, "no .bak → the primary parse error propagates");
 });
+
+// ── SchemaAheadError guard (disk path) ─────────────────────────────────────────
+// A store file written by NEWER code (raw schemaVersion > this build's
+// SCHEMA_VERSION) must never be written by this build: migrate() has already
+// dropped the collections this code doesn't know IN MEMORY, so persisting would
+// wipe them from disk (the 2026-07-12 silent-key-drop incident class). Reads
+// keep serving — a named degraded mode (isSchemaAhead).
+
+// A minimal VALID future-schema file: the current shape plus an unknown
+// collection a future version would own (validateDB accepts it — the required
+// arrays are present; migrate() drops the unknown key in memory).
+function futureFileText(): string {
+  return JSON.stringify(
+    {
+      ...makeDB({ version: 9, cases: [makeCase({ id: "CASE-1", title: "kept" })], messages: [] }),
+      schemaVersion: SCHEMA_VERSION + 1,
+      futureCollection: [{ id: "FUT-1", payload: "data this build does not know about" }],
+    },
+    null,
+    2,
+  );
+}
+
+test("readDB: a schema-AHEAD file still serves (degraded) and carries its raw disk version", async () => {
+  await resetStore(makeDB({}));
+  await fsp.writeFile(DISK_FILE, futureFileText(), "utf8");
+
+  const db = await storeDisk.readDB();
+  assert.equal(db.cases.length, 1, "reads keep serving the collections this build knows");
+  assert.equal(storeDisk.isSchemaAhead(db), true, "the degraded mode is NAMED, not silent");
+  assert.equal(storeDisk.diskSchemaVersion(db), SCHEMA_VERSION + 1, "the RAW pre-migrate disk version is captured");
+  assert.ok(!("futureCollection" in db), "migrate() drops unknown collections in memory — the reduced view");
+});
+
+test("mutate: REFUSES a schema-ahead store (SchemaAheadError), never runs fn, leaves the file byte-identical", async () => {
+  await resetStore(makeDB({}));
+  const text = futureFileText();
+  await fsp.writeFile(DISK_FILE, text, "utf8");
+
+  let ran = false;
+  await assert.rejects(
+    storeDisk.mutate(() => {
+      ran = true;
+    }),
+    (e: unknown) =>
+      e instanceof storeDisk.SchemaAheadError &&
+      (e as { disk: number }).disk === SCHEMA_VERSION + 1 &&
+      (e as { code: number }).code === SCHEMA_VERSION,
+    "a typed SchemaAheadError carrying both versions",
+  );
+  assert.equal(ran, false, "the mutate body must NEVER run against a newer store");
+  assert.equal(
+    await fsp.readFile(DISK_FILE, "utf8"),
+    text,
+    "byte-identical — nothing was re-stamped, no newer collection was dropped",
+  );
+
+  // The chain stays alive past the refusal: a current-schema store writes again.
+  await resetStore(makeDB({ version: 1 }));
+  assert.equal(await storeDisk.mutate(() => "ok"), "ok", "a later mutate on a healthy store still works");
+});
+
+test("writeDB: refuses a db loaded from a schema-ahead file (last line of defense for direct callers)", async () => {
+  await resetStore(makeDB({}));
+  await fsp.writeFile(DISK_FILE, futureFileText(), "utf8");
+
+  const db = await storeDisk.readDB();
+  await assert.rejects(
+    storeDisk.writeDB(db),
+    (e: unknown) => e instanceof storeDisk.SchemaAheadError,
+    "writeDB itself refuses — direct store callers are covered too",
+  );
+});
+
+test("schema guard: keys on the file ACTUALLY loaded — corrupt primary + schema-ahead .bak still refuses", async () => {
+  await resetStore(makeDB({}));
+  await fsp.writeFile(`${DISK_FILE}.bak`, futureFileText(), "utf8");
+  await fsp.writeFile(DISK_FILE, "{ not json", "utf8"); // primary corrupt → readDB falls back to .bak
+
+  const db = await storeDisk.readDB();
+  assert.equal(storeDisk.isSchemaAhead(db), true, "the .bak's raw version is the one that got loaded");
+  await assert.rejects(
+    storeDisk.mutate(() => undefined),
+    (e: unknown) => e instanceof storeDisk.SchemaAheadError,
+    "a write against the recovered-but-newer .bak state is refused too",
+  );
+});
+
+test("mutate: an OLDER-schema file (the normal upgrade direction) still writes and re-stamps", async () => {
+  await resetStore(makeDB({}));
+  const old = { ...makeDB({ version: 2, cases: [], messages: [] }), schemaVersion: SCHEMA_VERSION - 1 };
+  await fsp.writeFile(DISK_FILE, JSON.stringify(old, null, 2), "utf8");
+
+  await storeDisk.mutate((db: DBShape) => {
+    db.cases.push(makeCase({ id: "CASE-1" }));
+  });
+
+  const after = JSON.parse(await fsp.readFile(DISK_FILE, "utf8")) as DBShape;
+  assert.equal(after.schemaVersion, SCHEMA_VERSION, "upgrade-on-write stamped the code's version (unchanged contract)");
+  assert.equal(after.cases.length, 1, "the write landed");
+});
+
+test("writeDB: an in-memory db built by code (untagged) writes normally", async () => {
+  await resetStore(makeDB({}));
+  await storeDisk.writeDB(makeDB({ version: 7 }));
+  const after = JSON.parse(await fsp.readFile(DISK_FILE, "utf8")) as DBShape;
+  assert.equal(after.version, 7, "a code-built db is by definition the code's shape — safe to write");
+});
+
+test("schema guard: an AHEAD primary that fails validation + an older .bak — the rescue keeps the HIGHER version", async () => {
+  await resetStore(makeDB({}));
+  // Older, healthy .bak alongside…
+  await fsp.writeFile(`${DISK_FILE}.bak`, JSON.stringify(makeDB({ version: 3 }), null, 2), "utf8");
+  // …and a NEWER primary that parses as JSON but fails THIS build's validateDB
+  // (a future build restructured a collection: numeric ids). Without the retag,
+  // the .bak rescue would tag the db with the OLD version and the next write
+  // would clobber the newer primary — the reverse of the incident.
+  const aheadPrimary = JSON.stringify(
+    { schemaVersion: SCHEMA_VERSION + 2, version: 9, cases: [{ id: 123, status: 5, domain: null }], messages: [] },
+    null,
+    2,
+  );
+  await fsp.writeFile(DISK_FILE, aheadPrimary, "utf8");
+
+  const db = await storeDisk.readDB(); // rescued from the .bak…
+  assert.equal(db.version, 3, "the .bak state is what got served");
+  assert.equal(storeDisk.diskSchemaVersion(db), SCHEMA_VERSION + 2, "…but tagged with the PRIMARY's newer version");
+  await assert.rejects(
+    storeDisk.mutate(() => undefined),
+    (e: unknown) => e instanceof storeDisk.SchemaAheadError,
+    "a write would clobber the newer primary — refused",
+  );
+  assert.equal(await fsp.readFile(DISK_FILE, "utf8"), aheadPrimary, "the newer primary is untouched");
+});
+
+test("writeDB: a clone that dropped the symbol tag is still refused by the write-time disk re-check", async () => {
+  await resetStore(makeDB({}));
+  await fsp.writeFile(DISK_FILE, futureFileText(), "utf8");
+
+  const db = await storeDisk.readDB();
+  const clone = { ...db }; // spread copies enumerable props only — the tag is gone
+  assert.equal(storeDisk.isSchemaAhead(clone as DBShape), false, "the clone lost the tag (fail-open by itself)");
+  await assert.rejects(
+    storeDisk.writeDB(clone as DBShape),
+    (e: unknown) => e instanceof storeDisk.SchemaAheadError,
+    "the authoritative current-file re-read refuses anyway",
+  );
+});
+
+test("writeDB: refuses when the file became newer AFTER the read (cross-process race)", async () => {
+  await resetStore(makeDB({ version: 1 }));
+  const db = await storeDisk.readDB(); // healthy at read time — tag says safe
+  await fsp.writeFile(DISK_FILE, futureFileText(), "utf8"); // a newer build writes in between
+  await assert.rejects(
+    storeDisk.writeDB(db),
+    (e: unknown) => e instanceof storeDisk.SchemaAheadError,
+    "the write-time re-read sees the newer file and refuses",
+  );
+  assert.equal(await fsp.readFile(DISK_FILE, "utf8"), futureFileText(), "the newer file is untouched");
+});

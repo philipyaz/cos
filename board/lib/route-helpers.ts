@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { NotFoundError, VersionConflictError, BadRequestError } from "@/lib/store";
+import { NotFoundError, VersionConflictError, BadRequestError, SchemaAheadError } from "@/lib/store";
 import type { Actor } from "@/lib/types";
 
 // Calendar-day ("YYYY-MM-DD") shape guard — a pure, lock-free, db-free string predicate
@@ -20,10 +20,12 @@ export function resolveActor(req: NextRequest, body: unknown): Actor {
   return "human";
 }
 
-// Maps the three store-layer errors to their HTTP responses with the shared
+// Maps the store-layer errors to their HTTP responses with the shared
 // `{ error: e.message }` JSON body — NotFoundError → 404, VersionConflictError →
-// 409, BadRequestError → 400. Returns null for anything else so the caller can
-// rethrow (and surface a 500), preserving the original per-route catch behavior.
+// 409, BadRequestError → 400, SchemaAheadError → 503 (a machine-readable body:
+// the store on disk is NEWER than this build, writes are refused fail-closed).
+// Returns null for anything else so the caller can rethrow (and surface a 500),
+// preserving the original per-route catch behavior.
 export function storeErrorToResponse(e: unknown): NextResponse | null {
   if (e instanceof NotFoundError) {
     return NextResponse.json({ error: e.message }, { status: 404 });
@@ -33,6 +35,14 @@ export function storeErrorToResponse(e: unknown): NextResponse | null {
   }
   if (e instanceof BadRequestError) {
     return NextResponse.json({ error: e.message }, { status: 400 });
+  }
+  if (e instanceof SchemaAheadError) {
+    // 503 (not 4xx): the request was fine — this MACHINE is behind the store.
+    // `error` is a stable slug for agents/wrappers; `detail` is the human text.
+    return NextResponse.json(
+      { error: "store-newer-than-code", detail: e.message, disk: e.disk, code: e.code, fix: "git pull" },
+      { status: 503 },
+    );
   }
   return null;
 }

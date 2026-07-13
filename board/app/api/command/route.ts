@@ -8,7 +8,9 @@ import {
   archiveCase,
   logActivity,
   nextCaseId,
+  SchemaAheadError,
 } from "@/lib/store";
+import { storeErrorToResponse } from "@/lib/route-helpers";
 import {
   VALID_DOMAIN,
   type CaseRecord,
@@ -169,6 +171,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (e instanceof NoChange) {
       const db = await readDB();
       return NextResponse.json({ ran: [], message: e.message, version: db.version });
+    }
+    // ONLY the schema guard may break the never-fail contract: masking a
+    // fail-closed 503 as a 200 "failed to run" would hide the one error the user
+    // must act on. Every other store error keeps the friendly always-200 shape
+    // (command handlers deliberately never surface 4xx to the palette).
+    if (e instanceof SchemaAheadError) {
+      const mapped = storeErrorToResponse(e);
+      if (mapped) return mapped;
     }
     // Defensive: the grammar itself shouldn't throw otherwise, but never 500.
     return NextResponse.json({ ran: [], message: "Command failed to run." });

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { readDB, mutate, nextPriorityId } from "@/lib/store";
+import { storeErrorToResponse } from "@/lib/route-helpers";
 import { sortPriorityNotes, starredCases } from "@/lib/selectors";
 import { type PriorityNote } from "@/lib/types";
 
@@ -37,17 +38,23 @@ export async function POST(req: NextRequest) {
 
   // Read-modify-write inside the lock: id generation + insert are one critical
   // section, so concurrent creates can't mint the same PRI-id or clobber.
-  const { priority, version } = await mutate((db) => {
-    const now = new Date().toISOString();
-    const rec: PriorityNote = {
-      id: nextPriorityId(db),
-      text: String(body.text).trim(),
-      position: "position" in body && body.position != null ? (body.position as number) : undefined,
-      createdAt: now,
-      updatedAt: now,
-    };
-    (db.priorities ??= []).push(rec);
-    return { priority: rec, version: db.version };
-  });
-  return NextResponse.json({ priority, version }, { status: 201 });
+  try {
+    const { priority, version } = await mutate((db) => {
+      const now = new Date().toISOString();
+      const rec: PriorityNote = {
+        id: nextPriorityId(db),
+        text: String(body.text).trim(),
+        position: "position" in body && body.position != null ? (body.position as number) : undefined,
+        createdAt: now,
+        updatedAt: now,
+      };
+      (db.priorities ??= []).push(rec);
+      return { priority: rec, version: db.version };
+    });
+    return NextResponse.json({ priority, version }, { status: 201 });
+  } catch (e) {
+    const mapped = storeErrorToResponse(e);
+    if (mapped) return mapped;
+    throw e;
+  }
 }

@@ -150,6 +150,14 @@
 #      enforced BEFORE the agent runs). The server hard-imports the Agent SDK at module
 #      top, so when its deps aren't installed the test SKIPs gracefully (exit 0) — so it
 #      is run UNCONDITIONALLY (it self-skips, like guard-quarantine-release).
+#  13d. api-schema-guard — ONLY against the auto-started sandbox board (it must
+#      rewrite the store FILE, so it skips under COS_TEST_BOARD_URL): the
+#      FAIL-CLOSED schema guard. A store whose on-disk schemaVersion is AHEAD of
+#      the code (written by a newer build) keeps serving reads (200, the named
+#      degraded mode; SSE broadcasts degradedRead:true) while EVERY write is
+#      refused 503 { error:"store-newer-than-code", disk, code, fix:"git pull" }
+#      and the file stays byte-identical (the 2026-07-12 silent-wipe incident
+#      class). Restores the original bytes in a finally (net-zero).
 #  14. search-sidecar — headless python tests for the semantic search sidecar
 #      (search/test_search.py): index/topk/batch/determinism over BOTH backends,
 #      offline (COS_SEARCH_EMBEDDER=hash, no network). uv-GATED — skipped (not
@@ -187,6 +195,10 @@ TEST_BOARD_PID=""
 TEST_BOARD_PORT="${COS_TEST_BOARD_PORT:-3999}"
 BASE=""
 BOARD_UP=0
+# Set only for the AUTO-STARTED board (empty under COS_TEST_BOARD_URL): the
+# sandbox data dir, for the one test (api-schema-guard) that must rewrite the
+# store FILE to stage its scenario. Never points at live data.
+TEST_BOARD_DATA_DIR=""
 HTTP_CODE="test-board"
 # Shared by the test board AND the test processes so trust-derivation agrees on
 # the principal. A throwaway value — never the real owner.
@@ -210,10 +222,17 @@ start_test_board() {
     echo "SKIP: board/node_modules/next absent — api-* tests skipped (cd board && npm install). Live board is never used."
     return 0
   fi
-  local sb="${TMP}/test-board"
+  # The sandbox must live INSIDE the repo root (not $TMP): Next 16's Turbopack
+  # resolves the workspace root from the repo lockfile and hard-errors on a
+  # node_modules symlink that points outside it ("Symlink ... is invalid, it
+  # points out of the filesystem root") — a $TMP sandbox therefore never boots
+  # and every api-* step silently SKIPs. Gitignored; removed by the EXIT trap.
+  local sb="${REPO_ROOT}/.cos-test-board"
+  rm -rf "${sb}"
   rsync -a --exclude node_modules --exclude .next --exclude data "${BOARD_SRC}/" "${sb}/" 2>/dev/null
   ln -s "${BOARD_SRC}/node_modules" "${sb}/node_modules"
   mkdir -p "${sb}/data"
+  TEST_BOARD_DATA_DIR="${sb}/data"
   cp "${SCRIPT_DIR}/fixtures/board-seed.json" "${sb}/data/cases.json"
   printf '{}' > "${sb}/data/prefs.json"
   # Point the board's sidecar URLs at a dead port so the test board is fully
@@ -242,7 +261,14 @@ start_test_board() {
   return 0
 }
 
-cleanup() { stop_test_board 2>/dev/null; rm -rf "${TMP}"; }
+cleanup() {
+  stop_test_board 2>/dev/null
+  rm -rf "${TMP}"
+  # Remove the fixed-path sandbox only if THIS run created it — a
+  # COS_TEST_BOARD_URL run (or one that bailed before start_test_board) must not
+  # delete another run's live sandbox out from under it.
+  [ -n "${TEST_BOARD_DATA_DIR}" ] && rm -rf "${REPO_ROOT}/.cos-test-board"
+}
 trap cleanup EXIT
 
 echo "============================================================"
@@ -347,6 +373,15 @@ fi
 echo
 echo "--- spinning up throwaway test board (isolated; seeded fixture) ---------"
 start_test_board
+# In CI a non-booting sandbox must FAIL, not skip: node_modules IS installed
+# there, so a boot failure is a real regression — and letting every api-* step
+# SKIP would turn CI green with zero coverage of the HTTP contract (it happened:
+# the Next 16 Turbopack symlink rejection silently skipped the whole api tier).
+if [ "${BOARD_UP}" -ne 1 ] && [ -n "${CI:-}" ] && [ -x "${BOARD_SRC}/node_modules/.bin/next" ]; then
+  echo "CI: next is installed but the test board failed to boot — failing the suite (api coverage would silently vanish)."
+  fail=1
+  fail_reasons="${fail_reasons} test-board-boot"
+fi
 
 # --- 3. concurrency safety (only when a board is healthy) --------------------
 # Exercises the LIVE board's write path to prove the store mutex prevents lost
@@ -934,6 +969,34 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     fail=1
     fail_reasons="${fail_reasons} api-vault-route"
   fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 13d. api-schema-guard (auto-started test board only) --------------------
+# End-to-end test of the FAIL-CLOSED schema guard (SchemaAheadError): rewrites the
+# SANDBOX store file with a schemaVersion far ahead of the code (plus an unknown
+# future collection) — the 2026-07-12 silent-wipe scenario — then asserts reads
+# stay 200 (named degraded mode), every write 503s with the
+# { error:"store-newer-than-code", disk, code, fix } body (incl. a formerly
+# helper-less route), the file stays BYTE-IDENTICAL across refused writes, the
+# SSE stream broadcasts degradedRead:true, and writes recover after restore.
+# Needs FILE access to the running board's store, so it only runs against the
+# auto-started sandbox board (skipped under COS_TEST_BOARD_URL — no local path
+# is known, and it must never touch a live store). Restores the exact original
+# bytes in a finally (net-zero).
+echo
+echo "--- [13d] api-schema-guard (sandbox board + store file) -----"
+if [ "${BOARD_UP}" -eq 1 ] && [ -n "${TEST_BOARD_DATA_DIR}" ]; then
+  if CRM_BASE_URL="${BASE}" COS_BOARD_DATA="${TEST_BOARD_DATA_DIR}/cases.json" node "${SCRIPT_DIR}/api-schema-guard.mjs"; then
+    echo "api-schema-guard: PASS"
+  else
+    echo "api-schema-guard: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-schema-guard"
+  fi
+elif [ "${BOARD_UP}" -eq 1 ]; then
+  echo "SKIP: external test board (COS_TEST_BOARD_URL) — no file access to its store; schema-guard e2e needs the auto-started sandbox."
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
