@@ -456,8 +456,10 @@ function HistoryList({ recent, clock }: { recent: BackupSummary[]; clock: Date }
           <div key={b.file} className="flex flex-col md:flex-row md:items-center gap-1.5 md:gap-3 px-5 py-2.5">
             <span className="md:flex-1 min-w-0">
               <span className="block text-[13px] text-ink-900">{b.date}</span>
-              <span className="block text-[11px] text-ink-400 truncate font-mono" title={b.host}>
-                {b.host}
+              {/* Producer identity: the stable deviceId (per-device manifests), falling
+                  back to the hostname on legacy entries written before the split. */}
+              <span className="block text-[11px] text-ink-400 truncate font-mono" title={b.deviceId ?? b.host}>
+                {b.deviceId ?? b.host}
               </span>
             </span>
             <span

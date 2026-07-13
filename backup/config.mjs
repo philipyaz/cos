@@ -4,8 +4,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// This file is backup/config.mjs → repo root is one level up.
-export const REPO_ROOT = path.resolve(import.meta.dirname, "..");
+// This file is backup/config.mjs → repo root is one level up. COS_BACKUP_REPO_ROOT
+// exists ONLY so the hermetic test (tests/backup-hardening.mjs) can point the whole
+// pipeline at a synthetic skeleton — real runs never set it. DEFAULT_REPO_ROOT is
+// exported so backup.mjs's identity gate (assertDefaultRepoOrRefuse) can refuse an
+// overridden root the same way it refuses an overridden repo — fail closed unless
+// the COS_BACKUP_ALLOW_NONDEFAULT=1 test escape hatch is set.
+export const DEFAULT_REPO_ROOT = path.resolve(import.meta.dirname, "..");
+export const REPO_ROOT =
+  process.env.COS_BACKUP_REPO_ROOT && process.env.COS_BACKUP_REPO_ROOT.trim()
+    ? path.resolve(process.env.COS_BACKUP_REPO_ROOT.trim())
+    : DEFAULT_REPO_ROOT;
 
 // ── config/cos.env reader (fail-safe; mirrors board/lib/principal.ts discipline) ──
 // config/cos.env is the machine-local public config (paths/ports/binaries). It is a
@@ -51,6 +60,11 @@ const nonEmpty = (v) => typeof v === "string" && v.trim() !== "";
 
 const cosEnv = parseCosEnv(REPO_ROOT);
 
+// The standard value chain for a machine setting: env > cos.env > fallback.
+// Callers keep any post-processing (slug validation, sanitizing) local.
+const envOrCosEnv = (name, fallback) =>
+  (process.env[name] && process.env[name].trim()) || (nonEmpty(cosEnv[name]) ? cosEnv[name].trim() : fallback);
+
 // The EXPECTED backup repo — the SINGLE source of truth is config/cos.env BACKUP_REPO,
 // falling back to the ~/.cos-backups default when it is absent. This is what the
 // run-gate (assertDefaultRepoOrRefuse) refuses to deviate from, and what the board's
@@ -84,11 +98,38 @@ export const KEYCHAIN_ACCOUNT =
 // always captured instead of silently falling out of scope. Precedence env > cos.env >
 // the historical default. VAULT_NAME is a slug (setup-vault validates it); we reject any
 // value with a path separator / traversal so a malformed name can't widen the tar scope.
-const rawVaultName =
-  (process.env.VAULT_NAME && process.env.VAULT_NAME.trim()) ||
-  (nonEmpty(cosEnv.VAULT_NAME) ? cosEnv.VAULT_NAME.trim() : "my-personal-thoughts-vault");
+const rawVaultName = envOrCosEnv("VAULT_NAME", "my-personal-thoughts-vault");
 const vaultName = /^[A-Za-z0-9._-]+$/.test(rawVaultName) ? rawVaultName : "my-personal-thoughts-vault";
 export const VAULT_SCOPE_PATH = `vault/${vaultName}`;
+// Whether a vault name is actually CONFIGURED on this machine (env or cos.env),
+// vs merely defaulted. restore.mjs maps a snapshot's vault onto the local name
+// ONLY when configured — on a fresh DR machine with no cos.env yet, mapping onto
+// the legacy default would misfile a correctly-named snapshot vault.
+export const VAULT_NAME_CONFIGURED = Boolean(
+  (process.env.VAULT_NAME && process.env.VAULT_NAME.trim()) || nonEmpty(cosEnv.VAULT_NAME),
+);
+
+// The stable per-machine identity that keys this producer's manifests/<id>.json.
+// Precedence env > cos.env > a sanitized hostname fallback. The fallback exists
+// only until the device-role work (multi-device PR 3) mints a real COS_DEVICE_ID
+// at setup time — a hostname keeps two machines' manifests apart in the common
+// case, but it is NOT unique by construction (a replacement Mac often inherits
+// its predecessor's computer name), which is exactly why producer admission in
+// backup.mjs keys on a MACHINE-LOCAL marker + key fingerprint, never on this id.
+// Sanitized to a filename-safe slug so a hostname can never traverse out of
+// manifests/. MIRRORED (not imported) by board/lib/backup-status.ts.
+const rawDeviceId = envOrCosEnv("COS_DEVICE_ID", os.hostname());
+export const DEVICE_ID = rawDeviceId.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64) || "unknown-device";
+
+// The local board's base URL — restore.mjs probes it before --apply (restoring
+// over a RUNNING board lets an in-flight mutate serialize its stale in-memory
+// state right back over the freshly-restored file). cos.env stores BOARD_PORT
+// (BOARD_URL is a value the shell loader DERIVES from it — mirror that here);
+// an explicit BOARD_URL in env/cos.env still wins for exotic setups.
+export const BOARD_URL = envOrCosEnv(
+  "BOARD_URL",
+  `http://localhost:${/^\d+$/.test(envOrCosEnv("BOARD_PORT", "3000")) ? envOrCosEnv("BOARD_PORT", "3000") : "3000"}`,
+).replace(/\/$/, "");
 
 // What gets backed up — repo-root-relative files or directories.
 // (All real, live runtime stores that currently have NO off-site backup.)

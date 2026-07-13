@@ -33,10 +33,17 @@ flowchart LR
   live --> TAR[gzip-tar]
   TAR --> ENC["AES-256-GCM encrypt<br/>scrypt(passphrase, salt) → key<br/>random salt+IV per run"]
   ENC --> FILE["snapshots/cos-backup-&lt;ts&gt;.enc"]
-  ENC --> MAN["MANIFEST.json<br/>sha256 + metadata"]
-  FILE --> PUSH["git commit + push<br/>(private repo)"]
+  ENC --> MAN["manifests/&lt;deviceId&gt;.json<br/>sha256 + metadata + schemaVersion"]
+  FILE --> PUSH["git commit + push<br/>(fetch/rebase first; private repo)"]
   MAN --> PUSH
 ```
+
+**Multi-producer safe.** Each machine writes only its own `manifests/<deviceId>.json`
+(the pre-split single `MANIFEST.json` is still read, never written), every run converges
+with the remote before producing (fetch + rebase, with one converge-and-retry on a rejected
+push), and a machine's **first** run into an archive with history must decrypt-verify the
+newest snapshot with its local key (*producer admission*) — a wrong key is refused before
+it can silently split the archive into two mutually-unrestorable halves.
 
 The scope is declared in [`config.mjs`](https://github.com/philipyaz/cos/blob/main/backup/config.mjs)
 (`SCOPE`). The vault entry is the subtle one: it is resolved as `vault/<VAULT_NAME>` from
@@ -100,10 +107,12 @@ the board. The exit code is the contract every caller reads:
 | `1` | fail-closed **repo-guard refusal** (see below) | yes |
 | other non-zero | hard failure | yes |
 
-!!! note "Exit 2 and 3 are not failures"
+!!! note "Exit 2 and 3 are not failures — but a STANDING push outage is"
     `2` means the snapshot is committed and just needs a later push; `3` means another trigger was
-    already running. Health checks (and the `/backups` verdict) deliberately treat only a non-`0/2/3`
-    exit as a real failure.
+    already running. Health checks (and the `/backups` verdict) treat a single non-`0/2/3` exit as a
+    real failure — and additionally escalate to **error** when the oldest *unpushed* commit is more
+    than 24h old: each run "succeeded" locally, but the off-site channel has been dead for a day+,
+    which is a safety failure, not a cosmetic warning.
 
 ### Fail-closed repo guard
 
@@ -128,17 +137,19 @@ sequenceDiagram
   participant R as restore.mjs
   participant Repo as backup repo
   participant FS as live stores
-  R->>Repo: git pull, pick snapshot (--date / latest)
+  R->>Repo: sync (fetch/ff — HARD-fails if unreachable or diverged; --stale-ok escapes)
+  R->>R: pick snapshot — THIS device's latest (--device / --any-device for cross-machine)
   R->>R: decrypt → GCM auth tag verify
-  R->>R: sha256 vs MANIFEST.json
+  R->>R: sha256 vs the manifest entry
   R->>R: every *.json parses
   alt verification fails
     R-->>R: refuse (bad magic / tag throw / mismatch)
   else dry-run (default)
     R-->>R: report OK, write nothing
   else --apply
+    R->>R: refuse if anything answers on $BOARD_URL (--allow-live-board escapes)
     R->>FS: copy current state → ~/cos-recovery/pre-restore-&lt;ts&gt;/
-    R->>FS: overwrite live stores
+    R->>FS: overwrite live stores (vault mapped to local VAULT_NAME; jobs.json stripped; Obsidian identity kept)
   end
 ```
 

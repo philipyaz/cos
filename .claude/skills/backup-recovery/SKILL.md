@@ -25,11 +25,17 @@ this skill happened because live data was edited and the only backups were local
   macOS login Keychain (`security` item `cos-backup-key`) AND an offline copy in your
   password manager. Never in any repo, never logged. Lose it → backups are unrecoverable.
 - **Backup repo** — a PRIVATE GitHub repo (local clone at `$BACKUP_REPO`). Holds
-  `snapshots/cos-backup-<ts>.enc` + `MANIFEST.json`. Private **and** encrypted = a repo
-  leak exposes nothing. Its location is **config-driven**: `config/cos.env BACKUP_REPO`
-  (the loader exports it as `$BACKUP_REPO`), defaulting to `~/.cos-backups` when unset.
-  This config value is the **EXPECTED** repo; `backup.mjs` refuses to run against any
-  other effective path (see §6 Relocating + the fail-closed guard).
+  `snapshots/cos-backup-<ts>.enc` + **per-device manifests** `manifests/<deviceId>.json`
+  (one per producing machine — the deviceId is `COS_DEVICE_ID` from `config/cos.env`, else
+  a sanitized hostname; a legacy single `MANIFEST.json` from before the split is still
+  READ, never written). Private **and** encrypted = a repo leak exposes nothing. Its
+  location is **config-driven**: `config/cos.env BACKUP_REPO` (the loader exports it as
+  `$BACKUP_REPO`), defaulting to `~/.cos-backups` when unset. This config value is the
+  **EXPECTED** repo; `backup.mjs` refuses to run against any other effective path (see §6
+  Relocating + the fail-closed guard). Multiple machines may produce into ONE archive:
+  each run converges with the remote first (fetch + rebase), and a machine's FIRST run
+  must **decrypt-verify** the newest existing snapshot with its local key (producer
+  admission) — a wrong key is refused before it can split the archive.
 - **Scope** — `backup/config.mjs SCOPE`: board data, guard data, config, the vault. The
   vault entry is **resolved from `config/cos.env VAULT_NAME`** (`vault/<VAULT_NAME>`, the
   same active vault `setup-vault` records), so a renamed/relocated vault is always captured
@@ -58,6 +64,14 @@ Resolve the repo root as `$(git rev-parse --show-toplevel)`; commands below run 
 
 **1.1 — Generate + store the recovery key.** Skip if the Keychain item already exists
 (`security find-generic-password -s cos-backup-key -w >/dev/null 2>&1 && echo exists`).
+
+> **NEVER mint a new key when the backup repo already has snapshots.** If the configured
+> repo has history (`node backup/restore.mjs --list` shows entries, or `ls "$BACKUP_REPO"/snapshots`
+> is non-empty), this machine is JOINING an existing archive: provision the **same** recovery
+> key from the password manager via §2's `COS_BACKUP_KEY` path instead. A second key silently
+> splits the archive into two mutually-unrestorable halves — `backup.mjs` also enforces this
+> (producer admission: a joining machine's first run must decrypt-verify the newest existing
+> snapshot, and refuses to produce otherwise).
 
 ```bash
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
@@ -111,11 +125,24 @@ Done. A backup runs daily at 03:30 (or next wake).
 
 ## 2. Restore (after data loss / corruption / on a new machine)
 
+**STOP THE BOARD FIRST** (quit `next dev` / `launchctl bootout` the board service): restore
+`--apply` **refuses while anything answers on `$BOARD_URL`** — a live board holds the whole
+store in memory and an in-flight write would clobber the restored file (`--allow-live-board`
+overrides, at your own risk). Restore also **requires a reachable remote** (a stale clone
+must not pick "latest"); for offline disaster recovery pass `--stale-ok`.
+
 ```bash
-node backup/restore.mjs --list                       # pick a date
+node backup/restore.mjs --list                       # pick a date (lists ALL devices' snapshots)
 node backup/restore.mjs --date 2026-06-06             # DRY RUN: verify only, nothing written
 node backup/restore.mjs --date 2026-06-06 --apply     # restore (snapshots current state first)
 ```
+
+**Selection is device-scoped:** "latest" means THIS machine's latest. On a NEW machine (or
+restoring another machine's data — the migration/handover flow) pick the producer explicitly:
+`--device <id>` (ids shown by `--list`) or `--any-device` for the global newest. Cross-machine
+restores are role-aware: the snapshot's vault is mapped into this machine's configured
+`VAULT_NAME`, the producer's `vault/.cos/jobs.json` worker queue is stripped, and this
+machine's Obsidian identity in `config/settings.json` is preserved.
 
 `--apply` copies the current live stores to `~/cos-recovery/pre-restore-<ts>/` **before**
 overwriting, so the restore is reversible. After it completes, restart services:
@@ -250,6 +277,29 @@ launchctl bootstrap "gui/$U" "$LAUNCH_AGENTS_DIR/com.chiefofstaff.backup.plist"
 The board's `agent-target` readiness check WARNS when the installed plist's `COS_BACKUP_REPO`
 doesn't match the `cos.env` EXPECTED — catching a half-done relocation (step 3 skipped) so the
 daily floor and the board stay in sync.
+
+---
+
+## 7. Diverged backup repo (manual reconcile)
+
+`backup.mjs` converges with the remote automatically (fetch + rebase before producing;
+unique snapshot names + per-device manifests make that conflict-free). The ONE case it
+will not auto-resolve is a **pre-upgrade divergence on the legacy shared `MANIFEST.json`**
+(both machines appended to it before the per-device split). Symptoms: backup runs log
+`WARN rebase onto origin/... failed` and exit 2; `restore.mjs` refuses with `DIVERGED`.
+
+Reconcile once, by hand — the snapshots themselves never conflict (unique filenames):
+
+```bash
+cd "$BACKUP_REPO"
+git fetch origin && git rebase origin/HEAD   # conflicts only on MANIFEST.json
+# Union the two MANIFEST.json versions: keep BOTH sides' entries, newest first
+# (each entry is self-contained; order within the array is cosmetic).
+$EDITOR MANIFEST.json && git add MANIFEST.json && git rebase --continue
+git push origin HEAD
+```
+
+New entries land in `manifests/<deviceId>.json` from now on, so this cannot recur.
 
 ---
 

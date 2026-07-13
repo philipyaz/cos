@@ -10,7 +10,10 @@
 //   • The OBSIDIAN identity (obsidianVaultId/obsidianVaultName) — used ONLY to build the
 //     `obsidian://open?vault=…` deep-link in the case drawer. This lives in
 //     config/settings.json (the board's per-machine prefs file, already read by
-//     principal.ts/retention.ts) because the Obsidian-registered vault can have a
+//     principal.ts/retention.ts). These two keys are MACHINE-LOCAL: a cross-machine
+//     restore preserves them (backup/restore.mjs SETTINGS_MACHINE_KEYS mirrors this
+//     list — keep the two in lockstep when adding a machine-local settings key).
+//     The registration is per-machine because the Obsidian-registered vault can have a
 //     DIFFERENT name from the folder slug, AND because a deep-link by NAME is ambiguous
 //     when two registered vaults share a basename — so we prefer the unique 16-char
 //     vault ID, which setup-vault captures from ~/Library/Application Support/obsidian/

@@ -799,16 +799,19 @@ export interface QuarantineRecord {
 // here — the same fail-safe online/error contract the guard surface uses. These
 // types mirror that wire so the proxy route + the Backups UI share one shape.
 
-// One backup, mirroring the REAL ~/.cos-backups/MANIFEST.json entry VERBATIM (the 8
-// fields backup.mjs writes, in order). `createdAt` is the staleness anchor (the
-// durable wall-clock time of the run; preferred over launchctl's reboot-resettable
+// One backup, mirroring a manifest entry (manifests/<deviceId>.json, or the legacy
+// single MANIFEST.json for pre-split snapshots). `createdAt` is the staleness anchor
+// (the durable wall-clock time of the run; preferred over launchctl's reboot-resettable
 // counters). `scope` is the list of stores in that snapshot — storeCount is derived
-// as scope.length at read time (it is NOT a manifest field).
+// as scope.length at read time (it is NOT a manifest field). `deviceId`/`schemaVersion`
+// are absent on legacy entries written before the per-device split.
 export interface BackupSummary {
   file: string; // "snapshots/cos-backup-<ts>.enc"
   date: string; // YYYY-MM-DD
   createdAt: string; // ISO-8601 — the staleness anchor
   host: string; // os.hostname() of the machine that wrote it
+  deviceId?: string; // stable producer id (keys manifests/<deviceId>.json)
+  schemaVersion?: number; // the board store's raw schemaVersion at snapshot time
   scope: string[]; // repo-root-relative stores captured (storeCount = scope.length)
   plaintextSha256: string; // integrity sha of the pre-encryption tarball
   plaintextBytes: number; // pre-encryption size

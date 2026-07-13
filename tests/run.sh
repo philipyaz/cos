@@ -158,6 +158,17 @@
 #      refused 503 { error:"store-newer-than-code", disk, code, fix:"git pull" }
 #      and the file stays byte-identical (the 2026-07-12 silent-wipe incident
 #      class). Restores the original bytes in a finally (net-zero).
+#  13e. backup-hardening — hermetic multi-producer backup pipeline test (NO board,
+#      NO Keychain, NO network, NO live data: synthetic repo-root skeleton + a local
+#      BARE git "remote" + per-device clones in a mktemp sandbox, HOME sandboxed).
+#      Asserts: per-device manifests (deviceId/schemaVersion/vaultPath recorded, no
+#      legacy MANIFEST.json), fetch-before-push convergence (a BEHIND producer still
+#      exits 0), producer admission (same key joins; a WRONG key is refused before
+#      the archive splits), restore reads the manifest UNION, hard-fails on an
+#      unreachable remote (--stale-ok escapes), --apply refuses while anything
+#      LISTENS on BOARD_URL, and the cross-machine apply semantics (vault name
+#      mapping, .cos/jobs.json strip, settings.json machine-key merge). Run
+#      UNCONDITIONALLY (needs only git + node).
 #  14. search-sidecar — headless python tests for the semantic search sidecar
 #      (search/test_search.py): index/topk/batch/determinism over BOTH backends,
 #      offline (COS_SEARCH_EMBEDDER=hash, no network). uv-GATED — skipped (not
@@ -999,6 +1010,23 @@ elif [ "${BOARD_UP}" -eq 1 ]; then
   echo "SKIP: external test board (COS_TEST_BOARD_URL) — no file access to its store; schema-guard e2e needs the auto-started sandbox."
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 13e. backup-hardening (hermetic; no board/Keychain/network/live data) ---
+# The multi-producer backup pipeline contract: per-device manifests, fetch-before-
+# push convergence, producer admission (wrong-key refusal), manifest-union restore,
+# stale-clone hard-fail, the live-board apply guard, and the cross-machine restore
+# semantics (vault mapping / jobs.json strip / settings machine-key merge). Fully
+# sandboxed (mktemp skeleton + local bare git remote + COS_BACKUP_ALLOW_NONDEFAULT);
+# the real ~/.cos-backups and live stores are never touched.
+echo
+echo "--- [13e] backup-hardening (hermetic sandbox) ---------------"
+if node "${SCRIPT_DIR}/backup-hardening.mjs"; then
+  echo "backup-hardening: PASS"
+else
+  echo "backup-hardening: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} backup-hardening"
 fi
 
 # --- 13. search sidecar (python, headless, deterministic) --------------------
