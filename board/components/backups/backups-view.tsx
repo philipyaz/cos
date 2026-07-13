@@ -52,6 +52,7 @@ const BACKUP_SETUP_COMMAND =
 type Toast =
   | { kind: "fresh" }
   | { kind: "busy" }
+  | { kind: "lease" }
   | { kind: "ran"; pushed: boolean }
   | { kind: "failed"; code?: number };
 
@@ -122,6 +123,7 @@ export function BackupsView({ now, initial }: { now: string; initial: BackupStat
       // handled in the catch below as an inline error — never as a 200 toast here.
       if (res.skipped === "busy") setToast({ kind: "busy" });
       else if (res.skipped === "fresh") setToast({ kind: "fresh" });
+      else if (res.skipped === "lease-held-elsewhere") setToast({ kind: "lease" });
       else if (res.ran && res.ok) setToast({ kind: "ran", pushed: res.pushed ?? false });
       else if (res.ran && res.ok === false) setToast({ kind: "failed", code: res.code });
     } catch (e) {
@@ -573,6 +575,12 @@ function describeToast(toast: Toast): {
         tone: "amber",
         icon: <IconWarning className="w-4 h-4 mt-px text-amber-600 shrink-0" />,
         text: "Skipped — another backup is already in progress. Try again in a moment.",
+      };
+    case "lease":
+      return {
+        tone: "amber",
+        icon: <IconCheckCircle className="w-4 h-4 mt-px text-amber-600 shrink-0" />,
+        text: "Skipped — another device holds the hub lease (it produces the backups now). This machine deliberately does not.",
       };
     case "ran":
       return {

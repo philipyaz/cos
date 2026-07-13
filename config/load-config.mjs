@@ -36,21 +36,27 @@ export function loadConfig() {
   let out
   try {
     // The loader only assigns + exports (no stdout), so `env` after it yields a clean KEY=VALUE dump.
-    // `2>/dev/null` swallows benign noise (e.g. `brew --prefix` on a machine without Homebrew); the
-    // loader seeds defaults for everything it touches, so suppressing stderr loses nothing we need.
-    out = execFileSync('sh', ['-c', `. "${REPO_ROOT}/config/load-config.sh" 2>/dev/null; env`], {
+    // `&&` (not `;`) so the loader's own hard-fails PROPAGATE — the new role validation + the
+    // spoke+localhost BOARD_URL refusal `return 1`, which must reach Node, not be swallowed and turned
+    // into a partial/misconfigured env. brew-prefix noise is filtered per-line below (we can't blanket
+    // `2>/dev/null` without also hiding the loader's refusal message), and its stderr is captured so
+    // the throw can quote the exact reason.
+    out = execFileSync('sh', ['-c', `. "${REPO_ROOT}/config/load-config.sh" && env`], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
       maxBuffer: 4 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
   } catch (e) {
-    // This is the intended LOUD failure (never a silent hardcoded-port fallback). The likely causes,
-    // in order: config/load-config.sh missing; a syntax error in a sourced config/cos.env; or `sh`
-    // not on PATH (on Windows, install Git Bash — a documented prerequisite).
+    // This is the intended LOUD failure (never a silent hardcoded-port fallback). The likely causes:
+    // the loader REFUSED (invalid COS_DEVICE_ROLE, or spoke + a localhost BOARD_URL); config/
+    // load-config.sh missing; a syntax error in a sourced config/cos.env; or `sh` not on PATH (on
+    // Windows, install Git Bash). Surface the loader's own stderr so the real reason shows.
+    const stderr = (e && e.stderr ? String(e.stderr).trim() : '').split('\n').filter(Boolean).join(' ');
     throw new Error(
-      '[load-config] could not source config/load-config.sh. Check that the file exists, that a ' +
-        'sourced config/cos.env has no syntax error, and that `sh` is on PATH (Windows: install Git ' +
-        'Bash). Underlying error: ' + e.message,
+      '[load-config] could not source config/load-config.sh — ' +
+        (stderr || 'check that the file exists, that a sourced config/cos.env has no syntax error, and that `sh` is on PATH (Windows: install Git Bash).') +
+        (e && e.message ? ` (${e.message.split('\n')[0]})` : ''),
     )
   }
   const env = {}

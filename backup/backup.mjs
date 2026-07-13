@@ -3,17 +3,26 @@
 // the PRIVATE GitHub backup repo. Git history is the immutable, off-site, versioned
 // record (you cannot silently overwrite the past — that was the whole failure mode).
 //
-// Run by the launchd job (backup/deploy/com.chiefofstaff.backup.plist.template) or
-// by hand:  node backup/backup.mjs   (also: the /backup-recovery skill, "backup now").
+// Run by the launchd job (rendered from backup/backup.service.json by
+// scripts/gen-launchd.mjs — label com.chiefofstaff.backup) or by hand:
+//   node backup/backup.mjs   (also: the /backup-recovery skill, "backup now").
+//
+// Exit codes (the contract every caller reads — board run-gate, /backups verdict):
+//   0 = snapshot written + pushed         2 = committed locally only (push failed)
+//   3 = benign lock-skip (run in flight)  4 = benign lease skip (another device is
+//                                             the hub; state quarantined once)
+//   1/other = hard failure
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 import { execFileSync } from "node:child_process";
-import { REPO_ROOT, DEFAULT_REPO_ROOT, BACKUP_REPO, EXPECTED_BACKUP_REPO, SCOPE, VAULT_SCOPE_PATH, DEVICE_ID } from "./config.mjs";
+import { REPO_ROOT, DEFAULT_REPO_ROOT, BACKUP_REPO, EXPECTED_BACKUP_REPO, SCOPE, VAULT_SCOPE_PATH, DEVICE_ID, DEVICE_ROLE } from "./config.mjs";
 import { encrypt, decrypt } from "./lib/crypto.mjs";
 import { resolveKey } from "./lib/key.mjs";
 import { deviceManifestPath, readAllManifests, MANIFESTS_DIR } from "./lib/manifests.mjs";
+import { readLease, writeLease, leaseIsStale, coerceLease, LEASE_FILE } from "./lib/lease.mjs";
 import { firstLine } from "./lib/util.mjs";
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
@@ -61,6 +70,13 @@ function assertDefaultRepoOrRefuse() {
 function main() {
   // Identity gate FIRST — before we touch the keychain, the repo, or any store.
   assertDefaultRepoOrRefuse();
+
+  // A SPOKE never produces: it holds no state worth archiving (its board-facing
+  // tools point at the hub) and must not touch the lease. Hard refusal, exit 1.
+  if (DEVICE_ROLE === "spoke") {
+    log("refusing to run: this machine is a SPOKE (COS_DEVICE_ROLE=spoke) — spokes do not produce backups; the hub does.");
+    process.exit(1);
+  }
 
   // Acquire the single-flight lock. Reclaim it if it's orphaned (older than 120s),
   // otherwise another run owns it — log + exit with code 3 ("busy"). Code 3 is a BENIGN
@@ -234,6 +250,153 @@ function assertProducerAdmission(key, fetchOk) {
   fs.writeFileSync(ADMITTED_MARKER, fp + "\n");
 }
 
+// ── The hub lease (multi-device split-brain tripwire) ─────────────────────────
+// Exactly ONE machine may produce into the archive: the holder of HUB.json. The
+// lease rides the NORMAL snapshot commit + convergent (non-force) push — never a
+// force-push, which could clobber remote snapshot history from a diverged clone.
+// Race resolution comes from that same convergent push: if two machines both
+// claim a stale lease and both snapshot, the first pushes cleanly; the second's
+// push is rejected, the rebase hits an add/modify conflict on HUB.json, aborts,
+// and the run exits 2 (committed locally, retries next run) — it NEVER
+// force-overwrites. On its next run it sees the winner's fresh lease and backs
+// off. Loud and safe beats atomic-but-dangerous.
+//
+// evaluateLease is READ-ONLY: it decides whether this machine may produce and
+// whether it should (re)write HUB.json this run. The actual write is folded into
+// the snapshot commit by runBackup.
+const LEASE_RENEW_MARGIN_HOURS = 6; // re-stamp renewedAt only when older than this (avoid churn)
+
+// The authoritative lease view: the REMOTE's post-fetch HUB.json (git show @{u})
+// when online, else the local working tree. Shared coerceLease keeps every reader
+// identical.
+function readAuthoritativeLease(fetchOk, upstream) {
+  if (fetchOk && upstream) {
+    try {
+      return coerceLease(JSON.parse(sh("git", ["-C", BACKUP_REPO, "show", `${upstream}:${LEASE_FILE}`])));
+    } catch {
+      /* no HUB.json on the remote / unreadable — fall back to the local view */
+    }
+  }
+  return readLease(BACKUP_REPO);
+}
+
+// Returns { mayProduce, heldBy, action }:
+//   mayProduce false → another device holds a FRESH lease; do NOT produce (exit 4).
+//   action 'claim'   → take over a stale/absent lease (epoch bump) — write HUB.json.
+//   action 'renew'   → we already hold it; write only if the stamp is stale enough.
+//   action 'none'    → we hold it and it is fresh; leave HUB.json untouched.
+function evaluateLease(fetchOk) {
+  let upstream = null;
+  try {
+    upstream = sh("git", ["-C", BACKUP_REPO, "rev-parse", "--abbrev-ref", "@{u}"]).trim();
+  } catch {
+    /* no upstream configured */
+  }
+  const lease = readAuthoritativeLease(fetchOk, upstream);
+
+  if (lease && lease.deviceId !== DEVICE_ID && !leaseIsStale(lease)) {
+    return { mayProduce: false, heldBy: lease, action: "none" };
+  }
+  if (!lease || lease.deviceId !== DEVICE_ID) {
+    // Absent, or a STALE lease held by another device → we take over. When
+    // offline we still take over LOCALLY (the data deserves a snapshot); the
+    // convergent push either lands the claim or degrades to exit 2, and the next
+    // online run reconciles — no fabricated remote authority, no force-push.
+    if (lease) log(`lease: taking over a STALE lease from ${lease.deviceId} (last renewed ${lease.renewedAt}).`);
+    return { mayProduce: true, heldBy: lease, action: "claim" };
+  }
+  // We already hold it — renew only when the stamp is old enough (avoid a commit
+  // + push on every 03:30 + top-up + manual run).
+  const t = new Date(lease.renewedAt).getTime();
+  const due = !Number.isFinite(t) || Date.now() - t > LEASE_RENEW_MARGIN_HOURS * 3600_000;
+  return { mayProduce: true, heldBy: lease, action: due ? "renew" : "none" };
+}
+
+// Write HUB.json for a claim/renew (file only — the snapshot commit stages + pushes
+// it via `git add -A`). A claim bumps the epoch off whatever we're superseding.
+function stampLease(action, heldBy) {
+  const epoch = action === "claim" ? (heldBy ? heldBy.epoch : 0) + 1 : heldBy.epoch;
+  writeLease(BACKUP_REPO, { deviceId: DEVICE_ID, epoch });
+  log(`lease: ${action} by ${DEVICE_ID} (epoch ${epoch}) — rides this snapshot's commit.`);
+}
+
+// Quarantine this machine's stray state when it discovers another device holds the
+// lease: one encrypted snapshot into orphan/<deviceId>-<stamp>.enc (no manifest
+// entry — not part of the restore catalog), committed + pushed via the convergent
+// path. The machine-local marker records the CONTENT digest of the last quarantine
+// so a demoted-but-still-writing machine re-orphans when its store actually CHANGES
+// (continuous protection) but stays quiet + exits 4 when nothing changed. The marker
+// is written ONLY after a successful push, so a failed push retries next run.
+const ORPHANED_MARKER = path.join(BACKUP_REPO, ".backup.orphaned");
+
+function readOrphanMarker() {
+  try {
+    return JSON.parse(fs.readFileSync(ORPHANED_MARKER, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function orphanQuarantine(key, holder) {
+  const snap = archiveScope(key); // sha = the plaintext content digest
+  const prior = readOrphanMarker();
+  if (prior && prior.sha === snap.sha) {
+    log(`lease held by ${holder.deviceId} — this machine's state is unchanged since its last quarantine (exit 4).`);
+    return;
+  }
+  log(`LEASE HELD ELSEWHERE: ${holder.deviceId} (renewed ${holder.renewedAt}) is the hub — this machine must not produce.`);
+  const orphanDir = path.join(BACKUP_REPO, "orphan");
+  fs.mkdirSync(orphanDir, { recursive: true });
+  const fname = `${DEVICE_ID}-${snap.stamp}.enc`;
+  fs.writeFileSync(path.join(orphanDir, fname), snap.blob);
+  sh("git", ["-C", BACKUP_REPO, "add", "-A"]);
+  sh("git", ["-C", BACKUP_REPO, "commit", "-q", "-m", `orphan quarantine ${DEVICE_ID} (lease held by ${holder.deviceId})`]);
+  let pushed = false;
+  try {
+    sh("git", ["-C", BACKUP_REPO, "push", "origin", "HEAD"]);
+    pushed = true;
+  } catch {
+    if (syncWithRemote()) {
+      try {
+        sh("git", ["-C", BACKUP_REPO, "push", "origin", "HEAD"]);
+        pushed = true;
+      } catch (e) {
+        log("WARN: orphan quarantine could not be pushed — committed locally; will retry next run:", firstLine(e));
+      }
+    }
+  }
+  if (pushed) {
+    // Mark ONLY on a successful push, keyed on the content digest — so an unpushed
+    // quarantine retries, and a later local write (new digest) re-orphans.
+    fs.writeFileSync(ORPHANED_MARKER, JSON.stringify({ sha: snap.sha, at: snap.stamp }) + "\n");
+    log(`quarantined this machine's state → orphan/${fname} (pushed). Recover it via the hub if it holds real writes.`);
+  }
+}
+
+// gzip-tar the in-scope stores + encrypt — shared by the normal snapshot path and
+// the orphan quarantine. Throws when nothing in scope exists.
+function archiveScope(key) {
+  const present = SCOPE.filter((p) => fs.existsSync(path.join(REPO_ROOT, p)));
+  if (present.length === 0) throw new Error("nothing in scope exists — refusing to write an empty backup");
+  if (!present.includes(VAULT_SCOPE_PATH)) {
+    log(`WARN: configured vault ${VAULT_SCOPE_PATH} not found under the repo — it is NOT in this snapshot. Check config/cos.env VAULT_NAME.`);
+  }
+  // tar WITHOUT gzip, then gzip via node's zlib (mtime=0 header) — DETERMINISTIC
+  // for identical file content, unlike `tar czf` whose gzip stamps the wall clock
+  // into its header (a fresh sha every second). Determinism makes the snapshot sha
+  // reproducible AND lets the orphan-quarantine marker reliably detect "unchanged
+  // store" by content digest. Restore still reads it with `tar xzf`.
+  const tmpTar = path.join(os.tmpdir(), `cos-backup-${process.pid}.tar`);
+  sh("/usr/bin/tar", ["cf", tmpTar, "-C", REPO_ROOT, ...present]);
+  const rawTar = fs.readFileSync(tmpTar);
+  fs.rmSync(tmpTar, { force: true });
+  const tarball = zlib.gzipSync(rawTar, { level: 6 }); // node gzip: MTIME field = 0 → stable
+  const sha = crypto.createHash("sha256").update(tarball).digest("hex");
+  const blob = encrypt(tarball, key);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return { present, tarball, sha, blob, stamp, date: stamp.slice(0, 10) };
+}
+
 function runBackup() {
   const key = resolveKey(); // throws with guidance if missing
 
@@ -247,6 +410,30 @@ function runBackup() {
   // append to) sees the freshest view of the archive.
   const fetchOk = syncWithRemote();
   assertProducerAdmission(key, fetchOk);
+
+  // The hub lease: exactly one producer. A fresh lease held by another device
+  // stops this run cold (exit 4, after quarantining any changed local state).
+  const lease = evaluateLease(fetchOk);
+  if (!lease.mayProduce) {
+    // Make the LOCAL HUB.json reflect the true (remote) holder, so this machine's
+    // board /api/healthz stops reporting ITSELF as hub after demotion.
+    try {
+      sh("git", ["-C", BACKUP_REPO, "checkout", "@{u}", "--", LEASE_FILE]);
+    } catch {
+      /* no upstream / no remote HUB.json — leave the working tree as-is */
+    }
+    orphanQuarantine(key, lease.heldBy);
+    process.exitCode = 4; // benign "lease-held-elsewhere" skip — mapped like exit 3
+    return;
+  }
+  // We may produce. Stamp HUB.json when claiming or when a renewal is due — the
+  // write rides this run's snapshot commit + convergent push (no separate
+  // commit, no force-push). Clear any stale quarantine marker: we are the hub now.
+  if (lease.action === "claim" || lease.action === "renew") stampLease(lease.action, lease.heldBy);
+  if (fs.existsSync(ORPHANED_MARKER)) {
+    fs.rmSync(ORPHANED_MARKER, { force: true });
+    log("lease: this machine is the hub — cleared the orphan-quarantine marker.");
+  }
 
   // Load this device's manifest BEFORE the expensive tar/encrypt work, with
   // corruption recovery: a present-but-unparseable file must NEVER be silently
@@ -279,30 +466,11 @@ function runBackup() {
     }
   }
 
-  const present = SCOPE.filter((p) => fs.existsSync(path.join(REPO_ROOT, p)));
-  if (present.length === 0) throw new Error("nothing in scope exists — refusing to write an empty backup");
-  // Loudly flag a configured-but-missing vault. Resolving the vault from VAULT_NAME exists
-  // precisely so the ACTIVE vault is never SILENTLY dropped — if it's not on disk, say so
-  // (the line shows up in backup.out.log + the /backups log tails) rather than omitting it
-  // quietly. We still back up everything else that IS present.
-  if (!present.includes(VAULT_SCOPE_PATH)) {
-    log(`WARN: configured vault ${VAULT_SCOPE_PATH} not found under the repo — it is NOT in this snapshot. Check config/cos.env VAULT_NAME.`);
-  }
+  // 1+2) gzip-tar the scope + encrypt (shared with the orphan-quarantine path).
+  const { present, tarball, sha, blob, stamp, date } = archiveScope(key);
   log("scope:", present.join(", "));
 
-  // 1) gzip-tar the scope (deterministic-ish; content is what matters)
-  const tmpTar = path.join(os.tmpdir(), `cos-backup-${process.pid}.tgz`);
-  sh("/usr/bin/tar", ["czf", tmpTar, "-C", REPO_ROOT, ...present]);
-  const tarball = fs.readFileSync(tmpTar);
-  fs.rmSync(tmpTar, { force: true });
-  const sha = crypto.createHash("sha256").update(tarball).digest("hex");
-
-  // 2) encrypt
-  const blob = encrypt(tarball, key);
-
   // 3) write into the backup repo (timestamped; one file per run, never overwritten)
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const date = stamp.slice(0, 10);
   const snapDir = path.join(BACKUP_REPO, "snapshots");
   fs.mkdirSync(snapDir, { recursive: true });
   const fname = `cos-backup-${stamp}.enc`;
@@ -356,7 +524,7 @@ function runBackup() {
   } catch {
     /* no .gitignore yet */
   }
-  for (const entry of [".backup.lock", ".backup.admitted"]) {
+  for (const entry of [".backup.lock", ".backup.admitted", ".backup.orphaned"]) {
     if (!gi.split(/\r?\n/).includes(entry)) {
       gi = (gi && !gi.endsWith("\n") ? gi + "\n" : gi) + entry + "\n";
       fs.writeFileSync(giPath, gi);
@@ -372,9 +540,12 @@ function runBackup() {
   sh("git", ["-C", BACKUP_REPO, "commit", "-m", `backup ${stamp} · ${present.length} stores · ${(blob.length / 1024).toFixed(0)}KB · ${DEVICE_ID}`]);
   // Push, and on a rejection (another producer pushed while THIS run was
   // archiving) converge once and retry — snapshot files are unique-named and the
-  // manifest is per-device, so the rebase is conflict-free by construction. When
-  // the PRE-RUN fetch already failed we're offline: skip the pointless converge +
-  // second push and go straight to the benign exit 2.
+  // manifest is per-device, so a snapshot-only rebase is conflict-free. The ONE
+  // legitimate conflict is HUB.json when two machines raced to claim a stale
+  // lease: the rebase aborts, this retry push also fails (non-ff), and the run
+  // exits 2 (committed locally, retried next run — when this machine will see the
+  // winner's fresh lease and back off). NEVER a force-push. When the PRE-RUN fetch
+  // already failed we're offline: skip the pointless converge and exit 2 directly.
   try {
     sh("git", ["-C", BACKUP_REPO, "push", "origin", "HEAD"]);
     log("pushed to remote ✓");

@@ -4,10 +4,24 @@
   "kind": "bridge",
   "runtime": "bridge",
   "core": true,
+  "roles": [
+    "hub",
+    "spoke"
+  ],
   "portVar": "CALENDAR_BRIDGE_PORT",
-  "stdio": ["${NODE_BIN}", "${REPO_ROOT}/mcp/calendar-server/server.mjs"],
-  "env": { "CRM_BASE_URL": "${BOARD_URL}" },
+  "stdio": [
+    "${NODE_BIN}",
+    "${REPO_ROOT}/mcp/calendar-server/server.mjs"
+  ],
+  "env": {
+    "CRM_BASE_URL": "${BOARD_URL}"
+  },
   "idleExit": true,
-  "clients": ["claude-code", "cowork"],
-  "probe": { "type": "httpListen" }
+  "clients": [
+    "claude-code",
+    "cowork"
+  ],
+  "probe": {
+    "type": "httpListen"
+  }
 }

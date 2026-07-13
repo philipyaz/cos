@@ -104,19 +104,17 @@ node backup/restore.mjs --list         # the snapshot shows up
 node backup/restore.mjs                # DRY RUN: auth tag OK ✓ / sha256 OK ✓ / JSON-verified ✓
 ```
 
-**1.4 — Install the daily LaunchAgent:**
+**1.4 — Install the daily LaunchAgent** (rendered from the service manifest — the backup is an
+ordinary manifest service now, descriptor `backup/backup.service.json`, label
+`com.chiefofstaff.backup`, hub-only):
 
 ```bash
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-U="$(id -u)"
 mkdir -p "$REPO_ROOT/backup/logs"
-# launchd can't see an nvm/asdf shim — write the brew node path into the plist.
-sed -e "s|__NODE__|$BREW_PREFIX/bin/node|g" -e "s|__REPO_ROOT__|$REPO_ROOT|g" -e "s|__BACKUP_REPO__|$BACKUP_REPO|g" \
-  "$REPO_ROOT/backup/deploy/com.chiefofstaff.backup.plist.template" \
-  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.backup.plist"
-launchctl bootout "gui/$U/com.chiefofstaff.backup" 2>/dev/null || true
-launchctl bootstrap "gui/$U" "$LAUNCH_AGENTS_DIR/com.chiefofstaff.backup.plist"
-launchctl kickstart -k "gui/$U/com.chiefofstaff.backup"   # run once now; check backup/logs/
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install backup
+# The job is SCHEDULED (03:30 daily; next wake if asleep) — gen-launchd loads it but does
+# not fire it. Run once now to prove the chain end-to-end:
+launchctl kickstart -k "gui/$(id -u)/com.chiefofstaff.backup"   # then check backup/logs/
 ```
 
 Done. A backup runs daily at 03:30 (or next wake).
@@ -300,6 +298,24 @@ git push origin HEAD
 ```
 
 New entries land in `manifests/<deviceId>.json` from now on, so this cannot recur.
+
+---
+
+## 8. Windows: schedule the daily backup (Task Scheduler)
+
+macOS installs the 03:30 job as a launchd `StartCalendarInterval` plist
+(`gen-launchd.mjs --install backup`). Windows has no launchd — the Node service
+manager (`cos-services.mjs`) deliberately skips scheduled jobs — so register the
+daily run with **Task Scheduler** once:
+
+```powershell
+# from the repo root; sources cos.env via load-config so BACKUP_REPO etc. resolve
+schtasks /create /sc daily /st 03:30 /tn "com.chiefofstaff.backup" ^
+  /tr "node %CD%\backup\backup.mjs"
+```
+
+The backup script is identical across platforms (per-device manifest, producer
+admission, the HUB.json lease); only the scheduler differs.
 
 ---
 

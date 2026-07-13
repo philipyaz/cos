@@ -4,12 +4,27 @@
   "kind": "bridge",
   "runtime": "bridge",
   "core": true,
+  "roles": [
+    "hub"
+  ],
   "portVar": "VAULT_BRIDGE_PORT",
-  "stdio": ["${NODE_BIN}", "${REPO_ROOT}/mcp/vault-server/server.mjs"],
-  "env": { "COS_VAULT_DIR": "${VAULT_DIR}" },
-  "secrets": ["ANTHROPIC_API_KEY"],
+  "stdio": [
+    "${NODE_BIN}",
+    "${REPO_ROOT}/mcp/vault-server/server.mjs"
+  ],
+  "env": {
+    "COS_VAULT_DIR": "${VAULT_DIR}"
+  },
+  "secrets": [
+    "ANTHROPIC_API_KEY"
+  ],
   "secretWrapper": "${REPO_ROOT}/mcp/vault-server/launch.sh",
   "idleExit": true,
-  "clients": ["claude-code", "cowork"],
-  "probe": { "type": "httpListen" }
+  "clients": [
+    "claude-code",
+    "cowork"
+  ],
+  "probe": {
+    "type": "httpListen"
+  }
 }

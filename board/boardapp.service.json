@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "name": "boardapp",
+  "kind": "sidecar",
+  "runtime": "exec",
+  "optional": true,
+  "roles": ["hub"],
+  "autostart": false,
+  "portVar": "BOARD_PORT",
+  "cwd": "${REPO_ROOT}/board",
+  "exec": ["${NODE_BIN}", "${REPO_ROOT}/scripts/boardapp-run.mjs"],
+  "env": {
+    "COS_DEVICE_ROLE": "${COS_DEVICE_ROLE}",
+    "NODE_BIN": "${NODE_BIN}",
+    "BOARD_PORT": "${BOARD_PORT}"
+  },
+  "clients": [],
+  "probe": { "type": "httpListen" }
+}

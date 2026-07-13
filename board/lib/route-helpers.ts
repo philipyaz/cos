@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { NotFoundError, VersionConflictError, BadRequestError, SchemaAheadError } from "@/lib/store";
+import { NotFoundError, VersionConflictError, BadRequestError, SchemaAheadError, SpokeRoleError } from "@/lib/store";
 import type { Actor } from "@/lib/types";
 
 // Calendar-day ("YYYY-MM-DD") shape guard — a pure, lock-free, db-free string predicate
@@ -41,6 +41,14 @@ export function storeErrorToResponse(e: unknown): NextResponse | null {
     // `error` is a stable slug for agents/wrappers; `detail` is the human text.
     return NextResponse.json(
       { error: "store-newer-than-code", detail: e.message, disk: e.disk, code: e.code, fix: "git pull" },
+      { status: 503 },
+    );
+  }
+  if (e instanceof SpokeRoleError) {
+    // 503, same contract shape as the schema guard: the request was fine — this
+    // MACHINE's role forbids local writes (a spoke's store is read-only).
+    return NextResponse.json(
+      { error: "spoke-role-refusal", detail: e.message, role: "spoke", fix: "write via the hub board (BOARD_URL)" },
       { status: 503 },
     );
   }

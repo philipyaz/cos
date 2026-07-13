@@ -14,8 +14,13 @@
 
 import { readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { getManifest } from '../mcp/service-manifest.mjs'
+import { getManifest, currentRole } from '../mcp/service-manifest.mjs'
 import { loadConfig, REPO_ROOT } from '../config/load-config.mjs'
+
+// Cowork's config is PER-MACHINE (unlike the committed .mcp.json), so it is scoped to
+// this machine's device role: a spoke's Cowork gets only the board-facing wrappers
+// (they point at the hub via ${BOARD_URL}); hub-only servers never appear at all.
+const ROLE = currentRole()
 
 function loadSecrets() {
   const env = {}
@@ -37,7 +42,7 @@ const FULL_SYNC = NAMES.length === 0
 function buildEntries() {
   const secrets = loadSecrets()
   const out = {}
-  for (const e of getManifest({ client: 'cowork' })) {
+  for (const e of getManifest({ client: 'cowork', role: ROLE })) {
     if (!FULL_SYNC && !NAMES.includes(e.name)) continue
     const env = { ...e.env } // e.env has NO PATH / idle-exit (those are bridge/plist-only) — correct for Cowork
     for (const k of e.secrets || []) if (secrets[k] !== undefined) env[k] = secrets[k]
@@ -52,7 +57,7 @@ const entries = buildEntries()
 if (process.argv.includes('--print')) {
   // Redact secret VALUES in the printed preview so a console/log never shows the key.
   const redacted = JSON.parse(JSON.stringify(entries))
-  for (const e of getManifest({ client: 'cowork' })) {
+  for (const e of getManifest({ client: 'cowork', role: ROLE })) {
     if (!redacted[e.name]) continue
     for (const k of e.secrets || []) if (redacted[e.name].env[k]) redacted[e.name].env[k] = '«from config/secrets.env»'
   }

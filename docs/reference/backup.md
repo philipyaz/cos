@@ -38,12 +38,20 @@ flowchart LR
   MAN --> PUSH
 ```
 
-**Multi-producer safe.** Each machine writes only its own `manifests/<deviceId>.json`
-(the pre-split single `MANIFEST.json` is still read, never written), every run converges
-with the remote before producing (fetch + rebase, with one converge-and-retry on a rejected
-push), and a machine's **first** run into an archive with history must decrypt-verify the
-newest snapshot with its local key (*producer admission*) — a wrong key is refused before
-it can silently split the archive into two mutually-unrestorable halves.
+**Multi-producer safe — and single-producer by lease.** Each machine writes only its own
+`manifests/<deviceId>.json` (the pre-split single `MANIFEST.json` is still read, never
+written), every run converges with the remote before producing (fetch + rebase, with one
+converge-and-retry on a rejected push), and a machine's **first** run into an archive with
+history must decrypt-verify the newest snapshot with its local key (*producer admission*) —
+a wrong key is refused before it can silently split the archive into two
+mutually-unrestorable halves. On top of that, a tiny **plaintext `HUB.json` lease** names
+the ONE machine allowed to produce (the hub): the holder renews it on every run with a
+git-level compare-and-swap (`--force-with-lease` pinned to the just-fetched ref); a machine
+that finds a **fresh** lease held elsewhere quarantines its stray state once
+(`orphan/<deviceId>-<ts>.enc` — preserved, never discarded) and exits **4** (a benign,
+calm skip, like the lock's exit 3); a **stale** lease (>26h unrenewed) is claimable with an
+epoch bump — that is the handover. A machine whose `COS_DEVICE_ROLE` is `spoke` never
+produces at all.
 
 The scope is declared in [`config.mjs`](https://github.com/philipyaz/cos/blob/main/backup/config.mjs)
 (`SCOPE`). The vault entry is the subtle one: it is resolved as `vault/<VAULT_NAME>` from

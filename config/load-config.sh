@@ -75,6 +75,13 @@ fi
 # objective) that nutrition + fitness read; gated per-board via Settings.addons (it hard auto-enables
 # under either consumer). This default only seeds the supergateway HTTP bridge port.
 : "${BODY_BRIDGE_PORT:=8012}"
+# Device role (multi-device): "hub" runs the state machine (board, sidecars, backups, routines);
+# "spoke" is a stateless client whose board-facing services point at the hub's BOARD_URL. The
+# default is hub so a solo machine never meets the concept. Precedence + validation happen in
+# section 4 (AFTER cos.env is sourced) so the value the loader validates + exports is the final
+# one — and so a pre-set process env wins over cos.env, matching every other reader (cos-env.ts,
+# backup/config.mjs, ensure-bridges.mjs). Capture any pre-set env value here first.
+_cos_env_role_override="${COS_DEVICE_ROLE:-}"
 
 # --- 3. Override defaults with the real machine config (once cos-setup has written it) ---------
 if [ -f "$REPO_ROOT/config/cos.env" ]; then
@@ -84,6 +91,19 @@ if [ -f "$REPO_ROOT/config/cos.env" ]; then
 fi
 
 # --- 4. Derived values — computed AFTER cos.env so a port/name override propagates -------------
+# Device role: env override wins over cos.env (matching cos-env.ts / backup/config.mjs), then
+# default hub, then validate the FINAL value loudly. cos.env may have set COS_DEVICE_ROLE via the
+# `set -a` source above; the captured env override (if any) supersedes it.
+if [ -n "$_cos_env_role_override" ]; then COS_DEVICE_ROLE="$_cos_env_role_override"; fi
+: "${COS_DEVICE_ROLE:=hub}"
+case "$COS_DEVICE_ROLE" in
+  hub | spoke) ;;
+  *)
+    echo "[load-config] COS_DEVICE_ROLE='$COS_DEVICE_ROLE' is invalid — must be 'hub' or 'spoke' (config/cos.env, or the process env)." >&2
+    return 1 2>/dev/null || exit 1
+    ;;
+esac
+
 # A blank VAULT_NAME (e.g. before setup-vault fills it) is treated as unset → the template vault.
 [ -n "${VAULT_NAME:-}" ] || VAULT_NAME=example-vault
 : "${VAULT_DIR:=$REPO_ROOT/vault/$VAULT_NAME}"
@@ -101,6 +121,15 @@ fi
 : "${FITNESS_BRIDGE_URL:=http://localhost:$FITNESS_BRIDGE_PORT}"
 : "${BODY_BRIDGE_URL:=http://localhost:$BODY_BRIDGE_PORT}"
 
+# A spoke pointing at itself is the one misconfiguration that quietly recreates a second
+# state machine: role=spoke with BOARD_URL still the localhost default means every wrapper
+# would talk to a LOCAL board instead of the hub. Fail loudly, naming both keys.
+if [ "$COS_DEVICE_ROLE" = spoke ] && [ "$BOARD_URL" = "http://localhost:$BOARD_PORT" ]; then
+  echo "[load-config] COS_DEVICE_ROLE=spoke but BOARD_URL is the localhost default — a spoke has no local board." >&2
+  echo "[load-config] Set BOARD_URL to the hub's URL (e.g. https://<hub>.<tailnet>.ts.net) in config/cos.env." >&2
+  return 1 2>/dev/null || exit 1
+fi
+
 # --- 5. Export for child processes ------------------------------------------------------------
 export REPO_ROOT BREW_PREFIX NODE_BIN UV_BIN SUPERGATEWAY_BIN LAUNCH_AGENTS_DIR COWORK_CONFIG
 export OPENWHISPR_DB OPENWHISPR_AUDIO_DIR BACKUP_REPO
@@ -114,3 +143,9 @@ export WHATSAPP_MCP_DIR WHATSAPP_MCP_BRIDGE_PORT WHATSAPP_GO_PORT WHATSAPP_MCP_B
 export NUTRITION_BRIDGE_PORT NUTRITION_BRIDGE_URL
 export FITNESS_BRIDGE_PORT FITNESS_BRIDGE_URL
 export BODY_BRIDGE_PORT BODY_BRIDGE_URL
+export COS_DEVICE_ROLE
+# COS_DEVICE_ID has NO default here (setup mints it; backup tooling falls back to a
+# sanitized hostname) — export it only when the machine actually configured one.
+# (An `if`, not `[ ] &&`: this is the file's last statement, and a bare failed test
+# would make the whole `source` report a non-zero status — fatal under set -e.)
+if [ -n "${COS_DEVICE_ID:-}" ]; then export COS_DEVICE_ID; fi
