@@ -15,12 +15,15 @@ import { useMemo, useState } from "react";
 import type { DeviceStatus, DeviceSeen, HubLease } from "@/lib/types";
 import { fetchDeviceStatus } from "@/lib/board-client";
 import { relativeTime, formatDateTime } from "@/lib/format";
-import { IconBolt, IconRefresh, IconCheckCircle, IconWarning, IconCopy, IconCheck } from "@/components/icons";
+import { IconBolt, IconRefresh, IconCheckCircle, IconWarning, IconCopy, IconCheck, IconChevronRight } from "@/components/icons";
 
 export function DevicesView({ now, initial }: { now: string; initial: DeviceStatus }) {
   const [data, setData] = useState<DeviceStatus>(initial);
   const [refreshing, setRefreshing] = useState(false);
   const [copied, setCopied] = useState(false);
+  // The how-to disclosure — defaults OPEN when there's no join blob yet (the hub URL
+  // isn't set up, so the steps are the actionable content), collapsed once it is.
+  const [howToOpen, setHowToOpen] = useState(!initial.joinBlob);
   const clock = useMemo(() => new Date(now), [now]);
 
   const refresh = async (): Promise<void> => {
@@ -131,7 +134,7 @@ export function DevicesView({ now, initial }: { now: string; initial: DeviceStat
           <div className="px-5 py-3 border-b border-ink-100">
             <h2 className="text-[13px] font-semibold text-ink-900">Add a device</h2>
           </div>
-          <div className="px-5 py-3 text-[12.5px] space-y-2">
+          <div className="px-5 py-3 text-[12.5px] space-y-3">
             {data.joinBlob ? (
               <>
                 <p className="text-ink-600">
@@ -153,17 +156,99 @@ export function DevicesView({ now, initial }: { now: string; initial: DeviceStat
               </>
             ) : (
               <p className="text-ink-500">
-                To emit a join string, set <code className="font-mono text-ink-700">COS_HUB_PUBLIC_URL</code> in{" "}
-                <code className="font-mono text-ink-700">config/cos.env</code> to this hub&rsquo;s
-                <code className="font-mono text-ink-700"> tailscale serve</code> URL (e.g.{" "}
-                <code className="font-mono text-ink-700">https://mini.your-tailnet.ts.net</code>). Or run{" "}
-                <code className="font-mono text-ink-700">node scripts/join-blob.mjs</code> on the hub.
+                No join string yet — this hub&rsquo;s public address (<code className="font-mono text-ink-700">COS_HUB_PUBLIC_URL</code>)
+                isn&rsquo;t set. The steps below get you there.
               </p>
             )}
+
+            {/* Collapsible how-to: getting the hub's Tailscale URL. Actionable when no
+                blob exists; a reference (collapsed) once it does. */}
+            <div className="rounded-md border border-ink-100 bg-ink-50/50">
+              <button
+                onClick={() => setHowToOpen((v) => !v)}
+                className="w-full flex items-center gap-1.5 px-3 py-2 text-[12px] font-medium text-ink-700 hover:text-ink-900"
+                aria-expanded={howToOpen}
+              >
+                <IconChevronRight className={"w-3.5 h-3.5 transition-transform" + (howToOpen ? " rotate-90" : "")} />
+                {data.joinBlob ? "Set up / change the hub address (Tailscale)" : "How do I get the hub's Tailscale URL?"}
+              </button>
+              {howToOpen && <HubUrlHowTo hasBlob={!!data.joinBlob} />}
+            </div>
           </div>
         </section>
       </div>
     </div>
+  );
+}
+
+// The Tailscale-serve setup walkthrough. Reachable-over-the-tailnet HTTPS is what a
+// spoke connects to; this is a HUB-side prerequisite the join blob depends on.
+function HubUrlHowTo({ hasBlob }: { hasBlob: boolean }) {
+  return (
+    <div className="px-3 pb-3 pt-0 text-[12px] text-ink-600 space-y-2 border-t border-ink-100">
+      <ol className="mt-2 space-y-2 list-decimal list-inside marker:text-ink-400">
+        <li>
+          Install <a className="text-sky-700 hover:underline" href="https://tailscale.com/download" target="_blank" rel="noreferrer">Tailscale</a>{" "}
+          on <strong>this hub and the new machine</strong>, and sign both into the <strong>same tailnet</strong>:{" "}
+          <Cmd>tailscale up</Cmd>
+        </li>
+        <li>
+          <strong>Once</strong>, enable HTTPS certificates in the Tailscale admin console:{" "}
+          <span className="text-ink-500">Admin → DNS → <em>HTTPS Certificates</em></span> (and confirm MagicDNS is on).
+          The tailnet URL is HTTPS, so it needs a cert.
+        </li>
+        <li>
+          On <strong>this hub</strong>, serve the board over the tailnet:{" "}
+          <Cmd>tailscale serve --bg 3000</Cmd>
+          <span className="block mt-1 text-ink-500">
+            Use <code className="font-mono">serve</code> (tailnet-only, private) — <strong>not</strong>{" "}
+            <code className="font-mono">funnel</code>, which would expose the board to the public internet.
+          </span>
+        </li>
+        <li>
+          Read the URL back — <Cmd>tailscale serve status</Cmd> — it&rsquo;s{" "}
+          <code className="font-mono text-ink-700">https://&lt;machine&gt;.&lt;tailnet&gt;.ts.net</code>.
+        </li>
+        <li>
+          Set <code className="font-mono text-ink-700">COS_HUB_PUBLIC_URL</code> to that URL in{" "}
+          <code className="font-mono text-ink-700">config/cos.env</code> and restart the board — or just run{" "}
+          <code className="font-mono text-ink-700">node scripts/join-blob.mjs</code> on the hub, which
+          auto-detects it from <code className="font-mono">tailscale serve status</code>.
+        </li>
+      </ol>
+      {!hasBlob && (
+        <p className="text-ink-500 pt-1">
+          Once set, this panel shows a <code className="font-mono">cos-join://</code> string to paste into{" "}
+          <code className="font-mono text-ink-700">spoke-setup</code> on the new machine.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// A copyable one-line command chip.
+function Cmd({ children }: { children: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <span className="inline-flex items-center gap-1 align-middle">
+      <code className="rounded bg-ink-100 px-1.5 py-0.5 font-mono text-[11.5px] text-ink-800">{children}</code>
+      <button
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(children);
+            setDone(true);
+            setTimeout(() => setDone(false), 1500);
+          } catch {
+            /* clipboard denied — the text is selectable */
+          }
+        }}
+        className="text-ink-400 hover:text-ink-700"
+        title="Copy"
+        aria-label={`Copy: ${children}`}
+      >
+        {done ? <IconCheck className="w-3 h-3 text-emerald-600" /> : <IconCopy className="w-3 h-3" />}
+      </button>
+    </span>
   );
 }
 
