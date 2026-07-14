@@ -109,6 +109,12 @@ export const VAULT_NAME_CONFIGURED = Boolean(
   (process.env.VAULT_NAME && process.env.VAULT_NAME.trim()) || nonEmpty(cosEnv.VAULT_NAME),
 );
 
+// This machine's device role — "hub" produces backups (and runs the state machine);
+// "spoke" never produces (it holds no state worth archiving and must not touch the
+// lease). Tolerant read (the loader validates loudly at setup time). MIRRORED (not
+// imported) by board/lib/cos-env.ts getDeviceRole().
+export const DEVICE_ROLE = envOrCosEnv("COS_DEVICE_ROLE", "hub") === "spoke" ? "spoke" : "hub";
+
 // The stable per-machine identity that keys this producer's manifests/<id>.json.
 // Precedence env > cos.env > a sanitized hostname fallback. The fallback exists
 // only until the device-role work (multi-device PR 3) mints a real COS_DEVICE_ID
@@ -117,7 +123,7 @@ export const VAULT_NAME_CONFIGURED = Boolean(
 // its predecessor's computer name), which is exactly why producer admission in
 // backup.mjs keys on a MACHINE-LOCAL marker + key fingerprint, never on this id.
 // Sanitized to a filename-safe slug so a hostname can never traverse out of
-// manifests/. MIRRORED (not imported) by board/lib/backup-status.ts.
+// manifests/. MIRRORED (not imported) by board/lib/cos-env.ts getDeviceId().
 const rawDeviceId = envOrCosEnv("COS_DEVICE_ID", os.hostname());
 export const DEVICE_ID = rawDeviceId.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64) || "unknown-device";
 

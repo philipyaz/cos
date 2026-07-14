@@ -97,7 +97,10 @@ Pure declarative DATA — names/refs only, validated by `mcp/service-manifest.mj
 | `clients` | which clients get an entry: `["claude-code","cowork"]` for bridges; `[]` for sidecars/runner |
 | `inMcpJson` | optional override; defaults true only for bridges that list `claude-code` |
 | `cwd` | working dir (default `${REPO_ROOT}`) |
-| `probe` | `{ "type": "httpListen" \| "healthz" \| "bearerHealth" \| "process" }` — how `ensure-bridges.sh` checks liveness |
+| `roles` | device roles this service runs under: `["hub"]` (default) or `["hub","spoke"]`. A spoke runs only the board-facing thin wrappers (they point at the hub via `${BOARD_URL}`); every per-machine generator (`gen-launchd`, `gen-cowork-config`, `cos-services`, `ensure-bridges`) is scoped to `COS_DEVICE_ROLE` — the committed `.mcp.json` deliberately is NOT |
+| `label` / `logDir` | overrides for services with PRE-manifest installed identities (backup keeps `com.chiefofstaff.backup` + `backup/logs/`) — omit for new services |
+| `schedule` | `{ "hour": H, "minute": M }` → a SCHEDULED daily job (macOS `StartCalendarInterval`, no KeepAlive; skipped by the Windows manager — Task Scheduler territory). Literal numbers are fine (cadence, not machine config) |
+| `probe` | `{ "type": "httpListen" \| "healthz" \| "bearerHealth" \| "process" \| "scheduled" }` — how `ensure-bridges.sh` checks liveness (`scheduled` = healthy when LOADED, it is not supposed to be running between fires) |
 
 ---
 
@@ -143,13 +146,14 @@ debug, but you don't hand-write them:
 |---|---|---|
 | **Supervisor / restart** | launchd LaunchAgent; `RunAtLoad`+`KeepAlive` = real crash-restart at login | `cos-services.mjs`: `start` = idempotent nudge (detached, `windowsHide`); `watch` = foreground supervisor that respawns crashes with exponential backoff + a fast-crash cap (the launchd-`KeepAlive` equivalent — run it from a startup shortcut for persistent supervision) |
 | **Toolchain** | `$BREW_PREFIX/bin/{node,supergateway,uv}`; plist `PATH` leads with `$BREW_PREFIX/bin` | `$NODE_BIN`/`$SUPERGATEWAY_BIN`/`$UV_BIN` from `cos.env` — never `%APPDATA%/npm/...` or a pinned `pythoncore-3.x` literal |
-| **supergateway** | `$SUPERGATEWAY_BIN --stdio "…"` | `node <supergateway>/dist/index.js --stdio "…"` (no `cmd.exe` window; dodges MSYS `/mcp` path-mangling) |
+| **supergateway** | `node --require scripts/loopback-bind.cjs <dist>/index.js --stdio "…"` — the preload pins the bridge to **127.0.0.1** (supergateway has no bind-host option; unpinned it serves every LAN/tailnet interface with zero auth) | `node --require scripts/loopback-bind.cjs <supergateway>/dist/index.js --stdio "…"` (same preload; also: no `cmd.exe` window, dodges MSYS `/mcp` path-mangling) |
 | **Secret (vault/vaultjobs)** | `secretWrapper` (`launch.sh`) sources `config/secrets.env`, then execs — key never in the plist | `loadSecrets()` reads `config/secrets.env` and spreads the declared `secrets[]` into the spawn env — key never in committed source |
 | **uv sidecars (search/guardsvc)** | `uv run [--extra model] --directory <dir> uvicorn sidecar:app …` (uv self-provisions the venv) | `<dir>/.venv/Scripts/uvicorn.exe …` directly (venv pre-provisioned by `uv sync`) — avoids the `uv`→`cmd.exe` visible window |
 | **Stop** | `launchctl bootout` | `taskkill /T /F` against the PID file (`mcp/logs/.cos-services.pid`) |
 | **Spawn hygiene** | n/a | `windowsHide:true`; **forward-slash paths**; `--stdio` tokens are quoted so a path with a space survives supergateway's re-split |
 | **Platform selection** | `ensure-bridges.sh` gates on `uname` = `Darwin` | `ensure-bridges.mjs` (predev) routes `win32` → `cos-services`; `ensure-bridges.sh` Windows branch is a manual-invocation fallback |
 | **Guard model** | `COS_GUARD_MODEL` default `llama-prompt-guard-2-86m` (real gated Llama) | set `COS_GUARD_MODEL=heuristic-only` in `cos.env` (no CUDA) — a per-machine *setting*, not a code fork; guard still fails CLOSED |
+| **Scheduled / app-level** | `schedule` → `StartCalendarInterval`; `autostart:false` (`boardapp`) → installed by `gen-launchd --install`, NOT by the predev nudge | `cos-services` skips both (`!schedule && autostart`): schedule the `backup` job via Task Scheduler (backup-recovery §8); run `boardapp` (the production board) however the hub prefers (`boardapp-run.mjs` is cross-platform — it resolves `next`'s JS entrypoint, not the POSIX `.bin` shim) |
 
 ---
 

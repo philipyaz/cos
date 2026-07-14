@@ -37,9 +37,31 @@ export function stdioToArg(stdio) {
   return stdio.map((t) => (/\s/.test(t) ? `"${t}"` : t)).join(' ')
 }
 
-// Where descriptors live: any `<name>.service.json` directly under an mcp/* subdir, plus the two
-// Python sidecars that live outside mcp/ (guard/ and search/). Kept as an explicit, bounded scan
-// (no glob dependency) so discovery is predictable and order-stable (sorted).
+// The FULL argv both platform supervisors use to run a bridge, defined once so the
+// security-critical recipe can't drift between gen-launchd.mjs and cos-services.mjs:
+// `node --require <loopback preload> <supergateway dist> --stdio "<cmd>" …`. The
+// loopback preload pins supergateway's host-less app.listen(port) to 127.0.0.1
+// (supergateway has no bind-host option; unpinned it serves every interface with
+// --cors and zero auth). Each caller supplies the node binary, the resolved dist
+// path, the preload path, and the entry (for its stdio + port).
+export function supergatewayArgv({ nodeBin, preloadPath, distPath, entry }) {
+  return [
+    nodeBin,
+    '--require', preloadPath,
+    distPath,
+    '--stdio', stdioToArg(entry.stdio),
+    '--outputTransport', 'streamableHttp',
+    '--streamableHttpPath', '/mcp',
+    '--port', String(entry.port),
+    '--cors',
+    '--logLevel', 'info',
+  ]
+}
+
+// Where descriptors live: any `<name>.service.json` directly under an mcp/* subdir, plus the
+// services that live outside mcp/ — the two Python sidecars (guard/, search/), the backup job
+// (backup/), and the board app itself (board/). Kept as an explicit, bounded scan (no glob
+// dependency) so discovery is predictable and order-stable (sorted).
 function discoverDescriptorFiles() {
   const files = []
   const mcpDir = join(REPO_ROOT, 'mcp')
@@ -48,7 +70,7 @@ function discoverDescriptorFiles() {
     const dir = join(mcpDir, ent.name)
     for (const f of readdirSync(dir)) if (f.endsWith('.service.json')) files.push(join(dir, f))
   }
-  for (const extra of ['guard', 'search']) {
+  for (const extra of ['guard', 'search', 'backup', 'board']) {
     const dir = join(REPO_ROOT, extra)
     if (existsSync(dir)) {
       for (const f of readdirSync(dir)) if (f.endsWith('.service.json')) files.push(join(dir, f))
@@ -109,6 +131,26 @@ function resolveEntry(raw, file, env) {
     throw new Error(`[service-manifest] ${where}: portVar ${raw.portVar} did not resolve to a number`)
   }
 
+  // Device roles this service runs under (multi-device). A hub runs the state machine;
+  // a spoke runs only the board-facing thin wrappers that point at the hub. DEFAULT is
+  // ["hub"] — fail-safe: a new service never lands on spokes unless it declares itself.
+  const roles = raw.roles === undefined ? ['hub'] : raw.roles
+  if (!Array.isArray(roles) || roles.length === 0 || roles.some((r) => !['hub', 'spoke'].includes(r))) {
+    throw new Error(`[service-manifest] ${where}: roles must be a non-empty array drawn from ["hub","spoke"]`)
+  }
+
+  // Optional daily schedule (StartCalendarInterval on macOS): a scheduled job runs at
+  // hour:minute instead of being kept alive. Literal numbers are fine in a descriptor
+  // (they are cadence, not machine config).
+  let schedule = null
+  if (raw.schedule !== undefined) {
+    const { hour, minute } = raw.schedule || {}
+    if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
+      throw new Error(`[service-manifest] ${where}: schedule needs integer hour + minute`)
+    }
+    schedule = { hour, minute }
+  }
+
   const entry = {
     name,
     kind: raw.kind, // bridge | sidecar | runner
@@ -128,12 +170,22 @@ function resolveEntry(raw, file, env) {
     secretWrapper: raw.secretWrapper ? interpolate(raw.secretWrapper, env, where) : null,
     idleExit: raw.idleExit === true, // add COS_MCP_IDLE_EXIT_MS on the BRIDGE spawn (never on Cowork)
     clients: raw.clients || [], // which MCP clients get an entry: claude-code | cowork
+    roles, // device roles this service runs under: subset of [hub, spoke]
+    autostart: raw.autostart !== false, // false = NOT started by the predev/prestart bridge nudge
+    schedule, // {hour, minute} for a daily launchd job, or null (KeepAlive service)
     probe: raw.probe || { type: port ? 'httpListen' : 'process' },
     descriptorFile: file,
     // Derived, platform-agnostic identity used by launchd + the Windows manager + the logs.
-    label: `com.chiefofstaff.mcp-${name}`,
-    logOut: join(REPO_ROOT, 'mcp', 'logs', `${name}.out.log`),
-    logErr: join(REPO_ROOT, 'mcp', 'logs', `${name}.err.log`),
+    // `label`/`logDir` overrides exist for services with PRE-manifest installed identities
+    // (backup keeps com.chiefofstaff.backup + backup/logs/ so existing machines and the
+    // board's /backups reader see one continuous agent, not a duplicate).
+    label: raw.label || `com.chiefofstaff.mcp-${name}`,
+    logOut: raw.logDir
+      ? join(interpolate(raw.logDir, env, where), `${name}.out.log`)
+      : join(REPO_ROOT, 'mcp', 'logs', `${name}.out.log`),
+    logErr: raw.logDir
+      ? join(interpolate(raw.logDir, env, where), `${name}.err.log`)
+      : join(REPO_ROOT, 'mcp', 'logs', `${name}.err.log`),
   }
 
   // inMcpJson / Cowork eligibility: only bridges that list 'claude-code' / 'cowork' as clients.
@@ -167,6 +219,7 @@ let _manifestCache = null
  * @param {object} [opts]
  * @param {'claude-code'|'cowork'} [opts.client] only services exposed to this client (a bridge)
  * @param {'bridge'|'sidecar'|'runner'} [opts.kind] only this kind
+ * @param {'hub'|'spoke'} [opts.role] only services that run under this device role
  * @returns {Array} fully-resolved, ${VAR}-free entries
  */
 export function getManifest(opts = {}) {
@@ -184,13 +237,24 @@ export function getManifest(opts = {}) {
   let out = _manifestCache
   if (opts.client) out = out.filter((e) => e.clients.includes(opts.client) && e.kind === 'bridge')
   if (opts.kind) out = out.filter((e) => e.kind === opts.kind)
+  if (opts.role) out = out.filter((e) => e.roles.includes(opts.role))
   return out
+}
+
+// THIS machine's device role, from the loader (config/cos.env COS_DEVICE_ROLE; default hub).
+// The per-machine generators (gen-launchd, gen-cowork-config, cos-services, ensure-bridges)
+// scope themselves to it; the COMMITTED artifact (.mcp.json) deliberately does not.
+export function currentRole() {
+  const role = loadConfig().COS_DEVICE_ROLE || 'hub'
+  return role === 'spoke' ? 'spoke' : 'hub'
 }
 
 // ── CLI: shell/CJS consumers that can't `import` ESM read these ──────────────────────────────────
 // `--json`        full resolved manifest (the Windows manager parses this)
-// `--probe-list`  one tab-separated line per service: name<TAB>port<TAB>kind<TAB>probe<TAB>gate
-//                 (ensure-bridges.sh reads this; gate = core|optional, port = number or "-")
+// `--probe-list`  one tab-separated line per service:
+//                 name<TAB>port<TAB>kind<TAB>probe<TAB>gate<TAB>roles<TAB>autostart<TAB>label
+//                 (ensure-bridges.sh reads this; gate = core|optional, port = number or "-",
+//                 roles = comma-joined, autostart = 1|0, label = the launchd label incl. override)
 // (no arg)        a human-readable table
 if (import.meta.url === `file://${process.argv[1]}`) {
   const mode = process.argv[2]
@@ -200,7 +264,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } else if (mode === '--probe-list') {
     for (const e of m) {
       const gate = e.core ? 'core' : 'optional' // addon + optional both skip silently when absent
-      process.stdout.write([e.name, e.port ?? '-', e.kind, e.probe.type, gate].join('\t') + '\n')
+      process.stdout.write(
+        [e.name, e.port ?? '-', e.kind, e.probe.type, gate, e.roles.join(','), e.autostart ? '1' : '0', e.label].join('\t') + '\n',
+      )
     }
   } else {
     process.stdout.write(`Cos service manifest — ${m.length} services\n`)

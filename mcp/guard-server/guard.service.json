@@ -4,10 +4,23 @@
   "kind": "bridge",
   "runtime": "bridge",
   "core": true,
+  "roles": [
+    "hub"
+  ],
   "portVar": "GUARD_BRIDGE_PORT",
-  "stdio": ["${NODE_BIN}", "${REPO_ROOT}/mcp/guard-server/server.mjs"],
-  "env": { "COS_GUARD_URL": "${GUARD_SIDECAR_URL}" },
+  "stdio": [
+    "${NODE_BIN}",
+    "${REPO_ROOT}/mcp/guard-server/server.mjs"
+  ],
+  "env": {
+    "COS_GUARD_URL": "${GUARD_SIDECAR_URL}"
+  },
   "idleExit": true,
-  "clients": ["claude-code", "cowork"],
-  "probe": { "type": "httpListen" }
+  "clients": [
+    "claude-code",
+    "cowork"
+  ],
+  "probe": {
+    "type": "httpListen"
+  }
 }

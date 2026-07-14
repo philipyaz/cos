@@ -27,7 +27,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFile } from "node:child_process";
-import { parseCosEnv, expandTilde, nonEmpty } from "./cos-env";
+import { parseCosEnv, expandTilde, nonEmpty, getDeviceId } from "./cos-env";
 import {
   type BackupStatus,
   type BackupSummary,
@@ -109,23 +109,60 @@ const PUSH_OUTAGE_ERROR_HOURS = 24;
 const RECENT_CAP = 25; // how many manifest rows the history list shows
 const LOG_TAIL_LINES = 12; // tail length for the out/err log expanders
 
-// THIS machine's producer identity — MIRRORS backup/config.mjs DEVICE_ID (env >
-// cos.env > sanitized hostname; that .mjs is outside the Next root and can't be
-// imported). Freshness/staleness/lastRun anchor on THIS device's entries only:
-// in a shared multi-device archive, another machine's fresh snapshot must not
-// mask a dead LOCAL backup channel (isFresh would skip the self-healing top-up
-// forever while this machine's distinct store goes unprotected).
-const DEVICE_ID = ((): string => {
-  const raw =
-    (process.env.COS_DEVICE_ID && process.env.COS_DEVICE_ID.trim()) ||
-    (nonEmpty(COS_ENV.COS_DEVICE_ID) ? COS_ENV.COS_DEVICE_ID.trim() : os.hostname());
-  return raw.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64) || "unknown-device";
-})();
+// THIS machine's producer identity — getDeviceId() (cos-env.ts) mirrors
+// backup/config.mjs's chain (env > cos.env > sanitized hostname). Freshness/
+// staleness/lastRun anchor on THIS device's entries only: in a shared
+// multi-device archive, another machine's fresh snapshot must not mask a dead
+// LOCAL backup channel (isFresh would skip the self-healing top-up forever
+// while this machine's distinct store goes unprotected).
 
 // Is a manifest entry THIS machine's? Legacy entries (pre-split, no deviceId)
 // match on hostname — right after the upgrade they are the only local history.
 function isLocalEntry(s: BackupSummary): boolean {
-  return s.deviceId === DEVICE_ID || (!s.deviceId && s.host === os.hostname());
+  return s.deviceId === getDeviceId() || (!s.deviceId && s.host === os.hostname());
+}
+
+// ── The HUB.json lease (multi-device) ─────────────────────────────────────────
+// A tiny PLAINTEXT file in the (otherwise encrypted) backup repo naming the one
+// machine allowed to produce backups — the hub. backup.mjs claims/renews it and
+// exits 4 ("lease-held-elsewhere") when another device holds it fresh; /api/healthz
+// surfaces it so agents and the Devices UI can see who the hub is. Stale after
+// 26h without renewal (daily runs + top-ups renew far more often).
+// MIRRORS backup/lib/lease.mjs (readLease + coerceLease + leaseIsStale + the 26h
+// LEASE_STALE_HOURS) — that .mjs is outside the Next root and cannot be imported;
+// keep the constant + field coercion in lockstep with it.
+export const LEASE_STALE_HOURS = 26;
+
+export interface HubLease {
+  deviceId: string;
+  host: string | null;
+  epoch: number;
+  renewedAt: string;
+  stale: boolean; // renewedAt older than LEASE_STALE_HOURS (or unparseable)
+}
+
+// Fail-safe read of the local clone's HUB.json (null = no lease / no repo /
+// garbage file — the multi-device tripwires simply aren't armed).
+export function readHubLease(): HubLease | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(BACKUP_REPO, "HUB.json"), "utf8")) as {
+      deviceId?: unknown;
+      host?: unknown;
+      epoch?: unknown;
+      renewedAt?: unknown;
+    };
+    if (typeof raw.deviceId !== "string" || typeof raw.renewedAt !== "string") return null;
+    const t = new Date(raw.renewedAt).getTime();
+    return {
+      deviceId: raw.deviceId,
+      host: typeof raw.host === "string" ? raw.host : null,
+      epoch: typeof raw.epoch === "number" ? raw.epoch : 0,
+      renewedAt: raw.renewedAt,
+      stale: !Number.isFinite(t) || Date.now() - t > LEASE_STALE_HOURS * 3600_000,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── Manifest read (source a) ──────────────────────────────────────────────────
@@ -351,8 +388,10 @@ function computeOverall(args: {
   // committed-locally (push failed, still a successful backup); exit 3 = a benign
   // single-flight lock-skip (a rare launchd 03:30 collision with a board run) — neither
   // is a hard failure.
+  // exit 4 = lease-held-elsewhere: a demoted (or soaking) machine deliberately not
+  // producing — calm, never red.
   const hardFail =
-    lastExitCode !== null && lastExitCode !== 0 && lastExitCode !== 2 && lastExitCode !== 3;
+    lastExitCode !== null && lastExitCode !== 0 && lastExitCode !== 2 && lastExitCode !== 3 && lastExitCode !== 4;
   if (recentLen === 0 || hardFail) return "error";
   // A STANDING push outage escalates (oldest unpushed commit older than
   // PUSH_OUTAGE_ERROR_HOURS): each run "succeeded" locally, but the off-site
@@ -365,7 +404,7 @@ function computeOverall(args: {
   if (
     !stale &&
     pushState === "pushed" &&
-    (lastExitCode === 0 || lastExitCode === null || lastExitCode === 3)
+    (lastExitCode === 0 || lastExitCode === null || lastExitCode === 3 || lastExitCode === 4)
   ) {
     return "healthy";
   }
@@ -746,7 +785,7 @@ export interface RunResult {
   ok?: boolean;
   pushed?: boolean;
   code?: number;
-  skipped?: "fresh" | "busy";
+  skipped?: "fresh" | "busy" | "lease-held-elsewhere";
   refused?: "not-live-board";
 }
 
@@ -763,7 +802,7 @@ export interface RunResult {
 export function isFresh(hours = FRESH_WINDOW_HOURS): boolean {
   const candidates: BackupSummary[] = [];
   try {
-    const own = parseManifestText(path.join(BACKUP_REPO, "manifests", `${DEVICE_ID}.json`));
+    const own = parseManifestText(path.join(BACKUP_REPO, "manifests", `${getDeviceId()}.json`));
     if (own[0]) candidates.push(coerceSummary(own[0]));
   } catch {
     /* no own manifest yet */
@@ -807,6 +846,8 @@ export function isLiveBoard(): boolean {
 //   0     -> {ran, ok:true,  pushed:true}   (encrypted snapshot written + pushed)
 //   2     -> {ran, ok:true,  pushed:false}  (committed LOCALLY only — still a SUCCESS)
 //   3     -> {ran:false, skipped:'busy'}    (single-flight lock held — a benign skip, no run)
+//   4     -> {ran:false, skipped:'lease-held-elsewhere'} (another device holds the hub
+//            lease — this machine must not produce; benign on a demoted/soaking machine)
 //   other -> {ran, ok:false, code}          (a real failure)
 // A spawn failure / timeout (no numeric exit code) is mapped to code 1 (a failure).
 // Rejection is impossible (resolve-only).
@@ -832,6 +873,10 @@ function runBackup(): Promise<RunResult> {
           // backup.mjs exits 3 when the single-flight lock is held by another run — a
           // benign skip (no new snapshot taken), surfaced as "busy", NOT a failure.
           resolve({ ran: false, skipped: "busy" });
+        } else if (code === 4) {
+          // Exit 4: the HUB.json lease names another device — this machine must not
+          // produce (a demoted old hub, or a soaking new one). Benign, not a failure.
+          resolve({ ran: false, skipped: "lease-held-elsewhere" });
         } else {
           resolve({ ran: true, ok: false, code });
         }

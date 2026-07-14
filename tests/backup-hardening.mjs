@@ -8,19 +8,26 @@
 // HOME pointed into the sandbox so the pre-restore snapshot never touches the
 // real ~/cos-recovery.
 //
-// Asserts the PR-2 hardening contract:
-//   • per-device manifests: producer A writes ONLY manifests/<deviceId>.json
+// Asserts the hardening + HUB-lease contract (multi-device PRs 2 + 3). The
+// archive is SINGLE-PRODUCER by lease: exactly one machine (the hub) produces;
+// a second machine joins the archive but is lease-refused (exit 4) until it
+// legitimately takes over a stale lease — the modeled hub handover.
+//   • per-device manifests: a producer writes ONLY manifests/<deviceId>.json
 //     (deviceId + schemaVersion + vaultPath recorded); no MANIFEST.json minted;
-//   • fetch-before-push: a producer whose clone is BEHIND the remote (another
-//     device pushed) converges and pushes cleanly (exit 0, not the old
-//     permanent exit-2 divergence);
-//   • producer admission: a second device with the SAME key joins; a device
-//     with a WRONG key is REFUSED before it can split the archive;
-//   • restore reads the UNION of all manifests (--list shows every producer);
-//   • restore hard-fails on an unreachable remote (stale clone must not pick
-//     "latest") unless --stale-ok;
-//   • restore --apply REFUSES while anything answers on BOARD_URL
-//     (--allow-live-board overrides);
+//     a corrupt manifest is recovered from git HEAD, never clobbered;
+//   • HUB.json lease: the founder claims it; a FRESH lease held elsewhere makes
+//     a producer QUARANTINE its state once (orphan/<id>-<ts>.enc) and exit 4;
+//     a STALE lease (>26h) is claimed with an epoch bump; the demoted old hub
+//     orphans + exits 4 (and its clone converged with the remote to learn it);
+//   • producer admission: same key joins (decrypt-verify); a WRONG key is
+//     refused — even under a COLLIDING deviceId (the marker is machine-local);
+//   • a SPOKE never produces (COS_DEVICE_ROLE=spoke → exit 1);
+//   • restore reads the UNION of all manifests; selection is DEVICE-SCOPED
+//     (--device / --any-device for cross-machine); orphans are NOT in the catalog;
+//   • restore hard-fails on an unreachable remote (--stale-ok escapes; --list
+//     degrades to the local view with a warning);
+//   • restore --apply REFUSES while anything answers on BOARD_URL (fail-closed,
+//     incl. a scheme-less URL; --allow-live-board overrides);
 //   • cross-machine apply: the snapshot's vault (vault/test-vault-a) lands in
 //     the LOCAL vault name (vault/test-vault-b), the producer's
 //     .cos/jobs.json worker queue is STRIPPED, and config/settings.json keeps
@@ -146,27 +153,64 @@ async function main() {
   check(fs.existsSync(path.join(repoA, ".backup.admitted")), "machine-local admission marker written");
   const statusA = git(repoA, "status", "--porcelain");
   check(!/\.backup\.admitted/.test(statusA), "the admission marker is gitignored (never committed)");
+  // The founder claimed the hub lease.
+  const lease1 = JSON.parse(fs.readFileSync(path.join(repoA, "HUB.json"), "utf8"));
+  check(lease1.deviceId === "device-a" && lease1.epoch === 1, `founder claimed the HUB lease (holder ${lease1.deviceId}, epoch ${lease1.epoch})`);
 
-  // ── [2] second producer, SAME key: admission passes, manifests coexist ──────
+  // ── [1c] corrupt own manifest: recovered from git HEAD, catalog never clobbered ─
+  const preCorrupt = JSON.parse(fs.readFileSync(manAPath, "utf8")).backups.length;
+  fs.writeFileSync(manAPath, "{ this is not json");
+  r = await runScript(BACKUP_MJS, devA);
+  check(r.code === 0, `backup over a corrupt own manifest exits 0 (got ${r.code})`);
+  check(/recovered .* from git HEAD|recovered \d+ entries/.test(r.out), "corruption recovered from git HEAD (logged)");
+  const postCorrupt = JSON.parse(fs.readFileSync(manAPath, "utf8")).backups.length;
+  check(postCorrupt === preCorrupt + 1, `catalog preserved: ${preCorrupt}+1 entries after recovery (got ${postCorrupt})`);
+
+  // ── [2] second machine, SAME key: ADMITTED to the archive but LEASE-refused —
+  // A holds a fresh lease, so B quarantines its state once and exits 4.
   const repoB = cloneBackupRepo(path.join(TMP, "backupB"));
   const rootB = path.join(TMP, "rootB");
   makeRoot(rootB, { vaultName: "test-vault-b", obsidianVaultId: "OBSIDIAN-B" });
   const devB = { repoRoot: rootB, backupRepo: repoB, deviceId: "device-b", vaultName: "test-vault-b" };
   r = await runScript(BACKUP_MJS, devB);
-  check(r.code === 0, `device B (same key) is admitted and backs up (exit ${r.code})`);
+  check(r.code === 4, `device B (same key) is admitted but lease-refused (exit ${r.code})`);
   check(/producer admission: decrypt-verified/.test(r.out), "admission decrypt-verified A's newest snapshot");
-  check(fs.existsSync(path.join(repoB, "manifests", "device-b.json")), "manifests/device-b.json written");
+  check(/LEASE HELD ELSEWHERE/.test(r.out), "the refusal names the lease holder");
+  const orphansB = fs.existsSync(path.join(repoB, "orphan")) ? fs.readdirSync(path.join(repoB, "orphan")).filter((f) => f.startsWith("device-b-")) : [];
+  check(orphansB.length === 1, `B's stray state was quarantined once (orphan/${orphansB[0] ?? "MISSING"})`);
+  check(!fs.existsSync(path.join(repoB, "manifests", "device-b.json")), "no manifest entry for the lease-refused producer");
+  check(fs.existsSync(path.join(repoB, ".backup.orphaned")), "machine-local orphaned marker written");
 
-  // ── [3] fetch-before-push: A's stale clone converges instead of exit-2 ──────
-  // B's push above moved the remote; A's clone is now BEHIND. The old pipeline
-  // would commit on the stale branch and fail the push forever (exit 2).
+  // ── [2b] a second lease-refused run stays QUIET: exit 4, no second orphan ────
+  r = await runScript(BACKUP_MJS, devB);
+  check(r.code === 4, `repeat run on the demoted machine exits 4 (got ${r.code})`);
+  const orphansB2 = fs.readdirSync(path.join(repoB, "orphan")).filter((f) => f.startsWith("device-b-"));
+  check(orphansB2.length === 1, "no re-orphaning on subsequent runs (still exactly one quarantine)");
+
+  // ── [3] the HANDOVER: A's lease goes stale (>26h), B claims it (epoch bump) ──
+  // Stale-ify by rewriting HUB.json's renewedAt 30h into the past and pushing.
+  const staleLease = { ...JSON.parse(fs.readFileSync(path.join(repoB, "HUB.json"), "utf8")), renewedAt: new Date(Date.now() - 30 * 3600_000).toISOString() };
+  fs.writeFileSync(path.join(repoB, "HUB.json"), JSON.stringify(staleLease, null, 2) + "\n");
+  git(repoB, "add", "HUB.json");
+  git(repoB, "commit", "-q", "-m", "test: stale-ify the lease");
+  git(repoB, "push", "-q", "origin", "HEAD");
+
+  r = await runScript(BACKUP_MJS, devB);
+  check(r.code === 0, `device B claims the STALE lease and produces (exit ${r.code})`);
+  check(/taking over a STALE lease/.test(r.out), "the takeover is logged");
+  const lease2 = JSON.parse(fs.readFileSync(path.join(repoB, "HUB.json"), "utf8"));
+  check(lease2.deviceId === "device-b" && lease2.epoch === 2, `lease now held by device-b at epoch 2 (got ${lease2.deviceId}/${lease2.epoch})`);
+  check(!fs.existsSync(path.join(repoB, ".backup.orphaned")), "the orphaned marker cleared on re-admission as hub");
+  check(fs.existsSync(path.join(repoB, "manifests", "device-b.json")), "manifests/device-b.json written by the new hub");
+
+  // ── [4] the DEMOTED old hub: converges, sees B's fresh lease, orphans, exit 4 ─
   r = await runScript(BACKUP_MJS, devA);
-  check(r.code === 0, `device A backs up from a BEHIND clone with exit 0 (got ${r.code}) — no permanent divergence`);
-  const logA = git(repoA, "log", "--oneline", "-5");
-  check(fs.readdirSync(path.join(repoA, "snapshots")).length >= 2, "A's clone holds its own snapshots");
-  check(fs.existsSync(path.join(repoA, "manifests", "device-b.json")), `A's clone gained B's manifest via the pre-run fetch (log: ${logA.split("\n")[0]})`);
+  check(r.code === 4, `the demoted old hub exits 4 (got ${r.code})`);
+  const orphansA = fs.existsSync(path.join(repoA, "orphan")) ? fs.readdirSync(path.join(repoA, "orphan")).filter((f) => f.startsWith("device-a-")) : [];
+  check(orphansA.length === 1, "the old hub quarantined its stray state once");
+  check(fs.existsSync(path.join(repoA, "manifests", "device-b.json")), "A's clone converged with the remote (gained B's manifest) before deciding");
 
-  // ── [4] WRONG key: producer admission refuses before the archive splits ─────
+  // ── [5] WRONG key: producer admission refuses before the archive splits ─────
   const repoC = cloneBackupRepo(path.join(TMP, "backupC"));
   const rootC = path.join(TMP, "rootC");
   makeRoot(rootC, { vaultName: "test-vault-c", obsidianVaultId: "OBSIDIAN-C" });
@@ -175,21 +219,42 @@ async function main() {
   check(/producer admission FAILED/.test(r.out), "refusal names producer admission + the fix");
   check(!fs.existsSync(path.join(repoC, "manifests", "device-c.json")), "no manifest written for the refused producer");
 
-  // ── [4b] deviceId COLLISION cannot bypass admission: a replacement machine that
+  // ── [5b] deviceId COLLISION cannot bypass admission: a replacement machine that
   // inherits device A's id (the hostname-fallback hazard) but holds a wrong key is
   // still refused — admission keys on the machine-local marker, not the shared manifest.
   const repoC2 = cloneBackupRepo(path.join(TMP, "backupC2"));
   r = await runScript(BACKUP_MJS, { repoRoot: rootC, backupRepo: repoC2, deviceId: "device-a", vaultName: "test-vault-c", key: "the-wrong-key" });
   check(r.code !== 0 && /producer admission FAILED/.test(r.out), `a colliding deviceId with a wrong key is still refused (exit ${r.code})`);
 
-  // ── [4c] corrupt own manifest: recovered from git HEAD, catalog never clobbered ─
-  const preCorrupt = JSON.parse(fs.readFileSync(manAPath, "utf8")).backups.length;
-  fs.writeFileSync(manAPath, "{ this is not json");
-  r = await runScript(BACKUP_MJS, devA);
-  check(r.code === 0, `backup over a corrupt own manifest exits 0 (got ${r.code})`);
-  check(/recovered .* from git HEAD|recovered \d+ entries/.test(r.out), "corruption recovered from git HEAD (logged)");
-  const postCorrupt = JSON.parse(fs.readFileSync(manAPath, "utf8")).backups.length;
-  check(postCorrupt === preCorrupt + 1, `catalog preserved: ${preCorrupt}+1 entries after recovery (got ${postCorrupt})`);
+  // ── [5c] a SPOKE never produces ───────────────────────────────────────────────
+  r = await runScript(BACKUP_MJS, { ...devB, extraEnv: { COS_DEVICE_ROLE: "spoke" } });
+  check(r.code === 1 && /SPOKE/.test(r.out), `role=spoke is refused outright (exit ${r.code})`);
+
+  // ── [5d] the lease NEVER force-clobbers remote history from a diverged clone ──
+  // The former CAS force-push discarded remote-only snapshot commits. Reproduce a
+  // divergence: device-b (the current hub) commits a stray local commit that is NOT
+  // on the remote, while the remote gains a new commit from elsewhere; a renew/claim
+  // run must converge or exit 2 — NEVER drop the remote's commit.
+  const remoteHeadBefore = git(repoB, "rev-parse", "origin/HEAD").trim();
+  const remoteCountBefore = Number(git(repoB, "rev-list", "--count", "origin/HEAD").trim());
+  // Another clone pushes a commit to the remote (a snapshot device-b hasn't seen).
+  const repoOther = cloneBackupRepo(path.join(TMP, "backupOther"));
+  fs.writeFileSync(path.join(repoOther, "snapshots", "cos-backup-other.enc"), "x");
+  git(repoOther, "add", "-A");
+  git(repoOther, "commit", "-q", "-m", "other: a snapshot device-b has not seen");
+  git(repoOther, "push", "-q", "origin", "HEAD");
+  const otherSha = git(repoOther, "rev-parse", "HEAD").trim();
+  // device-b makes a stray unpushed local commit → its clone is now diverged.
+  fs.writeFileSync(path.join(repoB, "stray.txt"), "diverge");
+  git(repoB, "add", "-A");
+  git(repoB, "commit", "-q", "-m", "b: stray local commit (unpushed)");
+  // A backup run from the diverged clone (it will try to renew/claim + snapshot).
+  r = await runScript(BACKUP_MJS, devB);
+  const remoteHasOther = git(repoB, "branch", "-r", "--contains", otherSha).trim() !== "";
+  check(remoteHasOther, `the remote still contains the other clone's commit after a diverged run (exit ${r.code}) — no force-clobber`);
+  const remoteCountAfter = Number(git(repoOther, "rev-list", "--count", "origin/HEAD").trim());
+  check(remoteCountAfter >= remoteCountBefore + 1, `remote history only GREW (${remoteCountBefore}→${remoteCountAfter}), never rewound`);
+  check(remoteHeadBefore !== git(repoOther, "rev-parse", "origin/HEAD").trim() || remoteCountAfter > remoteCountBefore, "remote head advanced, not replaced");
 
   // ── [5] restore --list reads the UNION of every producer's manifest ─────────
   const repoR = cloneBackupRepo(path.join(TMP, "backupRestore"));
@@ -232,9 +297,10 @@ async function main() {
   check(r.code !== 0 && /not a valid http/.test(r.out), "a scheme-less BOARD_URL refuses instead of skipping the guard");
 
   // ── [8] cross-machine --apply: vault mapping, jobs.json strip, settings merge ─
-  // rootR is "machine B": local vault name test-vault-b, its own Obsidian identity.
-  // The latest snapshot is device A's (vault/test-vault-a inside the archive).
-  r = await runScript(RESTORE_MJS, { ...devR, argv: ["--apply", "--any-device"], extraEnv: { BOARD_URL: boardUrl } });
+  // rootR is a machine with local vault name test-vault-b and its own Obsidian
+  // identity, explicitly restoring DEVICE A's newest snapshot (vault/test-vault-a
+  // inside the archive) — the cross-machine flow.
+  r = await runScript(RESTORE_MJS, { ...devR, argv: ["--apply", "--device", "device-a"], extraEnv: { BOARD_URL: boardUrl } });
   check(r.code === 0, `--apply succeeds once nothing answers on BOARD_URL (exit ${r.code})`);
   check(
     fs.existsSync(path.join(rootR, "vault", "test-vault-b", "wiki", "note.md")),
