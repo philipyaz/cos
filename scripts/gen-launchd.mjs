@@ -12,18 +12,43 @@
 // their SOURCE moves from per-server templates to the manifest. Run the dry-run / --print / --out
 // modes freely; only --install touches ~/Library/LaunchAgents.
 
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
-import { getManifest, stdioToArg } from '../mcp/service-manifest.mjs'
-import { loadConfig } from '../config/load-config.mjs'
+import { getManifest, currentRole, supergatewayArgv } from '../mcp/service-manifest.mjs'
+import { loadConfig, REPO_ROOT } from '../config/load-config.mjs'
 
 const env = loadConfig()
 const BREW_PREFIX = env.BREW_PREFIX || '/opt/homebrew'
 const SUPERGATEWAY_BIN = env.SUPERGATEWAY_BIN || `${BREW_PREFIX}/bin/supergateway`
+const NODE_BIN = env.NODE_BIN || `${BREW_PREFIX}/bin/node`
 const UV_BIN = env.UV_BIN || `${BREW_PREFIX}/bin/uv`
 // launchd has no login PATH and can't see Homebrew/nvm — every plist leads PATH with the toolchain bin.
 const LAUNCHD_PATH = `${BREW_PREFIX}/bin:/usr/bin:/bin:/usr/sbin:/sbin`
+// This machine's device role (config/cos.env COS_DEVICE_ROLE; default hub) — a spoke
+// never installs hub-only services, structurally.
+const ROLE = currentRole()
+
+// supergateway ships no bind-host option (its express app.listen(port) binds ALL
+// interfaces — every LAN/tailnet peer could drive the MCPs with zero auth), so the
+// bridges are spawned through node with the loopback preload, which pins host-less
+// listen() calls to 127.0.0.1. That needs the dist entrypoint, not the bin shim:
+// resolve the symlink (npm global bins symlink to dist/index.js), falling back to
+// the conventional global-module path. Generation is a PURE TEXT step — it bakes a
+// path the launchd agent resolves at LOAD time on the target machine — so this never
+// requires the file to exist HERE (a machine without supergateway can still render or
+// inspect plists, and CI has none). It just resolves the best path deterministically.
+function supergatewayDist() {
+  try {
+    const real = realpathSync(SUPERGATEWAY_BIN)
+    if (real.endsWith('.js') || real.endsWith('.mjs') || real.endsWith('.cjs')) return real
+  } catch {
+    /* bin missing/odd here — fall through to the conventional npm-global path */
+  }
+  return `${BREW_PREFIX}/lib/node_modules/supergateway/dist/index.js`
+}
+const SUPERGATEWAY_DIST = supergatewayDist()
+const LOOPBACK_PRELOAD = join(REPO_ROOT, 'scripts', 'loopback-bind.cjs')
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 const xString = (s) => `<string>${esc(s)}</string>`
@@ -40,17 +65,10 @@ function programArguments(e) {
   if (e.secretWrapper) return [e.secretWrapper]
 
   if (e.runtime === 'bridge') {
-    // supergateway fronts the stdio command as Streamable HTTP on the bridge port at /mcp.
-    // The --stdio value is ONE arg (a single string supergateway parses + spawns).
-    return [
-      SUPERGATEWAY_BIN,
-      '--stdio', stdioToArg(e.stdio),
-      '--outputTransport', 'streamableHttp',
-      '--streamableHttpPath', '/mcp',
-      '--port', String(e.port),
-      '--cors',
-      '--logLevel', 'info',
-    ]
+    // supergateway fronts the stdio command as Streamable HTTP on the bridge port at /mcp,
+    // spawned through node with the loopback preload so the bridge listens on 127.0.0.1
+    // ONLY (supergateway has no bind-host option; unpinned it serves every interface).
+    return supergatewayArgv({ nodeBin: NODE_BIN, preloadPath: LOOPBACK_PRELOAD, distPath: SUPERGATEWAY_DIST, entry: e })
   }
   if (e.runtime === 'uvicorn') {
     // uv self-provisions the venv then runs uvicorn. --extra pulls in optional deps (e.g. the guard
@@ -68,6 +86,18 @@ function renderPlist(e) {
   // the long-lived sidecars/runner, never in the Cowork direct-stdio entry).
   if (e.idleExit) envVars.COS_MCP_IDLE_EXIT_MS = '300000'
 
+  // A SCHEDULED job (e.schedule) runs at hour:minute (next wake if asleep) instead of
+  // being kept alive — RunAtLoad/KeepAlive would re-run it in a loop.
+  const lifecycle = e.schedule
+    ? `<key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>${e.schedule.hour}</integer>
+    <key>Minute</key><integer>${e.schedule.minute}</integer>
+  </dict>
+  <key>RunAtLoad</key><false/>`
+    : `<key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>`
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- GENERATED from ${e.descriptorFile.replace(env.REPO_ROOT + '/', '')} by scripts/gen-launchd.mjs.
@@ -78,8 +108,7 @@ function renderPlist(e) {
   <key>ProgramArguments</key>${xArray(programArguments(e))}
   <key>EnvironmentVariables</key>${xDict(envVars)}
   <key>WorkingDirectory</key>${xString(e.cwd)}
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  ${lifecycle}
   <key>StandardOutPath</key>${xString(e.logOut)}
   <key>StandardErrorPath</key>${xString(e.logErr)}
 </dict>
@@ -105,10 +134,13 @@ if (args[0] === '--print') {
   }
   // Which services to write: explicit names, or --all, or (default) just the CORE services. A
   // per-add-on skill names exactly its own service(s) so it never installs an add-on plist the
-  // machine hasn't opted into. Unknown names are a loud error.
+  // machine hasn't opted into. Unknown names are a loud error. EVERY selection is scoped to
+  // this machine's device role — a spoke structurally cannot install a hub-only service, and
+  // naming one explicitly is a loud error (not a silent skip): the operator asked for something
+  // this role must not run.
   const rest = args.slice(args[0] === '--out' ? 2 : 1)
   let picked
-  if (rest.includes('--all')) picked = manifest
+  if (rest.includes('--all')) picked = manifest.filter((e) => e.roles.includes(ROLE))
   else if (rest.filter((n) => !n.startsWith('--')).length) {
     picked = rest
       .filter((n) => !n.startsWith('--'))
@@ -118,9 +150,16 @@ if (args[0] === '--print') {
           process.stderr.write(`[gen-launchd] no service named "${n}". Known: ${manifest.map((m) => m.name).join(', ')}\n`)
           process.exit(1)
         }
+        if (!e.roles.includes(ROLE)) {
+          process.stderr.write(
+            `[gen-launchd] "${n}" does not run on a ${ROLE} (its descriptor declares roles: ${e.roles.join(',')}). ` +
+              `This machine's role is COS_DEVICE_ROLE=${ROLE} (config/cos.env).\n`,
+          )
+          process.exit(1)
+        }
         return e
       })
-  } else picked = manifest.filter((e) => e.core)
+  } else picked = manifest.filter((e) => e.core && e.roles.includes(ROLE))
   mkdirSync(dir, { recursive: true })
   const onDarwin = args[0] === '--install' && process.platform === 'darwin'
   const uid = onDarwin ? process.getuid() : null
@@ -130,15 +169,18 @@ if (args[0] === '--print') {
     process.stdout.write(`[gen-launchd] wrote ${e.label}.plist\n`)
     if (onDarwin) {
       // Reload via launchd so the new plist takes effect now (bootout to pick up edits, then
-      // bootstrap + kickstart). Best-effort: a not-yet-loaded agent makes bootout error harmlessly.
-      for (const c of [`bootout gui/${uid}/${e.label}`, `bootstrap gui/${uid} "${plistPath}"`, `kickstart -k gui/${uid}/${e.label}`]) {
+      // bootstrap). A SCHEDULED job is NOT kickstarted — kickstart -k would FIRE it immediately
+      // (e.g. run a backup at install time) instead of waiting for its StartCalendarInterval.
+      const cmds = [`bootout gui/${uid}/${e.label}`, `bootstrap gui/${uid} "${plistPath}"`]
+      if (!e.schedule) cmds.push(`kickstart -k gui/${uid}/${e.label}`)
+      for (const c of cmds) {
         try {
           execSync(`launchctl ${c}`, { stdio: 'ignore' })
         } catch {
           /* best-effort */
         }
       }
-      process.stdout.write(`[gen-launchd] loaded ${e.label} (launchctl)\n`)
+      process.stdout.write(`[gen-launchd] loaded ${e.label} (launchctl${e.schedule ? ', scheduled — not fired now' : ''})\n`)
     }
   }
 } else {

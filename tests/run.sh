@@ -158,6 +158,28 @@
 #      refused 503 { error:"store-newer-than-code", disk, code, fix:"git pull" }
 #      and the file stays byte-identical (the 2026-07-12 silent-wipe incident
 #      class). Restores the original bytes in a finally (net-zero).
+#  13d2. api-healthz — ONLY if a board is running: the machine-identity handshake
+#      (GET /api/healthz): 200 {ok:true}, role defaults to hub, deviceId slug,
+#      code schemaVersion vs raw diskSchemaVersion with degradedRead === disk>code,
+#      appVersion, lease null-or-well-formed. Read-only (net-zero).
+#  13e. backup-hardening — hermetic multi-producer backup pipeline test (NO board,
+#      NO Keychain, NO network, NO live data: synthetic repo-root skeleton + a local
+#      BARE git "remote" + per-device clones in a mktemp sandbox, HOME sandboxed).
+#      Asserts: per-device manifests (deviceId/schemaVersion/vaultPath recorded, no
+#      legacy MANIFEST.json), fetch-before-push convergence (a BEHIND producer still
+#      exits 0), producer admission (same key joins; a WRONG key is refused before
+#      the archive splits), restore reads the manifest UNION, hard-fails on an
+#      unreachable remote (--stale-ok escapes), --apply refuses while anything
+#      LISTENS on BOARD_URL, and the cross-machine apply semantics (vault name
+#      mapping, .cos/jobs.json strip, settings.json machine-key merge). Run
+#      UNCONDITIONALLY (needs only git + node). Also covers the HUB.json lease
+#      lifecycle: founder claim, fresh-lease orphan quarantine + exit 4, stale
+#      takeover (epoch bump), demoted-hub exit 4, spoke exit 1.
+#  13f. gen-roles — hermetic device-role contract for the service manifest +
+#      generators: roles/label probe-list columns, loopback preload on bridge
+#      plists (+ its REAL bind behavior via a throwaway http server), scheduled
+#      backup plist, spoke install-set scoping + loud role errors, the loader's
+#      spoke/localhost + invalid-role hard-fails. Run UNCONDITIONALLY (node only).
 #  14. search-sidecar — headless python tests for the semantic search sidecar
 #      (search/test_search.py): index/topk/batch/determinism over BOTH backends,
 #      offline (COS_SEARCH_EMBEDDER=hash, no network). uv-GATED — skipped (not
@@ -238,7 +260,12 @@ start_test_board() {
   # Point the board's sidecar URLs at a dead port so the test board is fully
   # self-contained: api-search falls back to keyword (finds its own marker), and
   # the guard-proxy tests see online:false and self-skip — nothing live is touched.
+  # Pin the sandbox board's device identity so its role NEVER resolves from the real
+  # machine's config/cos.env (store.ts's role guard + /api/healthz read process.env
+  # first; without this, running the suite on a machine set to spoke would make the
+  # test board refuse writes). A throwaway hub id, never the real one.
   ( cd "${sb}" && COS_DATA_DIR="${sb}/data" COS_PRINCIPAL_EMAIL="${COS_PRINCIPAL_EMAIL}" \
+      COS_DEVICE_ROLE="hub" COS_DEVICE_ID="test-board" \
       COS_SEARCH_URL="http://127.0.0.1:59999" COS_GUARD_URL="http://127.0.0.1:59999" \
       "${BOARD_SRC}/node_modules/.bin/next" dev -p "${TEST_BOARD_PORT}" >"${TMP}/test-board.log" 2>&1 ) &
   TEST_BOARD_PID=$!
@@ -999,6 +1026,54 @@ elif [ "${BOARD_UP}" -eq 1 ]; then
   echo "SKIP: external test board (COS_TEST_BOARD_URL) — no file access to its store; schema-guard e2e needs the auto-started sandbox."
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 13d2. api-healthz (only when a board is healthy) -------------------------
+# The machine-identity handshake endpoint (role/deviceId/schema handshake/lease).
+# Read-only — net-zero by construction.
+echo
+echo "--- [13d2] api-healthz (sandbox board) ----------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-healthz.mjs"; then
+    echo "api-healthz: PASS"
+  else
+    echo "api-healthz: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-healthz"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 13e. backup-hardening (hermetic; no board/Keychain/network/live data) ---
+# The multi-producer backup pipeline contract: per-device manifests, fetch-before-
+# push convergence, producer admission (wrong-key refusal), manifest-union restore,
+# stale-clone hard-fail, the live-board apply guard, and the cross-machine restore
+# semantics (vault mapping / jobs.json strip / settings machine-key merge). Fully
+# sandboxed (mktemp skeleton + local bare git remote + COS_BACKUP_ALLOW_NONDEFAULT);
+# the real ~/.cos-backups and live stores are never touched. Also the HUB.json
+# lease lifecycle (claim / orphan-quarantine exit 4 / stale takeover / spoke exit 1).
+echo
+echo "--- [13e] backup-hardening (hermetic sandbox) ---------------"
+if node "${SCRIPT_DIR}/backup-hardening.mjs"; then
+  echo "backup-hardening: PASS"
+else
+  echo "backup-hardening: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} backup-hardening"
+fi
+
+# --- 13f. gen-roles (hermetic; manifest + generator device-role contract) ----
+# Roles/label columns, loopback preload (incl. real bind behavior), scheduled
+# backup plist, spoke scoping, loader role guards. Node-only; no launchd touched.
+echo
+echo "--- [13f] gen-roles (hermetic manifest contract) ------------"
+if node "${SCRIPT_DIR}/gen-roles.mjs"; then
+  echo "gen-roles: PASS"
+else
+  echo "gen-roles: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} gen-roles"
 fi
 
 # --- 13. search sidecar (python, headless, deterministic) --------------------

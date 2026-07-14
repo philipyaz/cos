@@ -56,6 +56,7 @@ import {
   type Rollup,
 } from "./selectors";
 import { resolveTrashRetentionDays, resolveReminderAutoDeleteDays } from "./retention";
+import { getDeviceRole } from "./cos-env";
 
 // Absolute path to the live JSON store. Exported so the SSE route can
 // fs.watch() it for live-update fan-out.
@@ -89,6 +90,21 @@ export class VersionConflictError extends Error {}
 // catalog). Route handlers map it to a 400. Shape-only checks still happen
 // outside the lock; this is for validity that depends on db state.
 export class BadRequestError extends Error {}
+
+// FAIL-CLOSED role guard (multi-device): a SPOKE machine runs no state machine —
+// its board-facing tools point at the hub's BOARD_URL, and a spoke-local store
+// must never accept a write (it would silently fork the single source of truth).
+// Enforced HERE at the chokepoint — not in npm hooks or launchers — so `npx next
+// dev`, `next start`, or any future entry point still cannot write. Routes map
+// it to 503 via storeErrorToResponse. Reads stay open (harmless on a spoke).
+export class SpokeRoleError extends Error {
+  constructor() {
+    super(
+      "this machine is a SPOKE (COS_DEVICE_ROLE=spoke) — its local store never accepts writes. " +
+        "Write via the hub board (BOARD_URL); if this machine should be the hub, fix config/cos.env.",
+    );
+  }
+}
 
 // FAIL-CLOSED schema guard: the on-disk store was written by NEWER code (its
 // schemaVersion is ahead of this build's SCHEMA_VERSION). migrate() only knows
@@ -446,6 +462,8 @@ async function pruneBackups(): Promise<void> {
 // file (rename is atomic on POSIX — a reader sees either the old or the new
 // complete file, never a partial one).
 export async function writeDB(db: DBShape): Promise<void> {
+  // Role guard first (multi-device): a spoke's store is read-only, whoever calls.
+  if (getDeviceRole() === "spoke") throw new SpokeRoleError();
   // Fast fail on the tag captured at readDB time (whichever file was actually
   // loaded, primary or .bak) — mutate() already threw for the normal path; this
   // covers direct writeDB callers, with the exact version the data came from.
@@ -504,10 +522,13 @@ let chain: Promise<unknown> = Promise.resolve();
 
 export async function mutate<T>(fn: (db: DBShape) => T | Promise<T>): Promise<T> {
   const run = chain.then(async () => {
+    // FAIL CLOSED before fn() ever runs — role first (a spoke's store is
+    // read-only, full stop), then schema (a store written by newer code must
+    // not be mutated by this build: migrate() has already dropped the
+    // collections this code doesn't know — persisting would wipe them). Both
+    // map to 503 in the routes.
+    if (getDeviceRole() === "spoke") throw new SpokeRoleError();
     const db = await readDB();
-    // FAIL CLOSED before fn() ever runs: a store written by newer code must not
-    // be mutated by this build (migrate() has already dropped the collections
-    // this code doesn't know — persisting would wipe them). Routes → 503.
     if (isSchemaAhead(db)) throw new SchemaAheadError(diskSchemaVersion(db));
     // Bump the monotonic version up-front so anything fn() reads/returns sees the
     // final post-write value. This makes every route's `db.version` match what the

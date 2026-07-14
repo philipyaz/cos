@@ -31,7 +31,8 @@ fi
 NODE="${NODE_BIN:-node}"
 LA="${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 
-# The canonical service list: "<name> <port|-> <kind> <probe> <gate>" lines from the manifest.
+# The canonical service list — tab-separated columns from the manifest:
+#   "<name>	<port|->	<kind>	<probe>	<gate>	<roles>	<autostart 1|0>	<label>"
 PROBE_LIST=$("$NODE" "$REPO/mcp/service-manifest.mjs" --probe-list 2>/dev/null)
 if [ -z "$PROBE_LIST" ]; then
   echo "[mcp] could not read the service manifest (node + mcp/service-manifest.mjs). Skipping bridge nudge."
@@ -49,13 +50,23 @@ probe_listen() {
 }
 probe_healthz() { curl -s --max-time 2 "http://127.0.0.1:$1/healthz" 2>/dev/null | grep -q '"ok":true'; }
 
-# Run the right check for one service line + emit a status/WARN. The 6th arg `installed` is 1 when the
-# caller already confirmed the service is set up on this machine (the Darwin branch filters out
-# opted-out add-ons by plist BEFORE calling, so an installed-but-DOWN add-on must still WARN — losing
-# that WARN was a diagnostic regression vs the old script). We WARN on down when installed OR core;
-# an opted-out optional service (installed=0, gate!=core) stays quiet so we don't nag.
+# Does this service run under THIS machine's device role? roles is the comma-joined column from the
+# probe-list; COS_DEVICE_ROLE comes from the loader (default hub). A role-mismatched service is
+# SILENTLY out of scope — on a spoke, hub-only services (even core ones) are simply not this
+# machine's concern, not a WARN.
+role_matches() {
+  case ",$1," in *",${COS_DEVICE_ROLE:-hub},"*) return 0 ;; *) return 1 ;; esac
+}
+
+# Run the right check for one service line + emit a status/WARN. The 6th arg `label` is the launchd
+# label from the manifest (it can be overridden per-descriptor — e.g. backup keeps its historical
+# com.chiefofstaff.backup). The 7th `installed` is 1 when the caller already confirmed the service is
+# set up on this machine (the Darwin branch filters out opted-out add-ons by plist BEFORE calling, so
+# an installed-but-DOWN add-on must still WARN — losing that WARN was a diagnostic regression vs the
+# old script). We WARN on down when installed OR core; an opted-out optional service (installed=0,
+# gate!=core) stays quiet so we don't nag.
 probe_one() {
-  name=$1 port=$2 kind=$3 probe=$4 gate=$5 installed=${6:-0}
+  name=$1 port=$2 kind=$3 probe=$4 gate=$5 label=$6 installed=${7:-0}
   warn=0
   { [ "$installed" = 1 ] || [ "$gate" = core ]; } && warn=1
   case "$probe" in
@@ -76,8 +87,13 @@ probe_one() {
       elif probe_listen "$port"; then echo "[mcp] WARN: $name on :$port but WhatsApp NOT connected — cold start or session expired; re-pair via /whatsapp-mcp-setup (see mcp/logs/$name.out.log)"
       elif [ "$warn" = 1 ]; then echo "[mcp] WARN: $name DOWN on :$port — see mcp/logs/$name.err.log"; fi ;;
     process)
-      if launchctl list 2>/dev/null | grep -q "com.chiefofstaff.mcp-$name"; then echo "[mcp] $name runner up (no port)"
+      if launchctl list 2>/dev/null | grep -q "$label"; then echo "[mcp] $name runner up (no port)"
       elif [ "$warn" = 1 ]; then echo "[mcp] WARN: $name runner not loaded (see mcp/logs/$name.err.log)"; fi ;;
+    scheduled)
+      # A scheduled job (e.g. the 03:30 backup) is healthy when LOADED — it is not
+      # supposed to be running between fires, so a process/port probe would lie.
+      if launchctl list 2>/dev/null | grep -q "$label"; then echo "[mcp] $name scheduled job loaded"
+      elif [ "$warn" = 1 ]; then echo "[mcp] WARN: $name scheduled job not loaded — see the backup-recovery skill"; fi ;;
   esac
 }
 
@@ -91,37 +107,48 @@ case "$OS" in
     exit 0
     ;;
   Darwin)
-    # --- macOS: launchd. Fresh-clone short-circuit — no installed agents yet → say so once + exit. ---
-    if ! ls "$LA"/com.chiefofstaff.mcp-*.plist >/dev/null 2>&1; then
+    # --- macOS: launchd. Fresh-clone short-circuit — no installed agents yet → say so once + exit.
+    # Match ANY chiefostaff agent (label overrides mean not every one is mcp-*, e.g. the backup job). ---
+    if ! ls "$LA"/com.chiefofstaff.*.plist >/dev/null 2>&1; then
       echo "[mcp] bridges not set up yet — run cos-setup to wire them. The board UI works without them."
       exit 0
     fi
     U=$(id -u)
-    # bootstrap + kickstart every INSTALLED agent (a missing optional plist is skipped silently).
-    echo "$PROBE_LIST" | while IFS=' 	' read -r name port kind probe gate; do
+    # bootstrap + kickstart every INSTALLED agent (a missing optional plist is skipped silently;
+    # a role-mismatched service is out of scope for this machine entirely). A scheduled job is
+    # bootstrapped but NEVER kickstarted — that would fire it now instead of at its hour. An
+    # autostart=0 service (the boardapp — the production board itself) is NOT touched by this
+    # predev/prestart nudge: a dev board is about to bind the port; launching the production board
+    # here would collide with it.
+    echo "$PROBE_LIST" | while IFS='	' read -r name port kind probe gate roles autostart label; do
       [ -n "$name" ] || continue
-      label="com.chiefofstaff.mcp-$name"
+      role_matches "$roles" || continue
+      [ "$autostart" = 1 ] || continue
       if [ ! -f "$LA/$label.plist" ]; then
         [ "$gate" = core ] && echo "[mcp] WARN: $name not installed ($label.plist missing) — run cos-setup"
         continue
       fi
       launchctl bootstrap gui/"$U" "$LA/$label.plist" 2>/dev/null
-      launchctl kickstart "gui/$U/$label" 2>/dev/null
+      [ "$probe" = scheduled ] || launchctl kickstart "gui/$U/$label" 2>/dev/null
     done
     sleep 1
-    echo "$PROBE_LIST" | while IFS=' 	' read -r name port kind probe gate; do
+    echo "$PROBE_LIST" | while IFS='	' read -r name port kind probe gate roles autostart label; do
       [ -n "$name" ] || continue
-      [ -f "$LA/com.chiefofstaff.mcp-$name.plist" ] || continue
-      probe_one "$name" "$port" "$kind" "$probe" "$gate" 1   # installed=1: plist present, so WARN if down
+      role_matches "$roles" || continue
+      [ "$autostart" = 1 ] || continue
+      [ -f "$LA/$label.plist" ] || continue
+      probe_one "$name" "$port" "$kind" "$probe" "$gate" "$label" 1   # installed=1: plist present, so WARN if down
     done
     exit 0
     ;;
   *)
     # --- other (Linux/CI): no bundled supervisor — just probe what happens to be up. ---
     echo "[mcp] no bundled supervisor for $OS — probing only (start services yourself)."
-    echo "$PROBE_LIST" | while IFS=' 	' read -r name port kind probe gate; do
+    echo "$PROBE_LIST" | while IFS='	' read -r name port kind probe gate roles autostart label; do
       [ -n "$name" ] || continue
-      probe_one "$name" "$port" "$kind" "$probe" "$gate"
+      role_matches "$roles" || continue
+      [ "$autostart" = 1 ] || continue
+      probe_one "$name" "$port" "$kind" "$probe" "$gate" "$label"
     done
     exit 0
     ;;

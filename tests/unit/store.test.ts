@@ -1314,6 +1314,40 @@ test("writeDB: a clone that dropped the symbol tag is still refused by the write
   );
 });
 
+// ── Spoke role guard (multi-device PR 3) ───────────────────────────────────────
+// A machine whose COS_DEVICE_ROLE is "spoke" runs no state machine: its local
+// store must never accept a write (that would silently fork the single source of
+// truth on the hub), whoever calls and however the board was launched. Reads
+// stay open. The env override is read per call (cos-env.ts), so flipping it
+// between calls works without a module reload.
+test("role guard: COS_DEVICE_ROLE=spoke refuses mutate() and writeDB(); reads stay open; hub restores writes", async () => {
+  await resetStore(makeDB({ version: 2, cases: [makeCase({ id: "CASE-1" })], messages: [] }));
+  process.env.COS_DEVICE_ROLE = "spoke";
+  try {
+    const before = await fsp.readFile(DISK_FILE, "utf8");
+    let ran = false;
+    await assert.rejects(
+      storeDisk.mutate(() => {
+        ran = true;
+      }),
+      (e: unknown) => e instanceof storeDisk.SpokeRoleError,
+      "mutate refuses with the typed SpokeRoleError",
+    );
+    assert.equal(ran, false, "the mutate body never runs on a spoke");
+    assert.equal(await fsp.readFile(DISK_FILE, "utf8"), before, "the file is byte-identical");
+    await assert.rejects(
+      storeDisk.writeDB(makeDB({ version: 9 })),
+      (e: unknown) => e instanceof storeDisk.SpokeRoleError,
+      "writeDB refuses too — direct callers are covered",
+    );
+    const db = await storeDisk.readDB();
+    assert.equal(db.cases.length, 1, "reads stay open on a spoke");
+  } finally {
+    delete process.env.COS_DEVICE_ROLE;
+  }
+  assert.equal(await storeDisk.mutate(() => "ok"), "ok", "back to hub — writes work again");
+});
+
 test("writeDB: refuses when the file became newer AFTER the read (cross-process race)", async () => {
   await resetStore(makeDB({ version: 1 }));
   const db = await storeDisk.readDB(); // healthy at read time — tag says safe

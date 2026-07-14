@@ -11,18 +11,32 @@ versioned record you cannot silently overwrite.
 ## What it does
 
 `node backup/backup.mjs` →
-1. gzip-tars the in-scope stores (see `config.mjs SCOPE`): board data, guard data,
+1. **converges with the remote** (fetch + rebase — a rejected push can never leave the
+   clone diverged forever), and on this machine's FIRST run into an archive with history,
+   **decrypt-verifies** the newest snapshot with the local key (*producer admission* — a
+   wrong key is refused before it can split the archive in two);
+2. gzip-tars the in-scope stores (see `config.mjs SCOPE`): board data, guard data,
    config, and the **active vault** (`vault/<VAULT_NAME>`, resolved from `config/cos.env`
    so a renamed vault is never silently dropped — `backup.mjs` WARNs if it's missing);
-2. encrypts the tarball with **AES-256-GCM** (`lib/crypto.mjs`) — key derived from your
+3. encrypts the tarball with **AES-256-GCM** (`lib/crypto.mjs`) — key derived from your
    recovery passphrase via scrypt, random salt+IV per backup, authenticated;
-3. writes `snapshots/cos-backup-<ts>.enc` + an integrity entry in `MANIFEST.json` into the
-   private backup repo and **commits + pushes**. One file per run, never overwritten.
+4. writes `snapshots/cos-backup-<ts>.enc` + an integrity entry in this device's
+   **`manifests/<deviceId>.json`** (per-device manifests: two machines sharing one archive
+   can never merge-conflict; a legacy `MANIFEST.json` is still read, never written) and
+   **commits + pushes** (one converge-and-retry on rejection). One snapshot file per run,
+   never overwritten.
 
-`node backup/restore.mjs` → pulls the repo, **verifies** (GCM auth tag → sha256 vs manifest
+`node backup/restore.mjs` → syncs the repo (**hard-fails on an unreachable remote or a
+diverged clone** — a stale clone must not pick "latest"; `--stale-ok` for offline DR),
+reads the union of every device's manifest, **verifies** (GCM auth tag → sha256 vs manifest
 → every `*.json` parses) before touching anything, runs **dry-run unless `--apply`**, and on
-`--apply` snapshots the current live state to `~/cos-recovery/pre-restore-*` first (a restore
-is itself reversible).
+`--apply` **refuses while anything answers on `$BOARD_URL`** (a live board would clobber the
+restore; `--allow-live-board` overrides), then snapshots the current live state to
+`~/cos-recovery/pre-restore-*` first (a restore is itself reversible). Selection is
+**device-scoped**: "latest" means this machine's latest; `--device <id>` / `--any-device`
+restore another producer's snapshot cross-machine (the vault maps into the local
+`VAULT_NAME`, the producer's `vault/.cos/jobs.json` queue is stripped, this machine's
+Obsidian identity in `config/settings.json` survives).
 
 ```
 node backup/restore.mjs --list          # what's available

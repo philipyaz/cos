@@ -23,7 +23,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { spawn, execSync } from 'node:child_process'
 import { loadConfig } from '../config/load-config.mjs'
-import { getManifest, stdioToArg } from './service-manifest.mjs'
+import { getManifest, supergatewayArgv } from './service-manifest.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '..')
 const LOGS = path.join(REPO, 'mcp', 'logs')
@@ -49,7 +49,7 @@ function loadSecretsEnv() {
 
 // Translate a platform-agnostic manifest entry into the concrete Windows spawn {cmd, args, env, cwd}.
 // Returns null (→ skip quietly) if the service's external dependency is absent.
-function toSpawn(e, cfg, stdioToArg) {
+function toSpawn(e, cfg) {
   const env = { ...e.env }
   if (e.idleExit) env.COS_MCP_IDLE_EXIT_MS = '300000'
   if (e.secrets && e.secrets.length) {
@@ -67,12 +67,18 @@ function toSpawn(e, cfg, stdioToArg) {
     // it at a nonexistent node (the supergateway parent already runs on process.execPath).
     const stdio = [...e.stdio]
     if (stdio[0] === cfg.NODE_BIN) stdio[0] = process.execPath
-    return {
-      cmd: process.execPath,
-      args: [sgDist, '--stdio', stdioToArg(stdio), '--outputTransport', 'streamableHttp',
-        '--streamableHttpPath', '/mcp', '--port', String(e.port), '--cors', '--logLevel', 'info'],
-      env, cwd: e.cwd,
-    }
+    // The loopback preload pins supergateway's host-less app.listen(port) to 127.0.0.1 —
+    // it has no bind-host option, and an unpinned bridge serves every interface (LAN/tailnet
+    // peers could drive the MCPs with zero auth). supergatewayArgv is the shared recipe both
+    // platforms render, so the security-critical spawn can't drift. args drop the leading node
+    // (process.execPath is cmd) but keep the preload as the first arg.
+    const argv = supergatewayArgv({
+      nodeBin: process.execPath,
+      preloadPath: path.join(REPO, 'scripts', 'loopback-bind.cjs'),
+      distPath: sgDist,
+      entry: { ...e, stdio },
+    })
+    return { cmd: argv[0], args: argv.slice(1), env, cwd: e.cwd }
   }
   if (e.runtime === 'uvicorn') {
     // Call the venv uvicorn directly (NOT `uv run`, which spawns a visible cmd.exe). The venv is
@@ -92,7 +98,15 @@ function toSpawn(e, cfg, stdioToArg) {
 
 function load() {
   const cfg = loadConfig()
-  const services = getManifest().map((e) => ({ entry: e, spawn: toSpawn(e, cfg, stdioToArg) }))
+  // Scope to this machine's device role (a spoke never runs hub-only services); skip SCHEDULED
+  // jobs (Windows has no launchd StartCalendarInterval — a scheduled runner under a KeepAlive-style
+  // supervisor would loop; schedule the daily backup via Task Scheduler — backup-recovery skill §8); and skip
+  // autostart:false services (the boardapp — the production board) so this nudge never launches
+  // the production board on top of an incoming dev board.
+  const role = cfg.COS_DEVICE_ROLE === 'spoke' ? 'spoke' : 'hub'
+  const services = getManifest({ role })
+    .filter((e) => !e.schedule && e.autostart)
+    .map((e) => ({ entry: e, spawn: toSpawn(e, cfg) }))
   return { cfg, services }
 }
 

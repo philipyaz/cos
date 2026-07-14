@@ -4,6 +4,9 @@
   "kind": "sidecar",
   "runtime": "uvicorn",
   "core": true,
+  "roles": [
+    "hub"
+  ],
   "portVar": "SEARCH_SIDECAR_PORT",
   "dir": "${REPO_ROOT}/search",
   "cwd": "${REPO_ROOT}/search",
@@ -16,5 +19,7 @@
   },
   "clients": [],
   "inMcpJson": false,
-  "probe": { "type": "healthz" }
+  "probe": {
+    "type": "healthz"
+  }
 }

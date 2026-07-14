@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "name": "backup",
+  "kind": "runner",
+  "runtime": "exec",
+  "optional": true,
+  "roles": ["hub"],
+  "label": "com.chiefofstaff.backup",
+  "logDir": "${REPO_ROOT}/backup/logs",
+  "exec": ["${NODE_BIN}", "${REPO_ROOT}/backup/backup.mjs"],
+  "env": { "COS_BACKUP_REPO": "${BACKUP_REPO}" },
+  "schedule": { "hour": 3, "minute": 30 },
+  "clients": [],
+  "probe": { "type": "scheduled" }
+}

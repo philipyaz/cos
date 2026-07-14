@@ -51,3 +51,36 @@ export function expandTilde(p: string): string {
 }
 
 export const nonEmpty = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+
+// ── Device identity + role (multi-device) ─────────────────────────────────────
+// MIRRORS backup/config.mjs's DEVICE_ID/DEVICE_ROLE chains (env > cos.env >
+// default — that .mjs is outside the Next root and cannot be imported). The
+// cos.env parse is cached (static per process); the ENV override is read per
+// call so tests can flip roles without a module reload. Consumers: the store's
+// spoke write guard, /api/healthz, and backup-status's device-scoped freshness.
+let _cosEnvCache: Record<string, string> | null = null;
+function machineEnv(): Record<string, string> {
+  if (!_cosEnvCache) _cosEnvCache = parseCosEnv(path.resolve(process.cwd(), ".."));
+  return _cosEnvCache;
+}
+
+// "hub" runs the state machine; "spoke" is a stateless client of the hub. Any
+// value other than the two known roles degrades to hub (the loader validates
+// loudly at setup time — this read-side is deliberately tolerant).
+export function getDeviceRole(): "hub" | "spoke" {
+  const raw = (process.env.COS_DEVICE_ROLE || machineEnv().COS_DEVICE_ROLE || "hub").trim();
+  return raw === "spoke" ? "spoke" : "hub";
+}
+
+// The stable per-machine id (sanitized to a filename-safe slug; hostname fallback
+// until setup mints a real COS_DEVICE_ID). Memoized on the raw input so the
+// sanitize regex doesn't re-run on every manifest row (isLocalEntry is a hot
+// predicate) — keyed on the raw value so a test-time env override stays live.
+let _idCache: { raw: string; id: string } | null = null;
+export function getDeviceId(): string {
+  const raw = (process.env.COS_DEVICE_ID || machineEnv().COS_DEVICE_ID || os.hostname()).trim();
+  if (_idCache && _idCache.raw === raw) return _idCache.id;
+  const id = raw.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64) || "unknown-device";
+  _idCache = { raw, id };
+  return id;
+}

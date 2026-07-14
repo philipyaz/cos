@@ -27,7 +27,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFile } from "node:child_process";
-import { parseCosEnv, expandTilde, nonEmpty } from "./cos-env";
+import { parseCosEnv, expandTilde, nonEmpty, getDeviceId } from "./cos-env";
 import {
   type BackupStatus,
   type BackupSummary,
@@ -102,8 +102,68 @@ function repoRootIsValid(): boolean {
 // 12h. Echoed on the envelope so the UI's labels match these exact gates.
 const STALE_THRESHOLD_HOURS = 36;
 const FRESH_WINDOW_HOURS = 12;
+// A standing PUSH outage older than this is an ERROR, not a warning: the off-site
+// channel is dead (and under multi-device the remote also carries the split-brain
+// tripwires), even though each local run "succeeded". 24h ≈ two daily runs.
+const PUSH_OUTAGE_ERROR_HOURS = 24;
 const RECENT_CAP = 25; // how many manifest rows the history list shows
 const LOG_TAIL_LINES = 12; // tail length for the out/err log expanders
+
+// THIS machine's producer identity — getDeviceId() (cos-env.ts) mirrors
+// backup/config.mjs's chain (env > cos.env > sanitized hostname). Freshness/
+// staleness/lastRun anchor on THIS device's entries only: in a shared
+// multi-device archive, another machine's fresh snapshot must not mask a dead
+// LOCAL backup channel (isFresh would skip the self-healing top-up forever
+// while this machine's distinct store goes unprotected).
+
+// Is a manifest entry THIS machine's? Legacy entries (pre-split, no deviceId)
+// match on hostname — right after the upgrade they are the only local history.
+function isLocalEntry(s: BackupSummary): boolean {
+  return s.deviceId === getDeviceId() || (!s.deviceId && s.host === os.hostname());
+}
+
+// ── The HUB.json lease (multi-device) ─────────────────────────────────────────
+// A tiny PLAINTEXT file in the (otherwise encrypted) backup repo naming the one
+// machine allowed to produce backups — the hub. backup.mjs claims/renews it and
+// exits 4 ("lease-held-elsewhere") when another device holds it fresh; /api/healthz
+// surfaces it so agents and the Devices UI can see who the hub is. Stale after
+// 26h without renewal (daily runs + top-ups renew far more often).
+// MIRRORS backup/lib/lease.mjs (readLease + coerceLease + leaseIsStale + the 26h
+// LEASE_STALE_HOURS) — that .mjs is outside the Next root and cannot be imported;
+// keep the constant + field coercion in lockstep with it.
+export const LEASE_STALE_HOURS = 26;
+
+export interface HubLease {
+  deviceId: string;
+  host: string | null;
+  epoch: number;
+  renewedAt: string;
+  stale: boolean; // renewedAt older than LEASE_STALE_HOURS (or unparseable)
+}
+
+// Fail-safe read of the local clone's HUB.json (null = no lease / no repo /
+// garbage file — the multi-device tripwires simply aren't armed).
+export function readHubLease(): HubLease | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(BACKUP_REPO, "HUB.json"), "utf8")) as {
+      deviceId?: unknown;
+      host?: unknown;
+      epoch?: unknown;
+      renewedAt?: unknown;
+    };
+    if (typeof raw.deviceId !== "string" || typeof raw.renewedAt !== "string") return null;
+    const t = new Date(raw.renewedAt).getTime();
+    return {
+      deviceId: raw.deviceId,
+      host: typeof raw.host === "string" ? raw.host : null,
+      epoch: typeof raw.epoch === "number" ? raw.epoch : 0,
+      renewedAt: raw.renewedAt,
+      stale: !Number.isFinite(t) || Date.now() - t > LEASE_STALE_HOURS * 3600_000,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // ── Manifest read (source a) ──────────────────────────────────────────────────
 // The wire shape of one MANIFEST.json entry — every field optional/loose because a
@@ -114,6 +174,8 @@ interface ManifestEntryWire {
   date?: unknown;
   createdAt?: unknown;
   host?: unknown;
+  deviceId?: unknown;
+  schemaVersion?: unknown;
   scope?: unknown;
   plaintextSha256?: unknown;
   plaintextBytes?: unknown;
@@ -134,6 +196,8 @@ function coerceSummary(raw: ManifestEntryWire): BackupSummary {
     date: str(raw.date),
     createdAt: str(raw.createdAt),
     host: str(raw.host),
+    deviceId: typeof raw.deviceId === "string" ? raw.deviceId : undefined,
+    schemaVersion: typeof raw.schemaVersion === "number" ? raw.schemaVersion : undefined,
     scope: Array.isArray(raw.scope) ? raw.scope.filter((s): s is string => typeof s === "string") : [],
     plaintextSha256: str(raw.plaintextSha256),
     plaintextBytes: num(raw.plaintextBytes),
@@ -141,27 +205,50 @@ function coerceSummary(raw: ManifestEntryWire): BackupSummary {
   };
 }
 
-// Read + parse MANIFEST.json into typed, newest-first summaries (the manifest is
-// already newest-first; backup.mjs unshifts). Returns [] on any trouble (missing
-// repo, unreadable file, garbage JSON) — the caller treats [] as "no backups yet".
-// Exported so the run-gate's isFresh() can reuse it (one parse path).
-export function readManifest(): BackupSummary[] {
+// Parse one manifest file's text into wire entries ([] on any trouble).
+function parseManifestText(file: string): ManifestEntryWire[] {
   try {
-    const text = fs.readFileSync(path.join(BACKUP_REPO, "MANIFEST.json"), "utf8");
-    const wire = JSON.parse(text) as ManifestWire;
-    if (!wire || !Array.isArray(wire.backups)) return [];
-    return wire.backups.map(coerceSummary);
+    const wire = JSON.parse(fs.readFileSync(file, "utf8")) as ManifestWire;
+    return wire && Array.isArray(wire.backups) ? wire.backups : [];
   } catch {
     return [];
   }
+}
+
+// Read the UNION of every producer's manifest into typed, newest-first summaries:
+// manifests/<deviceId>.json (one per producer — backup.mjs writes only its own)
+// plus the legacy single MANIFEST.json (still read so pre-split snapshots list).
+// Each file is newest-first already, but the MERGE needs the sort. Returns [] on
+// any trouble — the caller treats [] as "no backups yet". Exported so the
+// run-gate's isFresh() can reuse it (one parse path). MIRRORS
+// backup/lib/manifests.mjs readAllManifests (the .mjs/.ts sides can't
+// cross-import — same duplication contract as the cos.env reader above).
+export function readManifest(): BackupSummary[] {
+  const entries: ManifestEntryWire[] = [];
+  try {
+    const dir = path.join(BACKUP_REPO, "manifests");
+    for (const name of fs.readdirSync(dir)) {
+      if (name.endsWith(".json")) entries.push(...parseManifestText(path.join(dir, name)));
+    }
+  } catch {
+    /* no manifests/ dir yet */
+  }
+  entries.push(...parseManifestText(path.join(BACKUP_REPO, "MANIFEST.json")));
+  return entries
+    .map(coerceSummary)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 // ── Git push-state (source b) ─────────────────────────────────────────────────
 // Offline only: `rev-list --left-right --count HEAD...@{u}` => "<ahead>\t<behind>".
 // "0\t0" => pushed (local ref matches upstream). ahead>0 => local-only. No upstream
 // (@{u} unset) or a command failure => unknown (we NEVER falsely claim "pushed").
-async function readPushState(): Promise<{ pushState: PushState; aheadCount: number | null }> {
-  return new Promise((resolve) => {
+async function readPushState(): Promise<{
+  pushState: PushState;
+  aheadCount: number | null;
+  oldestUnpushedMs: number | null;
+}> {
+  const counts = await new Promise<{ pushState: PushState; aheadCount: number | null }>((resolve) => {
     execFile(
       "git",
       ["-C", BACKUP_REPO, "rev-list", "--left-right", "--count", "HEAD...@{u}"],
@@ -185,6 +272,27 @@ async function readPushState(): Promise<{ pushState: PushState; aheadCount: numb
       },
     );
   });
+  if (!counts.aheadCount) return { ...counts, oldestUnpushedMs: null };
+  // How LONG has the outage stood? The oldest unpushed commit's time anchors the
+  // escalation (multiple runs land per day — 03:30 + opportunistic + manual — so
+  // a bare commit COUNT would trip on one ordinary offline day).
+  const oldestUnpushedMs = await new Promise<number | null>((resolve) => {
+    execFile(
+      "git",
+      ["-C", BACKUP_REPO, "log", "@{u}..HEAD", "--format=%ct"],
+      { timeout: 4000, maxBuffer: 1 << 20 },
+      (err, stdout) => {
+        if (err) {
+          resolve(null);
+          return;
+        }
+        const lines = String(stdout).trim().split("\n").filter(Boolean);
+        const oldest = Number(lines[lines.length - 1]); // log is newest-first
+        resolve(Number.isFinite(oldest) ? oldest * 1000 : null);
+      },
+    );
+  });
+  return { ...counts, oldestUnpushedMs };
 }
 
 // ── launchctl agent state (source c) ──────────────────────────────────────────
@@ -272,22 +380,31 @@ function computeOverall(args: {
   recentLen: number;
   stale: boolean;
   pushState: PushState;
+  pushOutage: boolean;
   lastExitCode: number | null;
 }): BackupOverall {
-  const { recentLen, stale, pushState, lastExitCode } = args;
+  const { recentLen, stale, pushState, pushOutage, lastExitCode } = args;
   // error: nothing has ever been backed up, or the last run hard-failed. exit 2 =
   // committed-locally (push failed, still a successful backup); exit 3 = a benign
   // single-flight lock-skip (a rare launchd 03:30 collision with a board run) — neither
   // is a hard failure.
+  // exit 4 = lease-held-elsewhere: a demoted (or soaking) machine deliberately not
+  // producing — calm, never red.
   const hardFail =
-    lastExitCode !== null && lastExitCode !== 0 && lastExitCode !== 2 && lastExitCode !== 3;
+    lastExitCode !== null && lastExitCode !== 0 && lastExitCode !== 2 && lastExitCode !== 3 && lastExitCode !== 4;
   if (recentLen === 0 || hardFail) return "error";
+  // A STANDING push outage escalates (oldest unpushed commit older than
+  // PUSH_OUTAGE_ERROR_HOURS): each run "succeeded" locally, but the off-site
+  // channel has been dead for a day+ — and under multi-device the remote repo
+  // also carries the split-brain tripwires (device manifests; the HUB.json lease
+  // when it lands), so this is a SAFETY failure, not a cosmetic yellow chip.
+  if (pushOutage) return "error";
   // healthy: fresh, pushed, and the last run was clean (exit 0), a benign lock-skip
   // (exit 3), or unknown (null).
   if (
     !stale &&
     pushState === "pushed" &&
-    (lastExitCode === 0 || lastExitCode === null || lastExitCode === 3)
+    (lastExitCode === 0 || lastExitCode === null || lastExitCode === 3 || lastExitCode === 4)
   ) {
     return "healthy";
   }
@@ -582,15 +699,18 @@ export async function fetchBackupStatus(): Promise<BackupStatus> {
     };
   }
 
-  // Source (a) manifest — synchronous + already defensive.
+  // Source (a) manifest — synchronous + already defensive. The history list shows
+  // the whole ARCHIVE (every producer, newest first); the health anchors below
+  // (lastRun → ageMs → stale → overall) use THIS DEVICE's newest entry only —
+  // another machine's fresh snapshot must never mask a dead local channel.
   const all = readManifest();
   const recent = all.slice(0, RECENT_CAP);
-  const lastRun = recent[0] ?? null;
+  const lastRun = all.find(isLocalEntry) ?? null;
 
   // Sources (b) git push-state and (c) launchctl agent — independent, run in parallel;
   // each resolves to a safe default, never rejects.
   const [push, agent] = await Promise.all([
-    readPushState().catch(() => ({ pushState: "unknown" as PushState, aheadCount: null })),
+    readPushState().catch(() => ({ pushState: "unknown" as PushState, aheadCount: null, oldestUnpushedMs: null })),
     readAgent().catch(() => ({
       agentInstalled: false,
       lastExitCode: null,
@@ -611,10 +731,13 @@ export async function fetchBackupStatus(): Promise<BackupStatus> {
     if (Number.isFinite(t)) ageMs = now - t;
   }
   const stale = ageMs !== null && ageMs > STALE_THRESHOLD_HOURS * 3600_000;
+  const pushOutage =
+    push.oldestUnpushedMs !== null && now - push.oldestUnpushedMs > PUSH_OUTAGE_ERROR_HOURS * 3600_000;
   const overall = computeOverall({
     recentLen: recent.length,
     stale,
     pushState: push.pushState,
+    pushOutage,
     lastExitCode: agent.lastExitCode,
   });
 
@@ -662,17 +785,33 @@ export interface RunResult {
   ok?: boolean;
   pushed?: boolean;
   code?: number;
-  skipped?: "fresh" | "busy";
+  skipped?: "fresh" | "busy" | "lease-held-elsewhere";
   refused?: "not-live-board";
 }
 
-// Is the newest backup younger than `hours`? A cheap MANIFEST read (no subprocess).
-// Returns false when there are no backups (a first run is never "fresh") or the
-// timestamp is unparseable. Used by BOTH the manual gate (unless forced) and the
-// opportunistic trigger (always) to avoid spawning a redundant run.
+// Is THIS DEVICE's newest backup younger than `hours`? Returns false when there
+// are none (a first run is never "fresh") or the timestamp is unparseable. Used
+// by BOTH the manual gate (unless forced) and the opportunistic trigger (always)
+// to avoid spawning a redundant run. Device-scoped on purpose: in a shared
+// multi-device archive, the OTHER machine's fresh snapshot must not suppress
+// this machine's runs — that would permanently disable the self-healing top-up
+// exactly when the local launchd channel is dead. Cheap on the hot path (this
+// runs per GET via the opportunistic gate): parse only this device's manifest
+// (each file is newest-first) plus the legacy MANIFEST.json for pre-split
+// entries, not the whole union.
 export function isFresh(hours = FRESH_WINDOW_HOURS): boolean {
-  const all = readManifest();
-  const newest = all[0];
+  const candidates: BackupSummary[] = [];
+  try {
+    const own = parseManifestText(path.join(BACKUP_REPO, "manifests", `${getDeviceId()}.json`));
+    if (own[0]) candidates.push(coerceSummary(own[0]));
+  } catch {
+    /* no own manifest yet */
+  }
+  const legacyFirstLocal = parseManifestText(path.join(BACKUP_REPO, "MANIFEST.json"))
+    .map(coerceSummary)
+    .find(isLocalEntry);
+  if (legacyFirstLocal) candidates.push(legacyFirstLocal);
+  const newest = candidates.filter(isLocalEntry).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   if (!newest || !newest.createdAt) return false;
   const t = new Date(newest.createdAt).getTime();
   if (!Number.isFinite(t)) return false;
@@ -707,6 +846,8 @@ export function isLiveBoard(): boolean {
 //   0     -> {ran, ok:true,  pushed:true}   (encrypted snapshot written + pushed)
 //   2     -> {ran, ok:true,  pushed:false}  (committed LOCALLY only — still a SUCCESS)
 //   3     -> {ran:false, skipped:'busy'}    (single-flight lock held — a benign skip, no run)
+//   4     -> {ran:false, skipped:'lease-held-elsewhere'} (another device holds the hub
+//            lease — this machine must not produce; benign on a demoted/soaking machine)
 //   other -> {ran, ok:false, code}          (a real failure)
 // A spawn failure / timeout (no numeric exit code) is mapped to code 1 (a failure).
 // Rejection is impossible (resolve-only).
@@ -732,6 +873,10 @@ function runBackup(): Promise<RunResult> {
           // backup.mjs exits 3 when the single-flight lock is held by another run — a
           // benign skip (no new snapshot taken), surfaced as "busy", NOT a failure.
           resolve({ ran: false, skipped: "busy" });
+        } else if (code === 4) {
+          // Exit 4: the HUB.json lease names another device — this machine must not
+          // produce (a demoted old hub, or a soaking new one). Benign, not a failure.
+          resolve({ ran: false, skipped: "lease-held-elsewhere" });
         } else {
           resolve({ ran: true, ok: false, code });
         }
