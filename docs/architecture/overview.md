@@ -119,8 +119,10 @@ predictable.
 
 - **Local-first & private.** Your vault, board data, voice transcripts, and trust store live in local
   files that are **gitignored and never committed**. Cos only reaches the services you explicitly wire
-  (Anthropic for the model; Gmail / Calendar / WhatsApp if you connect them). The only thing that
-  leaves your machine is the **encrypted** backup blob.
+  (Anthropic for the model; Gmail / Calendar / WhatsApp if you connect them). What leaves your machine
+  is the **encrypted** backup blob — and, if you run [multi-device](multi-device.md), your board traffic
+  to the hub over your **private Tailscale network** (WireGuard-encrypted, tailnet-only via
+  `tailscale serve` — never exposed to the public internet).
 - **The single seam.** The board's **HTTP API is the one and only write path**. The UI is the human
   face of it; the board MCP is the agent's twin. Both write through the same routes, so there is no
   back door and no divergent logic. (The vault, symmetrically, is **knowledge-only** — its MCP has no
