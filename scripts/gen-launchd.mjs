@@ -34,17 +34,18 @@ const ROLE = currentRole()
 // bridges are spawned through node with the loopback preload, which pins host-less
 // listen() calls to 127.0.0.1. That needs the dist entrypoint, not the bin shim:
 // resolve the symlink (npm global bins symlink to dist/index.js), falling back to
-// the conventional global-module path.
+// the conventional global-module path. Generation is a PURE TEXT step — it bakes a
+// path the launchd agent resolves at LOAD time on the target machine — so this never
+// requires the file to exist HERE (a machine without supergateway can still render or
+// inspect plists, and CI has none). It just resolves the best path deterministically.
 function supergatewayDist() {
   try {
     const real = realpathSync(SUPERGATEWAY_BIN)
     if (real.endsWith('.js') || real.endsWith('.mjs') || real.endsWith('.cjs')) return real
   } catch {
-    /* bin missing/odd — fall through to the conventional path */
+    /* bin missing/odd here — fall through to the conventional npm-global path */
   }
-  const fallback = `${BREW_PREFIX}/lib/node_modules/supergateway/dist/index.js`
-  if (existsSync(fallback)) return fallback
-  return null // not found — programArguments throws only if a BRIDGE is actually rendered
+  return `${BREW_PREFIX}/lib/node_modules/supergateway/dist/index.js`
 }
 const SUPERGATEWAY_DIST = supergatewayDist()
 const LOOPBACK_PRELOAD = join(REPO_ROOT, 'scripts', 'loopback-bind.cjs')
@@ -67,14 +68,6 @@ function programArguments(e) {
     // supergateway fronts the stdio command as Streamable HTTP on the bridge port at /mcp,
     // spawned through node with the loopback preload so the bridge listens on 127.0.0.1
     // ONLY (supergateway has no bind-host option; unpinned it serves every interface).
-    if (!SUPERGATEWAY_DIST) {
-      process.stderr.write(
-        `[gen-launchd] supergateway not found — tried realpath(${SUPERGATEWAY_BIN}) and ` +
-          `${BREW_PREFIX}/lib/node_modules/supergateway/dist/index.js. Install it (\`npm i -g supergateway\`) ` +
-          `or set SUPERGATEWAY_BIN in config/cos.env, then re-run.\n`,
-      )
-      process.exit(1)
-    }
     return supergatewayArgv({ nodeBin: NODE_BIN, preloadPath: LOOPBACK_PRELOAD, distPath: SUPERGATEWAY_DIST, entry: e })
   }
   if (e.runtime === 'uvicorn') {

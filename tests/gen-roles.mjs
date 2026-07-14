@@ -80,6 +80,15 @@ async function main() {
   check(/com\.chiefofstaff\.backup</.test(r.out), "backup plist uses the historical label");
   r = run("node", ["scripts/gen-launchd.mjs", "--print", "boardapp"]);
   check(r.code === 0 && /boardapp-run\.mjs/.test(r.out) && /KeepAlive/.test(r.out), "boardapp plist runs the build-then-start entry under KeepAlive");
+  // Generation must NOT require supergateway to be installed HERE (it's a pure text step;
+  // the plist resolves the path at launchd-load time on the target machine, and CI has no
+  // supergateway). Force the resolver to miss and assert it still renders the conventional
+  // dist path — this is the exact condition that only shows up when supergateway is ABSENT.
+  r = run("node", ["scripts/gen-launchd.mjs", "--print", "board"], { SUPERGATEWAY_BIN: "/nonexistent/supergateway" });
+  check(
+    r.code === 0 && /supergateway\/dist\/index\.js/.test(r.out),
+    "a bridge plist still renders when supergateway is NOT installed (generation never requires the binary)",
+  );
 
   // ── [3] role scoping in gen-launchd ────────────────────────────────────────
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "cos-gen-roles-"));
