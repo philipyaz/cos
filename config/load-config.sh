@@ -144,8 +144,14 @@ export NUTRITION_BRIDGE_PORT NUTRITION_BRIDGE_URL
 export FITNESS_BRIDGE_PORT FITNESS_BRIDGE_URL
 export BODY_BRIDGE_PORT BODY_BRIDGE_URL
 export COS_DEVICE_ROLE
-# COS_DEVICE_ID has NO default here (setup mints it; backup tooling falls back to a
-# sanitized hostname) — export it only when the machine actually configured one.
-# (An `if`, not `[ ] &&`: this is the file's last statement, and a bare failed test
-# would make the whole `source` report a non-zero status — fatal under set -e.)
+# These have NO default (they only exist on a configured machine) — export each only
+# when set. COS_DEVICE_ID: the stable per-machine id (setup mints it; backup tooling
+# falls back to a sanitized hostname). COS_HUB_PUBLIC_URL: the hub's externally-
+# reachable URL (the `tailscale serve` MagicDNS name) — HUB-side only, so the Devices
+# UI can emit a cos-join:// blob for a new spoke. BACKUP_REPO_REF: the private backup
+# repo ref (e.g. owner/cos-backups) a warm-standby spoke may clone — carried in the blob.
+# (Trailing `if`s, not `[ ] &&`: a bare failed test as the file's last statement would
+# make the whole `source` report non-zero — fatal under set -e.)
 if [ -n "${COS_DEVICE_ID:-}" ]; then export COS_DEVICE_ID; fi
+if [ -n "${COS_HUB_PUBLIC_URL:-}" ]; then export COS_HUB_PUBLIC_URL; fi
+if [ -n "${BACKUP_REPO_REF:-}" ]; then export BACKUP_REPO_REF; fi

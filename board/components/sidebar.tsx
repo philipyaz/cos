@@ -153,6 +153,7 @@ export function Sidebar({
     { href: "/trash", label: "Trash", icon: <IconTrash /> },
     { href: "/security", label: "Security", icon: <IconShield /> },
     { href: "/backups", label: "Backups", icon: <IconArchive /> },
+    { href: "/devices", label: "Devices", icon: <IconBolt /> },
   ];
 
   return (

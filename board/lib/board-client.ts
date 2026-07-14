@@ -27,6 +27,7 @@ import type {
   GuardDeps,
   ModelPresetView,
   BackupStatus,
+  DeviceStatus,
   VaultStatus,
 } from "./types";
 import type { TreeNode } from "./selectors";
@@ -933,6 +934,15 @@ export function triggerBackup(force = false): Promise<TriggerBackupResult> {
 // backups convention — distinct module).
 export function fetchVaultStatus(): Promise<VaultStatus> {
   return request<VaultStatus>("/api/vault/status");
+}
+
+// ── Devices surface (multi-device presence) ───────────────────────────────────
+// This machine's role/id + the hub lease + the known-devices last-seen list + the
+// cos-join:// blob. Read from the board's /api/devices route (server-only reader
+// lib/devices.ts). Always-200 fail-safe; the Devices view refetches imperatively
+// (like Backups/Vault — the last-seen data has no SSE version to key on).
+export function fetchDeviceStatus(): Promise<DeviceStatus> {
+  return request<DeviceStatus>("/api/devices");
 }
 
 // ── Live connection status ────────────────────────────────────────────────────

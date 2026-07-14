@@ -162,6 +162,12 @@
 #      (GET /api/healthz): 200 {ok:true}, role defaults to hub, deviceId slug,
 #      code schemaVersion vs raw diskSchemaVersion with degradedRead === disk>code,
 #      appVersion, lease null-or-well-formed. Read-only (net-zero).
+#  13d3. api-devices — ONLY if a board is running: the multi-device Devices surface
+#      (GET /api/devices): the identity envelope (role/deviceId/schemaVersion/
+#      leaseStaleHours), the x-device ephemeral last-seen tracker (a header registers +
+#      bumps a device, a header-less request invents nothing, a malformed id is
+#      sanitized, a write path records via resolveActor), and the null join blob when
+#      COS_HUB_PUBLIC_URL is unset. In-memory + read-only (net-zero).
 #  13e. backup-hardening — hermetic multi-producer backup pipeline test (NO board,
 #      NO Keychain, NO network, NO live data: synthetic repo-root skeleton + a local
 #      BARE git "remote" + per-device clones in a mktemp sandbox, HOME sandboxed).
@@ -1040,6 +1046,23 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-healthz: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-healthz"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 13d3. api-devices (only when a board is healthy) ------------------------
+# The multi-device Devices surface (GET /api/devices + the x-device ephemeral
+# last-seen tracker + the join blob). Read-only / in-memory — net-zero.
+echo
+echo "--- [13d3] api-devices (sandbox board) ----------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-devices.mjs"; then
+    echo "api-devices: PASS"
+  else
+    echo "api-devices: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-devices"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
