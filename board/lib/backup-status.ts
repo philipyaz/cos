@@ -35,6 +35,7 @@ import {
   type BackupOverall,
   type BackupCheck,
   type BackupRepoSource,
+  type HubLease,
 } from "./types";
 
 // ── Local path re-derivation (validated anchor) ───────────────────────────────
@@ -133,13 +134,10 @@ function isLocalEntry(s: BackupSummary): boolean {
 // keep the constant + field coercion in lockstep with it.
 export const LEASE_STALE_HOURS = 26;
 
-export interface HubLease {
-  deviceId: string;
-  host: string | null;
-  epoch: number;
-  renewedAt: string;
-  stale: boolean; // renewedAt older than LEASE_STALE_HOURS (or unparseable)
-}
+// HubLease is defined in ./types (the canonical home) so the Devices envelope can
+// reference it without a circular import; re-exported so existing importers of
+// `HubLease` from backup-status keep working.
+export type { HubLease };
 
 // Fail-safe read of the local clone's HUB.json (null = no lease / no repo /
 // garbage file — the multi-device tripwires simply aren't armed).

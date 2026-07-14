@@ -17,6 +17,7 @@
 // v3 toolset (the full case / task / message lifecycle + board ops):
 //   reads   : get_case, search, list_templates, list_pending, list_labels,
 //             list_label_bundles, get_tree, list_initiatives
+//   devices : get_device_status (multi-device: role / lease / last-seen)
 //   case    : create_case, update_case, update_cases (bulk), archive_case,
 //             restore_case, delete_case (soft → Trash), apply_template
 //   hierarchy: create_initiative, create_workstream, set_parent, regroup_cases
@@ -1068,6 +1069,39 @@ function starredLine(c) {
   return `${c.id} [${tier}] ${c.title}` + (kind === "case" && c.status ? ` — ${c.status}` : "");
 }
 
+async function handleGetDeviceStatus() {
+  const { data, errorResult } = await api("GET", "/api/devices");
+  if (errorResult) return errorResult;
+
+  const lines = [`This machine: ${data.deviceId} (${data.role}), code schema v${data.schemaVersion}`];
+
+  if (data.lease) {
+    const who = data.lease.deviceId === data.deviceId ? `${data.lease.deviceId} (THIS machine)` : data.lease.deviceId;
+    lines.push(
+      `Hub lease: held by ${who}${data.lease.stale ? " — STALE (claimable)" : ""} ` +
+        `(epoch ${data.lease.epoch}, renewed ${data.lease.renewedAt})`,
+    );
+  } else {
+    lines.push("Hub lease: not armed (single-machine setup, or backup repo not configured).");
+  }
+
+  const devices = data.devices ?? [];
+  if (devices.length) {
+    lines.push(`\nDevices seen (${devices.length}, agent last-seen):`);
+    for (const d of devices) {
+      const tags = [d.deviceId === data.deviceId ? "this" : null, d.deviceId === data.lease?.deviceId ? "hub" : d.role]
+        .filter(Boolean)
+        .join(", ");
+      lines.push(`  ${d.deviceId}${tags ? ` [${tags}]` : ""} — last seen ${d.lastSeen}`);
+    }
+  } else {
+    lines.push("\nNo other devices seen yet.");
+  }
+
+  if (data.joinBlob) lines.push(`\nAdd a device (paste into spoke-setup): ${data.joinBlob}`);
+  return text(lines.join("\n"));
+}
+
 async function handleGetPriorities() {
   const { data, errorResult } = await api("GET", "/api/priorities");
   if (errorResult) return errorResult;
@@ -1444,6 +1478,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleUpdateReminder(args, { linkOnly: true });
     case "link_reminder_message":
       return handleLinkReminderMessage(args);
+    // priorities
+    // devices (multi-device status)
+    case "get_device_status":
+      return handleGetDeviceStatus();
     // priorities
     case "get_priorities":
       return handleGetPriorities();

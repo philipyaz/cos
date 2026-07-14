@@ -46,6 +46,13 @@ args.
 
 ### Reads
 
+#### `get_device_status()`
+`GET /api/devices`. This deployment's multi-device status: which machine this board is
+(device id + role `hub`/`spoke`), whether its code schema matches the store on disk (the
+drift handshake), who holds the HUB lease (the one machine allowed to produce backups),
+and which other devices' agents have recently touched this board (ephemeral last-seen).
+Read-only. Answers "which machine am I on / is this the hub / is my code in sync".
+
 #### `get_case(id)`
 `GET /api/cases/{id}`. Loads a case's current state. Returns the case fields — including
 **`domain`**, **`priority`**, **`dueAt`**, **`archivedAt`**, **`snoozeUntil`**, and linked

@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { DATA_FILE, rawSchemaVersionOf } from "@/lib/store";
 import { SCHEMA_VERSION } from "@/lib/types";
 import { getDeviceRole, getDeviceId } from "@/lib/cos-env";
 import { readHubLease } from "@/lib/backup-status";
+import { recordDevice } from "@/lib/devices";
 
 // GET /api/healthz — the machine-identity handshake (multi-device). One cheap,
 // FAIL-SAFE read that answers: who are you (deviceId/role/appVersion), what
@@ -42,7 +43,10 @@ async function diskSchema(): Promise<number | null> {
   }
 }
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  // A spoke polling the hub's healthz carries its x-device header — record it so the
+  // hub's Devices list sees the spoke (healthz is the spoke chip's poll target).
+  recordDevice(req);
   const onDiskSchema = await diskSchema();
   return NextResponse.json({
     ok: true,
