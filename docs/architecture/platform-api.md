@@ -57,9 +57,12 @@ for free:
   stamped with a stale version raises `VersionConflictError`, which the shared route helper maps
   to **HTTP 409** — the UI can refetch and retry rather than clobber an intervening change.
 
-!!! note "Live data never leaves the machine"
+!!! note "Your board is never committed to git"
     `cases.json` and its snapshots are gitignored and never committed — the local-first,
-    private-by-default tenet. The committed store is empty; your board is yours.
+    private-by-default tenet. The committed store is empty; your board is yours. (What *does*
+    leave the machine, only if you opt in: the **encrypted** off-site backup blob, and — under
+    [multi-device](multi-device.md) — your board traffic to the hub over your private,
+    WireGuard-encrypted Tailscale network, never the public internet.)
 
 ### SSE live-refresh keeps every surface honest
 

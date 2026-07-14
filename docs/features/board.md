@@ -318,7 +318,11 @@ The foundation that makes agent-native real and keeps the JSON store trustworthy
 | Responsive / PWA | Mobile layout; installable; read-first offline | Triage from a phone | Responsive pass; service worker | P2 | L |
 | Dark mode | Theme toggle | Long sessions / preference | CSS vars + toggle | P3 | S |
 
-_Out of scope (critic): **auth/login** (single-user local; OS-level security suffices), **multi-device real-time sync / cloud DB** (revisit only at device #2 — keep the swappable store seam), **collaborative/multi-user** (single-user by design; no collaborator accounts)._
+_Out of scope (critic): **auth/login** (single-user local; OS-level security suffices — a spoke's
+reach is gated by the tailnet, not an app login), **collaborative/multi-user** (single-user by design;
+no collaborator accounts). **Multi-device** is now IN scope and shipped as **hub & spoke** — not
+real-time sync / a cloud DB, but a single hub store with stateless clients over Tailscale (the store
+seam stayed swappable and we chose not to swap it); see [Multi-device](../architecture/multi-device.md)._
 
 ## Phased roadmap
 
@@ -348,7 +352,7 @@ If only one slice ships, ship this (the critic's top-leverage set, all Phase 0�
 With the one-line reason each:
 
 - **Auth / login / accounts** — single-user local product; OS-level security is the boundary.
-- **Multi-device real-time sync / cloud DB** — revisit only when a second device appears; keep the store seam swappable until then.
+- **Multi-device** — DECIDED (device #2 arrived): **hub & spoke**, not real-time sync / a cloud DB. The single store stays on the hub; other machines are stateless Tailscale clients. See [Multi-device](../architecture/multi-device.md).
 - **Collaborative / multi-user** — single-user by design; no collaborator accounts, no identity system.
 - **Generic public/3rd-party API** — one local webhook into the router is the only inbound extension; a real API implies the auth/multi-tenant the product rejects.
 - **Heavy client state libs / SPA rewrite** — keep SSR + light client interactivity; don't trade local-first simplicity for a framework.

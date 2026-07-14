@@ -131,17 +131,11 @@ nav:
       - Reminders: features/reminders.md
       - Priorities: features/priorities.md
       - Unanswered messages: features/unanswered-messages.md
-  - Security:
-      - Prompt-injection guard: security/guard.md
-  - Features:
-      - Board: features/board.md
-      - Calendar: features/calendar.md
-      - Reminders: features/reminders.md
-      - Priorities: features/priorities.md
-      - Activity: features/activity.md
       - Body: features/body.md
       - Nutrition & Chef: features/nutrition.md
       - Fitness: features/fitness.md
+  - Security:
+      - Prompt-injection guard: security/guard.md
   - Subsystems:
       - Semantic search: reference/search.md
       - Encrypted backup: reference/backup.md

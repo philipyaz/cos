@@ -189,7 +189,9 @@ The job is **done** when every component below holds and the end-to-end acceptan
 - [ ] Cases carry a **`work | life` domain** (mirrors the vault's split) so the board is the single to-do surface for *both* sides of life, filterable by domain.
 - [ ] Board MCP exposes the **full lifecycle**, not just create/get: `create_case`, `get_case`, `update_case` (fields + lane move), `add_task` / `update_task` / `complete_task`, `link_message`. *(Required so the board can be "automatically updated with new or modified tasks.")*
 - [ ] Cases link to vault context (entity / concept / source).
-- [ ] Board persistence durability across devices decided (durable store vs accepted single-machine).
+- [x] Board persistence durability across devices decided — **hub & spoke** (the single file-backed
+      store stays on the hub; other machines are stateless clients over Tailscale, not a synced/durable
+      store). See [Multi-device](multi-device.md).
 
 **C. Channel bridges**
 - [ ] **OpenWhispr local MCP** built: `list_transcripts`, `get_transcript`, and a **processed-watermark** so the loop is idempotent. Modeled on `create-case-server`; sandbox-bridged.

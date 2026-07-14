@@ -66,18 +66,22 @@ on your own machine only if you no longer want them.)
 
 ## Board persistence — durability decision
 
-**Decision: accept single-machine durability for now.** The board persists to a **single JSON file**,
-`board/data/cases.json` (read/written by `board/lib/store.ts` at `process.cwd()/data/cases.json`). This
-is the simplest durable store for a local-first, single-machine product and is good enough today.
+**Decision: single-machine durability — the settled choice.** The board persists to a **single JSON
+file**, `board/data/cases.json` (read/written by `board/lib/store.ts` at `process.cwd()/data/cases.json`).
+This is the simplest durable store for a local-first product, and multi-device did NOT change it — it
+stays one store on the hub (see the resolved multi-device note below).
 
-**Trade-off accepted:** the data is local to one machine and is not multi-device synced; concurrent
+**Trade-off accepted:** the store lives on one machine (the hub) and is not multi-device *synced* —
+other machines are stateless clients, not replicas; concurrent
 writers are not coordinated beyond the single Next.js process.
 
-**Upgrade path (if/when multi-device is needed):** swap the file-backed store in `board/lib/store.ts`
-for a **durable store** (e.g. SQLite/Postgres) or place `cases.json` in a **synced location** (an
-iCloud/Dropbox-backed path, or the same git auto-sync pattern the vault uses). The HTTP API and case
-model stay the same; only the store implementation changes. Revisit this when a second device enters
-the picture.
+**Multi-device — decided: hub & spoke (not a synced store).** When the second device arrived, the
+answer was **not** to swap the store for SQLite/Postgres or a synced `cases.json` — every such design
+inherits merge conflicts and schema skew between two live stores. Instead the single file-backed store
+**stays on one machine (the hub)**, and other machines are **spokes**: stateless clients whose
+board-facing wrappers point at the hub's `BOARD_URL` over a private Tailscale network. Nothing syncs
+because there is nothing to sync. The store implementation is unchanged; the HTTP API is the seam that
+already made this possible. See [Multi-device (hub & spoke)](../architecture/multi-device.md).
 
 ## Store schema versions (`schemaVersion`)
 
