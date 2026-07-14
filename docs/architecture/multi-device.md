@@ -8,10 +8,9 @@ its browser and its board-facing wrappers talk to the hub's HTTP API over a priv
 [Tailscale](https://tailscale.com) network. Nothing syncs, because there is nothing to sync; the
 single store is the single source of truth.
 
-!!! note "Status"
-    This page documents the mechanics that have landed (roles, the store guard, the hub lease, the
-    Devices surface, `spoke-setup`). The full runbook — the migration ceremony and the `hub-handover`
-    skill — arrives with the final multi-device change.
+The whole design is one decision — **don't sync; keep one store and reach it.** A hub failure or a
+planned migration is handled by moving the *role*, not by reconciling two stores (see
+[Moving the hub role](#moving-the-hub-role) below).
 
 ## Roles
 
@@ -67,8 +66,20 @@ backup-repo ref, **addresses and expectations, no secrets**. On the new machine,
 and paste it. `cos-setup` asks "first machine, or joining?" up front and routes a join to `spoke-setup`,
 structurally skipping the board-seed step (which must never run on a machine with no local store).
 
+## Moving the hub role
+
+There is no failover to coordinate because there is no second store — a hub swap moves the **role**.
+The `hub-handover` skill is the data-safe ceremony: soak the new machine as a restore-hydrated hub
+while the old one stays authoritative; at cutover **stop the old board *before* the final backup** (so
+no write is stranded), restore the old hub's final snapshot on the new machine (producer-aware, no
+board answering, schema ≥ the snapshot), claim the lease, then demote the old machine to a spoke and
+diff its archived store against the final snapshot (any late write is quarantined, never lost). The
+same skill covers unplanned failover onto a warm-standby machine. The single irreversible hazard —
+running old code against a newer store — is blocked structurally by the
+[fail-closed schema guard](../reference/migration.md#store-schema-versions-schemaversion).
+
 ## Related
 
 - [Backups](../reference/backup.md) — per-device manifests, producer admission, the hub lease.
 - [Migration notes](../reference/migration.md) — the fail-closed schema guard (code ≥ store).
-- `spoke-setup`, `cos-setup`, `backup-recovery` skills (in `.claude/skills/`).
+- `spoke-setup`, `hub-handover`, `cos-setup`, `backup-recovery` skills (in `.claude/skills/`).

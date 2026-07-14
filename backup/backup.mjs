@@ -12,6 +12,9 @@
 //   3 = benign lock-skip (run in flight)  4 = benign lease skip (another device is
 //                                             the hub; state quarantined once)
 //   1/other = hard failure
+//
+// Flags: --claim  the hub-handover takeover — claim the lease (epoch bump) even when
+//                 a FRESH lease is held elsewhere, then produce as the new hub.
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -285,7 +288,12 @@ function readAuthoritativeLease(fetchOk, upstream) {
 //   action 'claim'   → take over a stale/absent lease (epoch bump) — write HUB.json.
 //   action 'renew'   → we already hold it; write only if the stamp is stale enough.
 //   action 'none'    → we hold it and it is fresh; leave HUB.json untouched.
-function evaluateLease(fetchOk) {
+// `force` (the --claim / hub-handover takeover) claims even a FRESH foreign lease —
+// the explicit operator action that transfers the hub role at cutover, when the old
+// hub's lease is still fresh (renewed minutes ago by its final backup). Safe because
+// the ceremony has the old hub stopped + its backup agent booted out first; the
+// convergent CAS push still resolves any residual race.
+function evaluateLease(fetchOk, force = false) {
   let upstream = null;
   try {
     upstream = sh("git", ["-C", BACKUP_REPO, "rev-parse", "--abbrev-ref", "@{u}"]).trim();
@@ -294,15 +302,19 @@ function evaluateLease(fetchOk) {
   }
   const lease = readAuthoritativeLease(fetchOk, upstream);
 
-  if (lease && lease.deviceId !== DEVICE_ID && !leaseIsStale(lease)) {
+  if (!force && lease && lease.deviceId !== DEVICE_ID && !leaseIsStale(lease)) {
     return { mayProduce: false, heldBy: lease, action: "none" };
   }
   if (!lease || lease.deviceId !== DEVICE_ID) {
-    // Absent, or a STALE lease held by another device → we take over. When
-    // offline we still take over LOCALLY (the data deserves a snapshot); the
-    // convergent push either lands the claim or degrades to exit 2, and the next
-    // online run reconciles — no fabricated remote authority, no force-push.
-    if (lease) log(`lease: taking over a STALE lease from ${lease.deviceId} (last renewed ${lease.renewedAt}).`);
+    // Absent, or a STALE lease held by another device (or ANY foreign lease under
+    // --claim) → we take over. When offline we still take over LOCALLY (the data
+    // deserves a snapshot); the convergent push either lands the claim or degrades
+    // to exit 2, and the next online run reconciles — no fabricated remote
+    // authority, no force-push.
+    if (lease) {
+      const why = force && !leaseIsStale(lease) ? "FORCED takeover (--claim) of the fresh lease from" : "taking over a STALE lease from";
+      log(`lease: ${why} ${lease.deviceId} (last renewed ${lease.renewedAt}).`);
+    }
     return { mayProduce: true, heldBy: lease, action: "claim" };
   }
   // We already hold it — renew only when the stamp is old enough (avoid a commit
@@ -412,8 +424,11 @@ function runBackup() {
   assertProducerAdmission(key, fetchOk);
 
   // The hub lease: exactly one producer. A fresh lease held by another device
-  // stops this run cold (exit 4, after quarantining any changed local state).
-  const lease = evaluateLease(fetchOk);
+  // stops this run cold (exit 4, after quarantining any changed local state) —
+  // UNLESS --claim (the hub-handover takeover): then we claim it (epoch bump) and
+  // produce, transferring the hub role to THIS machine.
+  const forceClaim = process.argv.includes("--claim");
+  const lease = evaluateLease(fetchOk, forceClaim);
   if (!lease.mayProduce) {
     // Make the LOCAL HUB.json reflect the true (remote) holder, so this machine's
     // board /api/healthz stops reporting ITSELF as hub after demotion.
