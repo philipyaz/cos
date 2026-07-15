@@ -120,6 +120,7 @@ nav:
       - The vault agent: architecture/vault-agent.md
       - Triage skills: architecture/triage-skills.md
       - MCP servers: architecture/mcp-servers.md
+      - Multi-device (hub & spoke): architecture/hub-spoke.md
       - Platform API: architecture/platform-api.md
       - Add-ons: architecture/addons.md
       - Case hierarchy: architecture/hierarchy.md
