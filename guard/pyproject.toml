@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 # heuristic (pure-regex, no torch, no network), so the engine never touches the model.
 dependencies = [
   "fastapi>=0.139.0",
-  "uvicorn>=0.29",
+  "uvicorn>=0.51.0",
 ]
 
 [project.optional-dependencies]
