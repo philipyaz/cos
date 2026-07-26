@@ -63,7 +63,10 @@ node "$REPO_ROOT/backup/restore.mjs" --device <old-hub-id>  # DRY RUN: auth tag 
 Then `--apply` it **with no board running** (`restore.mjs` refuses `--apply` while anything answers on
 `$BOARD_URL` — that guard is the point). First board boot migrates the store on read (code ≥ store =
 the safe direction). Wire guard/mcp-bridge/add-ons, fresh WhatsApp QR (session DBs are non-portable),
-and `tailscale serve --bg 3000`.
+and — since this machine now serves other devices over the tailnet proxy — run the **production** board
+here (`cd board && npm run build && npm run start`, or install the `boardapp` LaunchAgent), **not**
+`next dev` (whose on-demand compilation + lazy chunks are unreliable behind a reverse proxy — the page
+loads but opening a case can silently fail for a remote browser), behind `tailscale serve --bg 3000`.
 
 **CHECKPOINT** — the new machine's board shows the right case counts + add-on nav + a working vault
 query, and an SSE stream stays open >10 min over the tailnet. **Treat it as read-mostly**: any writes

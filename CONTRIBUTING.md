@@ -11,7 +11,7 @@ that clarity, keep your data yours, and respect the human-in-the-loop are exactl
 
 Everything lives in one monorepo. The fuller tour is in [`README.md`](./README.md); the short version:
 
-- **`board/`** — the **Board**: a Next.js 15 app (App Router, React 19, Tailwind) and the writable
+- **`board/`** — the **Board**: a Next.js 16 app (App Router, React 19, Tailwind) and the writable
   kanban of what's left to do. UI under `app/` + `components/`, pure logic in `lib/`, the HTTP API
   under `app/api/`, persistence in `data/cases.json` (a single JSON file).
 - **`vault/`** — the **Vault**: your second brain, a compounding context fingerprint, local-first.
@@ -23,8 +23,9 @@ Everything lives in one monorepo. The fuller tour is in [`README.md`](./README.m
 - **`mcp/`** — the local stdio **MCP servers** (`board` · `openwhispr` · `calendar` · `guard` · `vault`)
   that expose it all to agents, plus the shared `packages/mcp-kit` helper.
 - **`config/`** — machine config, split by concern: `cos.env` (paths/ports), `secrets.env` (the API
-  key), `settings.json` (board prefs), `auto-sync.json` (router switch). Only the `*.example` files
-  are committed. Every shell step sources `config/load-config.sh` first.
+  key), `settings.json` (board prefs), `auto-sync.json` (router switch). The loaders, `auto-sync.json`,
+  and the `*.example` files are committed — the live `cos.env`/`secrets.env`/`settings.json` are
+  gitignored. Every shell step sources `config/load-config.sh` first.
 - **`tests/`** — golden fixtures + invariants (see below).
 - **`.claude/skills/`** — the setup skills that stand the system up.
 
