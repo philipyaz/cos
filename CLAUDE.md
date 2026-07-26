@@ -17,6 +17,18 @@ sidecar ports + URLs, etc.) so nothing is hardcoded. The `config/` dir splits by
 (machine paths/ports, gitignored), `secrets.env` (the Anthropic API key), `settings.json` (board prefs),
 and `auto-sync.json` (router switch); only the `*.example` files are committed.
 
+**Multi-device — one hub, thin spokes.** Cos is multi-device via **hub & spoke**: ONE machine (the
+*hub*) runs the board and owns all state; every other device reaches it over **Tailscale**. To just
+**VIEW/use** the board from another device you need *nothing* on that device — the hub runs the
+**production** board (`cd board && npm run build && npm run start`, or the `boardapp` LaunchAgent —
+never `next dev` behind a proxy) behind `tailscale serve --bg 3000`, and any tailnet device opens the
+**portless** `https://<hub>.<tailnet>.ts.net` in a browser (full read/write UI — the browser writes
+through the same HTTP API). You add a **spoke** (`spoke-setup` — the thin local stdio MCP wrappers
+pointed at the hub's `BOARD_URL`) ONLY when you also want **agents** (Claude Code/Cowork) to drive the
+board *from that machine*, since Cowork accepts only **local stdio** MCP servers (not a remote HTTP MCP
+over the tailnet). Move the hub role to a different machine with `hub-handover` (the old one stays a
+browser viewer, needing no spoke). Full runbook: `docs/architecture/multi-device.md`.
+
 ## Architecture philosophy — Cos is a state machine; agents are the intelligence
 
 Internalise this before you build anything. **Every component — the `board/` and every add-on —
