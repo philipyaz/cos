@@ -425,6 +425,20 @@ const REMOVE_MEAL_PLAN_TOOL = {
   },
 };
 
+const GET_NUTRITION_STATUS_TOOL = {
+  name: "get_nutrition_status",
+  description:
+    "The deterministic RECONCILIATION status — `GET /api/nutrition/status`. Read-only, UNGATED " +
+    "(works even if the add-on is disabled). This is the read `/nutrition-chef` runs FIRST, on " +
+    "every invocation, before any planning: `stalePlannedMeals` (past-dated 'planned' meal-plan " +
+    "entries — count/oldest/ids), `provablyCooked` (the subset with a same-date+slot food-log " +
+    "entry naming their MEAL-<n> id — the auto-closeable set), `daysSinceLastFoodLog`, " +
+    "`daysSinceLastPantryWrite`, `expiredPantryItems`, and `hasNutritionTargets` + " +
+    "`daysSinceLastTargets`. Everything is computed fresh from existing records on every call — " +
+    "nothing is stored here.",
+  inputSchema: { type: "object", properties: {} },
+};
+
 const GET_NUTRITION_TARGETS_TOOL = {
   name: "get_nutrition_targets",
   description:
@@ -511,6 +525,7 @@ const LIST_NUTRITION_TARGETS_TOOL = {
 
 const TOOLS = [
   // reads
+  GET_NUTRITION_STATUS_TOOL,
   LIST_FOOD_LOG_TOOL,
   GET_FOOD_LOG_TOOL,
   READ_PANTRY_TOOL,
@@ -671,6 +686,43 @@ async function handleGetFoodLog(args) {
   if (e.health) lines.push(`Health: ${e.health}`);
   lines.push(`Estimated: ${e.estimated ? "yes (the calorie count is a guess)" : "no (measured)"}`);
   if (e.note) lines.push(`Note: ${e.note}`);
+  return text(lines.join("\n"));
+}
+
+async function handleGetNutritionStatus() {
+  const { data, errorResult } = await api("GET", "/api/nutrition/status");
+  if (errorResult) return errorResult;
+  const s = data;
+  const lines = ["Nutrition status:"];
+
+  const stale = s.stalePlannedMeals ?? { count: 0, ids: [] };
+  if (stale.count === 0) {
+    lines.push("Meal plan: clean — no stale planned meals.");
+  } else {
+    const age = stale.oldestAgeDays;
+    lines.push(
+      `Stale planned meals: ${stale.count} (oldest ${stale.oldestDate}, ${age} day${age === 1 ? "" : "s"} ago) — ${stale.ids.join(", ")}`,
+    );
+  }
+
+  const proven = s.provablyCooked ?? { count: 0, matches: [] };
+  if (proven.count > 0) {
+    lines.push(`Provably cooked (a matching food log proves these): ${proven.count}`);
+    for (const m of proven.matches) lines.push(`  - ${m.mealId} ← ${m.foodLogId}`);
+  }
+
+  lines.push(`Days since last food log: ${s.daysSinceLastFoodLog ?? "never"}`);
+  lines.push(`Days since last pantry write: ${s.daysSinceLastPantryWrite ?? "never"}`);
+
+  const expired = s.expiredPantryItems ?? { count: 0, ids: [] };
+  lines.push(`Expired pantry items: ${expired.count}${expired.count ? ` — ${expired.ids.join(", ")}` : ""}`);
+
+  if (!s.hasNutritionTargets) {
+    lines.push("No nutrition targets have EVER been set — author them via save_nutrition_targets.");
+  } else {
+    lines.push(`Days since last nutrition targets: ${s.daysSinceLastTargets}`);
+  }
+
   return text(lines.join("\n"));
 }
 
@@ -1196,6 +1248,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const args = request.params.arguments ?? {};
   switch (request.params.name) {
     // reads
+    case "get_nutrition_status":
+      return handleGetNutritionStatus(args);
     case "list_food_log":
       return handleListFoodLog(args);
     case "get_food_log":

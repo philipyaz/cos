@@ -105,6 +105,16 @@ only — not medical advice.
 
 ### Reads
 
+#### `get_nutrition_status()`
+`GET /api/nutrition/status`. Read-only, **UNGATED** (works even if the add-on is disabled). The
+deterministic RECONCILIATION status — the read `/nutrition-chef` runs FIRST, on every invocation,
+before any planning. Returns `stalePlannedMeals` (past-dated `planned` meal-plan entries — count,
+oldest date/age, ids), `provablyCooked` (the subset with a same-date+slot food-log entry naming
+their `MEAL-<n>` id — the auto-closeable set), `daysSinceLastFoodLog`, `daysSinceLastPantryWrite`,
+`expiredPantryItems`, and `hasNutritionTargets` + `daysSinceLastTargets`. Nothing here is stored —
+every field is recomputed fresh from the food log, pantry, meal plan, and targets already on the
+board.
+
 #### `list_food_log([from], [to], [slot], [date])`
 `GET /api/nutrition/log`. Lists entries **grouped by day** with a **per-day calorie rollup**,
 one line per entry (slot · description · kcal · macros · health · ~est). Read-only (works even
