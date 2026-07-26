@@ -100,3 +100,19 @@ export interface GuardrailFlag {
   level: GuardrailLevel;
   message: string;
 }
+
+// ── Pantry name normalisation (v14 bulk-reconcile upsert key) ─────────────────────────────────
+// The deterministic identity key POST /api/nutrition/pantry/reconcile upserts on: strip accents
+// (Unicode-decompose, drop the combining marks), lowercase, trim + collapse internal whitespace,
+// then drop ONE trailing "s" (only when the result is ≥4 chars and doesn't already end "ss") so a
+// re-shop's spelling/case/plural drift still lands on the same row. It deliberately does NOT
+// resolve synonyms, translations, or pack-size math (two rows of one food in different languages
+// or sizes) — merging those stays the agent's judgement call (see nutrition-chef's pantry-capture
+// reference), the ADR 0001 line between mechanics and generative reasoning.
+export function normalizePantryName(name: string): string {
+  const stripped = name.normalize("NFD").replace(/\p{M}/gu, "");
+  const collapsed = stripped.toLowerCase().trim().replace(/\s+/g, " ");
+  return collapsed.length >= 4 && collapsed.endsWith("s") && !collapsed.endsWith("ss")
+    ? collapsed.slice(0, -1)
+    : collapsed;
+}

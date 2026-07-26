@@ -74,6 +74,15 @@
 #      date filters, GET-by-id, PATCH persist (an x-actor:agent write round-trips),
 #      the missing-date/slot/description + non-number-calories + bad-slot/bad-health
 #      400s, and delete. Snapshots+restores cases.json. Skipped when no board is up.
+#  10e2. api-nutrition-pantry-reconcile — ONLY if a board is running: the v14 bulk pantry
+#      RECONCILE write (POST /api/nutrition/pantry/reconcile). A fresh name ADDS a row; a
+#      resubmit of a normalised variant (case/whitespace/plural/accent) UPDATES that same row
+#      instead of minting a duplicate; a batch of N new items bumps db.version exactly ONCE
+#      with N distinct ids; an in-batch duplicate is reported SKIPPED, not double-added; a
+#      malformed item (or an empty items array) rejects the WHOLE batch with nothing written;
+#      the pantry count never reduces; and the GATE mirrors api-nutrition-gate (a DISABLED
+#      add-on 404s the write while GET stays 200). Snapshots+restores cases.json. Skipped when
+#      no board is up.
 #  10g. api-body-weight — ONLY if a board is running: the v14 weigh-in lifecycle
 #      (/api/body/weight[/:id]) after enabling the "body" add-on:
 #      create→WEIGHT-<n>+version bump (weightKg + note persist), body-composition
@@ -696,6 +705,27 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-nutrition-pantry: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-nutrition-pantry"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10e2. api-nutrition-pantry-reconcile (only when a board is healthy) -----
+# The v14 bulk pantry RECONCILE write (board/app/api/nutrition/pantry/reconcile): upsert by a
+# normalised name (case/whitespace/plural/accent), one version bump per batch with distinct
+# minted ids, in-batch duplicates skipped (not double-added), fail-closed on any malformed item
+# (incl. an empty items array), never reduces the pantry count, and the GATE (a DISABLED add-on
+# 404s the write while GET stays 200). Snapshots + restores board/data/cases.json (pantryItems +
+# settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10e2] api-nutrition-pantry-reconcile (live board) ------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-pantry-reconcile.mjs"; then
+    echo "api-nutrition-pantry-reconcile: PASS"
+  else
+    echo "api-nutrition-pantry-reconcile: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-pantry-reconcile"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."

@@ -7,7 +7,8 @@ description: >
   were cooked, batching the rest into one question) before doing anything else. It LOGS
   what you ate (estimating calories + optional macros + a green/amber/red health flag),
   maintains the PANTRY (add / read / update / remove on-hand items, flag low stock +
-  expiring soon), and PLANS meals from what's on hand — reading the pantry first,
+  expiring soon, or reconcile a WHOLE shop or a photo of a receipt/fridge shelf in one
+  confirmed write), and PLANS meals from what's on hand — reading the pantry first,
   preferring expiring ingredients, honoring the user's ALLERGIES + diet, and optionally
   putting a meal on the calendar. It owns the DIETARY PROFILE (allergies, diet
   type/regime, the "views on diet" methodology) and AUTHORS the daily nutrition
@@ -15,12 +16,13 @@ description: >
   MCP) + the dietary profile, computing the calorie/macro targets itself, and saving
   them — always with not-medical-advice framing. Use when the user says "log what I
   ate", "I had X for lunch", "what's in my fridge", "add Y to the pantry", "we're low on
-  Z", "plan meals", "what can I cook", "meal plan for the week", "I cooked the salmon",
-  "reconcile my meal plan", "clean up stale planned meals", "close out old meals", "set
-  my allergies", "I'm vegan / I don't eat pork / I'm doing keto", "what's my calorie
-  target", "how am I doing on my diet", "am I on track", or otherwise asks to track
-  food, manage the kitchen, plan / cook meals, reconcile the meal plan, set dietary
-  preferences, or get nutrition targets.
+  Z", "here's my shopping receipt", "photo of my fridge", "restock the pantry from this
+  receipt", "plan meals", "what can I cook", "meal plan for the week", "I cooked the
+  salmon", "reconcile my meal plan", "clean up stale planned meals", "close out old
+  meals", "set my allergies", "I'm vegan / I don't eat pork / I'm doing keto", "what's
+  my calorie target", "how am I doing on my diet", "am I on track", or otherwise asks to
+  track food, manage the kitchen, plan / cook meals, reconcile the meal plan, set
+  dietary preferences, or get nutrition targets.
 ---
 
 # Nutrition & Chef (the kitchen operator)
@@ -300,6 +302,35 @@ A zero-quantity row is a ghost that clutters the pantry; "gone" is *removed*, no
 > 2, unit: "cans", category: "pantry", location: "pantry")`. Olive oil already present →
 > `update_pantry_item(<id>, lowStock: true)` rather than adding a second row.
 
+### Bulk capture — a photo of a receipt or a fridge shelf
+
+For a **whole shop or a whole shelf** — not one item — a photo beats twenty-five individual
+`add_pantry_item` calls. This path is **one extraction, one merge pass, one confirmation, one
+write**; a single ad-hoc add still goes through `add_pantry_item` / `read_pantry` above. The
+**mechanical** half of dedup (spelling, casing, plurals, accents) is now enforced by
+`reconcile_pantry` itself — it upserts by a normalised name, so you no longer hand-match those.
+**Semantic aliases stay yours to resolve** (step 2). Worked examples, the ambiguous-case gallery,
+and receipt-extraction tips live in
+[`references/pantry-capture.md`](references/pantry-capture.md) — read it the first time you run
+this job.
+
+1. **Extract** the items from the photo in your own context (vision is your job; the board never
+   sees the image): `name`, `quantity`+`unit` when legible, `category`, `location`, `expiresAt`
+   when printed. Skip non-food lines (bags, deposits, discounts).
+2. **`read_pantry`**, then resolve the **semantic aliases** the route cannot — the same food in
+   two languages, or at two pack sizes, is ONE item; merge before submitting (worked examples in
+   the reference doc). Never submit an alias you haven't resolved — `reconcile_pantry` will
+   happily add it as new.
+3. **Propose ONE collapsed diff and get ONE yes — even in auto mode** (a photo extraction is
+   fallible, so this bulk write always confirms, per STEP 0's bulk rule): counts first, only the
+   genuinely ambiguous items named — *"+9 new, 4 updated, 2 look like duplicates of
+   PANTRY-12/PANTRY-31 — merge? 1 item expired 26 days ago — remove it?"* Never a per-item prompt.
+4. **On yes:** one `reconcile_pantry(items)` call, then `remove_pantry_item` for each expired
+   item Philip approved removing (expiry proposals come from `read_pantry`'s `EXPIRED` flags /
+   `get_nutrition_status`'s `expiredPantryItems`) — removal stays the explicit tool;
+   `reconcile_pantry` never deletes.
+5. **Report** the diff the tool returned: added / updated / skipped, and the new version.
+
 ---
 
 ## JOB 3 — Meal plan / Chef ("what can I cook", "plan the week")
@@ -463,6 +494,10 @@ read now — there's no per-day chip).
   doesn't enforce uniqueness) — update the existing row, don't duplicate; set
   category/location/expiry/lowStock sensibly; lead with expiring-soon + low-stock when
   asked what's on hand.
+- **Bulk capture (photo → pantry):** extract → `read_pantry` → merge semantic aliases
+  yourself → propose ONE collapsed diff → ONE confirmation (always, even in auto mode)
+  → one `reconcile_pantry` call. Expired items are proposed for removal in the same
+  confirmation; removal is never automatic — `reconcile_pantry` itself never deletes.
 - **Meal plan:** `read_pantry` **first**; prefer on-hand + expiring ingredients; record
   `pantryItemIds` (soft refs). Calendar is **opt-in** — `create_event` (calendar MCP)
   first, then store the `EVT-id` as `eventId`; `null` unlinks. `status: "cooked"` →

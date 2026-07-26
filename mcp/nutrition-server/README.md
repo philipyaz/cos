@@ -148,6 +148,23 @@ A null/empty value on an optional macro / `note` / `health` clears it.
 `DELETE /api/nutrition/log/{id}`. Hard-removes the entry (food-log entries have no soft-archive).
 **Gated**.
 
+### Pantry lifecycle
+
+#### `reconcile_pantry(items)`
+`POST /api/nutrition/pantry/reconcile`. Applies a WHOLE shop or photo extraction as **ONE** gated
+write. **Gated**.
+
+- `items` **(required)**, non-empty array of `{ name, [quantity], [unit], [category], [location],
+  [expiresAt] }`. Only `name` is required per item.
+- Upserts by a **normalised** name (trim, casefold, accent-strip, trailing plural) — a re-shop
+  **updates** the existing row instead of minting a duplicate. The submitted `name` is only the
+  match key; it never overwrites the stored name.
+- **Never removes** anything — use `remove_pantry_item` for that. Rejects the **whole batch**
+  (writing nothing) if any item is malformed.
+- Does **not** resolve semantic aliases (the same food in another language, or at a different pack
+  size) — merge those yourself first (`read_pantry`), then submit the resolved list.
+- Returns `{ added, updated, skipped, version }` — one `db.version` bump for the whole batch.
+
 ### Weight-loss reads
 
 #### `list_weights([from], [to])`

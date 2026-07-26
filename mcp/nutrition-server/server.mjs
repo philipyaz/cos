@@ -302,6 +302,41 @@ const REMOVE_PANTRY_ITEM_TOOL = {
   },
 };
 
+const RECONCILE_PANTRY_TOOL = {
+  name: "reconcile_pantry",
+  description:
+    "Apply a WHOLE shop or photo extraction as ONE gated write — `POST /api/nutrition/pantry/reconcile`. " +
+    ADDON_GUARDRAIL +
+    " `items` upsert by a NORMALISED name (trim/casefold/accent-strip/trailing-plural) so a re-shop " +
+    "UPDATES the existing row instead of minting a duplicate — this is the mechanical half of dedup, " +
+    "moved to where it can't be forgotten. NEVER removes anything (use `remove_pantry_item` for that); " +
+    "rejects the WHOLE batch, writing nothing, if any item is malformed. Semantic aliases — the same " +
+    "food in another language, or at a different pack size — are NOT resolved here: merge those " +
+    "YOURSELF before submitting (call `read_pantry` first). Returns a diff of { added, updated, skipped }.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      items: {
+        type: "array",
+        description: "The items to reconcile — a whole shop or a whole extracted receipt/shelf.",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "What the item is, e.g. 'Greek yoghurt'." },
+            quantity: { type: "number", description: "Optional amount on hand, e.g. 2." },
+            unit: { type: "string", description: "Optional unit, e.g. 'g', 'cans', 'bunch'." },
+            category: { type: "string", enum: PANTRY_CATEGORY, description: "Optional food category." },
+            location: { type: "string", enum: PANTRY_LOCATION, description: "Optional storage location: fridge | freezer | pantry." },
+            expiresAt: { type: "string", description: "Optional expiry day, 'YYYY-MM-DD'." },
+          },
+          required: ["name"],
+        },
+      },
+    },
+    required: ["items"],
+  },
+};
+
 // ── Meal-plan tool definitions (OUR meal-plan model field names exactly) ───────
 
 const PLAN_MEAL_TOOL = {
@@ -542,6 +577,7 @@ const TOOLS = [
   ADD_PANTRY_ITEM_TOOL,
   UPDATE_PANTRY_ITEM_TOOL,
   REMOVE_PANTRY_ITEM_TOOL,
+  RECONCILE_PANTRY_TOOL,
   // meal-plan lifecycle
   PLAN_MEAL_TOOL,
   UPDATE_MEAL_PLAN_TOOL,
@@ -964,6 +1000,32 @@ async function handleRemovePantryItem(args) {
   return text(`Removed ${id} from the pantry (no soft-archive; hard-removed).`);
 }
 
+async function handleReconcilePantry(args) {
+  if (!Array.isArray(args.items) || args.items.length === 0) {
+    return err("'items' must be a non-empty array.");
+  }
+  for (const it of args.items) {
+    if (!it || typeof it.name !== "string" || it.name.trim() === "") {
+      return err("Every item needs a non-empty 'name' — the board validates the rest.");
+    }
+  }
+
+  // Light local check only — the route owns the real validation (category/location enums,
+  // expiresAt shape, quantity type) and fails the WHOLE batch closed on any bad item.
+  const { data, errorResult } = await api("POST", "/api/nutrition/pantry/reconcile", { items: args.items });
+  if (errorResult) return errorResult;
+
+  const added = data.added ?? [];
+  const updated = data.updated ?? [];
+  const skipped = data.skipped ?? [];
+  const parts = [
+    `+${added.length} added${added.length ? ` (${added.map((x) => x.name).join(", ")})` : ""}`,
+    `~${updated.length} updated${updated.length ? ` (${updated.map((x) => x.name).join(", ")})` : ""}`,
+    `${skipped.length} skipped${skipped.length ? ` (${skipped.map((s) => `${s.name} — ${s.reason}`).join(", ")})` : ""}`,
+  ];
+  return text(`${parts.join(" · ")} · one write, version ${data.version}`);
+}
+
 // ── Meal-plan tools ────────────────────────────────────────────────────────────
 
 async function handlePlanMeal(args) {
@@ -1280,6 +1342,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleUpdatePantryItem(args);
     case "remove_pantry_item":
       return handleRemovePantryItem(args);
+    case "reconcile_pantry":
+      return handleReconcilePantry(args);
     // meal-plan lifecycle
     case "plan_meal":
       return handlePlanMeal(args);
