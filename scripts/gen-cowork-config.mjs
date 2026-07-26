@@ -16,6 +16,11 @@ import { readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { getManifest, currentRole } from '../mcp/service-manifest.mjs'
 import { loadConfig, REPO_ROOT } from '../config/load-config.mjs'
+import {
+  classifySecret,
+  anthropicKeyShapeWarning,
+  secretRefusalMessage,
+} from '../config/secret-validation.mjs'
 
 // Cowork's config is PER-MACHINE (unlike the committed .mcp.json), so it is scoped to
 // this machine's device role: a spoke's Cowork gets only the board-facing wrappers
@@ -39,13 +44,41 @@ function loadSecrets() {
 const NAMES = process.argv.slice(2).filter((a) => !a.startsWith('--'))
 const FULL_SYNC = NAMES.length === 0
 
+// Secrets that must NOT be snapshotted (placeholder or missing), collected while building so the
+// write path can refuse ATOMICALLY — before the backup + write — rather than leaving a config that is
+// right about everything except the one thing that makes the server work. Only ever populated for a
+// server actually IN this run's set, so a named merge that excludes the secret-carrying server
+// (`… board calendar`) can't trip on it, and neither can a spoke (vault is roles:["hub"], so it isn't
+// in a spoke's manifest at all).
+const refusals = []
+const warnings = []
+
 function buildEntries() {
   const secrets = loadSecrets()
   const out = {}
   for (const e of getManifest({ client: 'cowork', role: ROLE })) {
     if (!FULL_SYNC && !NAMES.includes(e.name)) continue
     const env = { ...e.env } // e.env has NO PATH / idle-exit (those are bridge/plist-only) — correct for Cowork
-    for (const k of e.secrets || []) if (secrets[k] !== undefined) env[k] = secrets[k]
+    for (const k of e.secrets || []) {
+      const value = secrets[k]
+      // Cowork gets a SNAPSHOT of this value, not a reference to secrets.env (it can't run the macOS
+      // secret-wrapper). So a placeholder captured here is PERMANENT: the server 401s and never
+      // recovers, even after the real key lands in secrets.env — which is exactly the bug this guard
+      // exists to stop. Full write-up in config/secret-validation.mjs.
+      const state = classifySecret(value)
+      if (state !== 'present') {
+        refusals.push(secretRefusalMessage(k, state, e.name))
+        continue // never write a known-dead credential into the entry
+      }
+      if (k === 'ANTHROPIC_API_KEY') {
+        // SOFT check only, never a hard gate: Anthropic's key format isn't a contract we control, so a
+        // strict validator here would break setup the day it changes. This only nudges on an
+        // obviously-truncated paste.
+        const w = anthropicKeyShapeWarning(value)
+        if (w) warnings.push(`${k} for '${e.name}' ${w}`)
+      }
+      env[k] = value
+    }
     // The stdio command IS the direct command Cowork runs (node server.mjs / uv run … main.py).
     out[e.name] = { command: e.stdio[0], args: e.stdio.slice(1), env }
   }
@@ -54,6 +87,8 @@ function buildEntries() {
 
 const entries = buildEntries()
 
+for (const w of warnings) process.stderr.write(`[gen-cowork-config] WARNING: ${w}\n`)
+
 if (process.argv.includes('--print')) {
   // Redact secret VALUES in the printed preview so a console/log never shows the key.
   const redacted = JSON.parse(JSON.stringify(entries))
@@ -61,8 +96,18 @@ if (process.argv.includes('--print')) {
     if (!redacted[e.name]) continue
     for (const k of e.secrets || []) if (redacted[e.name].env[k]) redacted[e.name].env[k] = '«from config/secrets.env»'
   }
+  // --print touches no file, so a bad secret is a WARNING here rather than a refusal — you can still
+  // inspect the shape of what WOULD be written. The write path below is where it's fatal.
+  for (const r of refusals) process.stderr.write(`[gen-cowork-config] WOULD REFUSE TO WRITE: ${r}\n`)
   process.stdout.write(JSON.stringify({ mcpServers: redacted }, null, 2) + '\n')
 } else {
+  // Refuse BEFORE the backup + write so the run is atomic: a placeholder secret leaves the existing
+  // config completely untouched.
+  if (refusals.length) {
+    for (const r of refusals) process.stderr.write(`[gen-cowork-config] REFUSING TO WRITE: ${r}\n`)
+    process.stderr.write('[gen-cowork-config] aborted — no changes made.\n')
+    process.exit(1)
+  }
   const cfg = loadConfig()
   const target = cfg.COWORK_CONFIG
   if (!target) {

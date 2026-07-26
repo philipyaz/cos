@@ -16,8 +16,11 @@ which resolves `REPO_ROOT` from git and exports machine config from `config/cos.
 `cos-setup`) — paths, ports, and URLs (`REPO_ROOT`, `BREW_PREFIX`, `VAULT_DIR`, `BOARD_URL`, the bridge/
 sidecar ports + URLs, etc.) so nothing is hardcoded. The `config/` dir splits by concern: `cos.env`
 (machine paths/ports), `secrets.env` (the Anthropic API key), `settings.json` (board prefs), and
-`auto-sync.json` (router switch); the loaders, `auto-sync.json`, and the `*.example` files are
-committed — the live `cos.env`/`secrets.env`/`settings.json` are gitignored.
+`auto-sync.json` (router switch); the loaders, `secret-validation.mjs`, `auto-sync.json`, and the
+`*.example` files are committed — the live `cos.env`/`secrets.env`/`settings.json` are gitignored.
+Secrets reach the two MCP clients by **different binding paths** (Claude Code re-reads `secrets.env`
+per start; Cowork gets an inlined snapshot), so rotation is a two-step — see the *"Cowork holds a
+COPY of every secret"* gotcha in [`mcp/CLAUDE.md`](mcp/CLAUDE.md).
 
 - **`mcp/CLAUDE.md`** — read it before touching `mcp/`.
 - **`board/data/CLAUDE.md`** — `board/data/` is LIVE, irreplaceable user data; read it BEFORE
