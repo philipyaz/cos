@@ -64,6 +64,13 @@ jobs:
           node mcp/service-manifest.mjs --json > /dev/null
           node scripts/gen-mcp-json.mjs --check
 
+      # The Cowork skill bundles (board/.claude/skill-bundles/*.zip) are a build artifact of
+      # board/.claude/skills/. They are what Cowork actually installs, so a skill edited without
+      # a rebuild ships a STALE procedure with nothing at runtime to flag it. Deterministic zips
+      # make this a byte comparison. Same generated-file discipline as .mcp.json above.
+      - name: Check skill bundles are in sync
+        run: node scripts/pack-skills.mjs --check
+
       # Board deps so start_test_board finds node_modules/.bin/next and the
       # api-* integration steps RUN instead of silently skipping.
       - name: Install board deps

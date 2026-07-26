@@ -58,6 +58,33 @@ flowchart LR
     org -->|Initiative ▸ Workstream ▸ Case| board
 ```
 
+## Getting them into Cowork — the skill bundles
+
+Cowork installs a skill from a **`.zip`**, not from a folder on disk. So each skill is also shipped
+as a bundle under
+[`board/.claude/skill-bundles/`](https://github.com/philipyaz/cos/tree/main/board/.claude/skill-bundles) —
+**one zip per skill**, carrying its `SKILL.md`, its `references/`, and any other supporting file,
+with the skill folder at the archive root. Install via **Cowork Desktop → Settings → Capabilities →
+Skills → Upload skill**.
+
+The bundles are a **build artifact** of the skill folders, in the same sense as `.mcp.json` and the
+[labels reference](../reference/labels.md) — generated, committed, never hand-edited:
+
+```bash
+node scripts/pack-skills.mjs          # rebuild the bundles that changed
+node scripts/pack-skills.mjs --check  # CI gate: fails if any bundle is stale, missing, or orphaned
+```
+
+!!! warning "A stale zip is a silent failure"
+    The bundle is what Cowork actually runs. Edit a guardrail in `SKILL.md`, skip the rebuild, and
+    the scheduled task keeps following the *old* procedure — with nothing at runtime to tell you.
+    That is why `--check` is a hard CI gate rather than a convention.
+
+The archives are written **deterministically** (entries sorted, fixed 1980-01-01 timestamps, fixed
+permissions), so rebuilding an unchanged skill is byte-identical. That is what makes committing
+binaries tolerable: the diff moves only when a skill genuinely changes, and the freshness check is
+a byte comparison rather than a separate checksum manifest.
+
 ## The two reconcilers as one shared pipeline
 
 `mail-to-board` and `whatsapp-triage` are the same machine wearing two envelopes. Both
