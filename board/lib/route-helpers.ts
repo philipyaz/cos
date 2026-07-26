@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { NotFoundError, VersionConflictError, BadRequestError, SchemaAheadError, SpokeRoleError } from "@/lib/store";
+import { recordDevice } from "@/lib/devices";
 import type { Actor } from "@/lib/types";
 
 // Calendar-day ("YYYY-MM-DD") shape guard — a pure, lock-free, db-free string predicate
@@ -10,8 +11,12 @@ export const isISODate = (v: unknown): v is string =>
   typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 // "human" by default; an MCP/agent write flags itself via { actor:"agent" } or
-// the `x-actor: agent` header so its writes are attributed correctly.
+// the `x-actor: agent` header so its writes are attributed correctly. Every write
+// route calls this, so it is also the chokepoint where we record the calling
+// device's ephemeral last-seen (from the x-device header the wrappers send) — the
+// Devices surface signal. Fail-safe; a header-less browser write records nothing.
 export function resolveActor(req: NextRequest, body: unknown): Actor {
+  recordDevice(req);
   const fromHeader = req.headers.get("x-actor");
   if (fromHeader === "agent") return "agent";
   if (body && typeof body === "object" && (body as Record<string, unknown>).actor === "agent") {

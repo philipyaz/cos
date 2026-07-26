@@ -3,8 +3,10 @@ import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
 import { CommandPalette } from "@/components/command-palette";
 import { SchemaAheadBanner } from "@/components/schema-ahead-banner";
+import { SpokeChip } from "@/components/spoke-chip";
 import { readDB, diskSchemaVersion } from "@/lib/store";
 import { ADDON_REGISTRY, isAddonEnabled } from "@/lib/addons";
+import { getDeviceRole } from "@/lib/cos-env";
 import type { AddonNavGroup } from "@/lib/board-client";
 
 export const metadata: Metadata = {
@@ -48,6 +50,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="font-sans text-ink-900 antialiased">
         {/* Degraded-read guard banner — a fixed overlay; renders nothing normally. */}
         <SchemaAheadBanner initialDiskSchemaVersion={diskSchema} />
+        {/* Spoke reachability chip — renders only on a SPOKE served over the network. */}
+        <SpokeChip role={getDeviceRole()} />
         <div className="flex h-screen w-screen overflow-hidden bg-ink-50">
           <Sidebar unreadCount={unreadCount} addonGroups={addonGroups} />
           <main className="flex-1 flex flex-col min-w-0 bg-white border-l border-ink-100">

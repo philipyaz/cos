@@ -123,6 +123,7 @@ nav:
       - Platform API: architecture/platform-api.md
       - Add-ons: architecture/addons.md
       - Case hierarchy: architecture/hierarchy.md
+      - Multi-device (hub & spoke): architecture/multi-device.md
   - Features:
       - Board: features/board.md
       - Activity: features/activity.md

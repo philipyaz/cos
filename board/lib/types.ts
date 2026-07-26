@@ -889,6 +889,42 @@ export interface BackupStatus {
   overall: BackupOverall; // the headline verdict (see BackupOverall)
 }
 
+// ── Devices surface (multi-device) ───────────────────────────────────────────────
+// The HUB.json lease view — the one machine authorized to produce backups (the hub).
+// A tiny plaintext file in the backup repo; read fail-safe by backup-status.readHubLease
+// (defined here as the canonical home so both backup-status and the Devices envelope can
+// reference it without a circular import).
+export interface HubLease {
+  deviceId: string; // the hub's device id
+  host: string | null; // os.hostname() of the hub when it last renewed
+  epoch: number; // bumps on each takeover (a monotonic claim counter)
+  renewedAt: string; // ISO-8601 of the last renewal
+  stale: boolean; // renewedAt older than LEASE_STALE_HOURS (a claimable lease)
+}
+
+// One tracked device's ephemeral last-seen (in-memory only; never persisted — see
+// lib/devices.ts). Derived from the x-device/x-device-role headers agent traffic sends.
+export interface DeviceSeen {
+  deviceId: string; // the sanitized COS_DEVICE_ID the request carried
+  role?: "hub" | "spoke"; // from x-device-role, when sent
+  lastSeen: string; // ISO-8601 of the most recent request from this device
+  count: number; // requests seen from this device this process lifetime
+}
+
+// The render-ready Devices envelope (lib/devices.ts fetchDeviceStatus → /api/devices →
+// the Devices view + the get_device_status MCP tool). Always online:true (the board
+// process answered); a null lease / empty devices list is a normal state.
+export interface DeviceStatus {
+  online: boolean;
+  role: "hub" | "spoke"; // THIS machine's role
+  deviceId: string; // THIS machine's id
+  schemaVersion: number; // THIS machine's code schema (for the drift handshake)
+  lease: HubLease | null; // who holds the hub lease (null = no lease armed yet)
+  leaseStaleHours: number; // the staleness window the lease uses (26)
+  devices: DeviceSeen[]; // known devices, newest-seen first (agent last-seen only)
+  joinBlob: string | null; // the cos-join:// string for adding a device, or null (COS_HUB_PUBLIC_URL unset)
+}
+
 // ── Vault surface (the knowledge half) ──────────────────────────────────────────
 // The /vault surface mirrors Backups/Security: a SERVER-ONLY reader (lib/vault-status.ts)
 // produces ONE render-ready envelope, surfaced via /api/vault/status and the client view.

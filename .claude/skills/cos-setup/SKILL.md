@@ -44,6 +44,23 @@ are only needed if you run those optional add-ons (Steps 3.4 / 3.5 / 3.6).
 
 ## The sequence
 
+### Step 0.0 — first Cos machine, or joining an existing one? (multi-device)
+Before anything else, decide the **role** of this machine:
+
+- **First Cos machine (a HUB)** — this machine runs the state machine (board on :3000, its own
+  `cases.json`, sidecars, backups, the Cowork routines). Continue with Step 0 below. `COS_DEVICE_ROLE`
+  stays `hub` (the default).
+- **Joining an existing Cos (a SPOKE)** — this machine is a stateless CLIENT of an existing hub: its
+  board-facing MCP wrappers point at the hub's `BOARD_URL`, and it has **no local store of its own**.
+  Then **SKIP Step 0 entirely** (there is no local store to seed — the board-seed copy that follows is
+  the documented seed-over-live-data footgun, and a spoke must never run it), skip the vault/guard-model
+  steps and Step 4 (backup is hub-only), and run the **`spoke-setup`** skill instead — it flips
+  `COS_DEVICE_ROLE=spoke`, points `BOARD_URL` at the hub, and wires only the board-facing wrappers.
+  You get the hub's join string (`cos-join://…`) from the hub's board **Devices** panel ("Add a device")
+  or `node scripts/join-blob.mjs` on the hub.
+
+The rest of this runbook is the **HUB / first-machine** path.
+
 ### Step 0 — seed runtime stores (fresh public clone only)
 - **What it does** — a fresh clone of the public repo ships WITHOUT real runtime data
   (`board/data/cases.json`, `config/settings.json`, `guard/data/*.json` are gitignored). Seed the
