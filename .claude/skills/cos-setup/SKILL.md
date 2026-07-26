@@ -1,6 +1,6 @@
 ---
 name: cos-setup
-description: The single first-run entry point that stands up the WHOLE Cos system, sequencing the four component setup skills in dependency order — setup-vault → guard-setup → mcp-bridge-setup → backup-recovery. Use when setting up the chief of staff system, doing a first-run setup, onboarding a new machine, or asking for the full setup; also when you're unsure which component skill to run first and want the guided end-to-end runbook.
+description: The single first-run entry point that stands up the WHOLE Cos system, sequencing the four component setup skills in dependency order — setup-vault → guard-setup → mcp-bridge-setup → backup-recovery. Use when setting up the chief of staff system, doing a first-run setup, onboarding a new machine, or asking for the full setup; also when you're unsure which component skill to run first and want the guided end-to-end runbook. Covers the three multi-device paths at Step 0.0 — a fresh hub, joining as a spoke (routes to spoke-setup), or promoting this machine to hub in a hub swap (routes to hub-handover).
 allowed-tools: Bash, Read
 ---
 
@@ -44,22 +44,57 @@ are only needed if you run those optional add-ons (Steps 3.4 / 3.5 / 3.6).
 
 ## The sequence
 
-### Step 0.0 — first Cos machine, or joining an existing one? (multi-device)
-Before anything else, decide the **role** of this machine:
+### Step 0.0 — first Cos machine, joining as a spoke, or taking over the hub role? (multi-device)
+**Only want to VIEW the board from another device? You need NOTHING on that device — no spoke, no
+runbook.** Run the **production** board on the hub (`cd board && npm run build && npm run start`, or
+install the `boardapp` LaunchAgent — **not** `next dev`, whose on-demand compilation + lazy chunks
+are unreliable through a reverse proxy: the page loads but opening a case can silently fail) and
+expose it on the tailnet with `tailscale serve --bg 3000` (needs Tailscale HTTPS/MagicDNS). The
+board is loopback-bound, so `tailscale serve` is the ONLY door in — and the URL is **portless**
+(HTTPS 443): any tailnet device opens `https://<hub>.<tailnet>.ts.net` in a browser and gets the
+**full read/write UI** (the browser writes through the same HTTP API). A **spoke** (below) is only
+for running Claude/Cowork **agents** on the second machine — never needed just to view.
 
-- **First Cos machine (a HUB)** — this machine runs the state machine (board on :3000, its own
-  `cases.json`, sidecars, backups, the Cowork routines). Continue with Step 0 below. `COS_DEVICE_ROLE`
-  stays `hub` (the default).
+Otherwise, decide the **role** of this machine — there are **three** setup paths:
+
+- **First Cos machine (a fresh HUB)** — this machine runs the state machine (board on :3000, its own
+  `cases.json`, sidecars, backups, the Cowork routines) and there is **no existing hub** to inherit
+  from. Continue with Step 0 below. `COS_DEVICE_ROLE` stays `hub` (the default). This is the path the
+  rest of this runbook documents.
 - **Joining an existing Cos (a SPOKE)** — this machine is a stateless CLIENT of an existing hub: its
   board-facing MCP wrappers point at the hub's `BOARD_URL`, and it has **no local store of its own**.
+  A spoke exists for **one** reason — to run Claude Code + Cowork **agents** against the hub through
+  **LOCAL stdio MCP** tools. It is required because **Cowork only accepts local stdio MCP servers**;
+  it can't consume the hub's remote HTTP MCP over the tailnet (a hard, validated fact), so a thin
+  local shim forwarding tool calls to the hub's `/api/*` is the only way. If you just want to *view*
+  the board here, stop — use a browser (top of this step); a browser can't give a local agent tools.
   Then **SKIP Step 0 entirely** (there is no local store to seed — the board-seed copy that follows is
   the documented seed-over-live-data footgun, and a spoke must never run it), skip the vault/guard-model
   steps and Step 4 (backup is hub-only), and run the **`spoke-setup`** skill instead — it flips
   `COS_DEVICE_ROLE=spoke`, points `BOARD_URL` at the hub, and wires only the board-facing wrappers.
   You get the hub's join string (`cos-join://…`) from the hub's board **Devices** panel ("Add a device")
   or `node scripts/join-blob.mjs` on the hub.
+- **Joining but PROMOTING this machine to HUB (a hub swap)** — an existing hub is **stepping down** and
+  THIS machine becomes the new hub (the old one demotes to a spoke, or retires). This is neither a fresh
+  first-run nor a plain spoke join, so do **NOT** run this runbook straight through — the data-safety is
+  in the *order* of the swap. Run the **`hub-handover`** skill, which sequences the freeze → final-backup
+  → cutover → demote ceremony and **reuses this runbook's component steps with two deliberate
+  substitutions**:
+  - **Step 0's seed becomes a RESTORE.** The new hub is hydrated from the old hub's newest **encrypted
+    snapshot** (`node "$REPO_ROOT/backup/restore.mjs" --device <old-hub-id> --apply`, with no board
+    running), never from the fixture — seeding would create a divergent empty store that the cutover
+    re-restore only has to overwrite. (`restore.mjs --list` on this machine names `<old-hub-id>`.)
+  - **Step 4's backup PRODUCER role is DEFERRED to cutover.** You still do Steps 0.5–3 (cos.env, vault,
+    guard model, bridges) and provision the **same recovery key** as the old hub, but you do **NOT**
+    install this machine's backup LaunchAgent until the handover cutover, where `backup.mjs --claim`
+    takes the `HUB.json` lease. Two producers racing that lease is exactly what the ceremony exists to
+    prevent — old hub off, new hub on, in that order.
 
-The rest of this runbook is the **HUB / first-machine** path.
+  Prereqs (`hub-handover` enforces them): both machines on the **same Tailscale tailnet**, the **same
+  recovery key** on both, and this machine's checkout at **`SCHEMA_VERSION` ≥ the store's schema** (the
+  migration's safe direction — otherwise the board fails closed with `SchemaAheadError` after restore).
+
+The rest of this runbook is the **fresh HUB / first-machine** path.
 
 ### Step 0 — seed runtime stores (fresh public clone only)
 - **What it does** — a fresh clone of the public repo ships WITHOUT real runtime data

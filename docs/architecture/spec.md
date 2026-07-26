@@ -190,8 +190,9 @@ The job is **done** when every component below holds and the end-to-end acceptan
 - [ ] Board MCP exposes the **full lifecycle**, not just create/get: `create_case`, `get_case`, `update_case` (fields + lane move), `add_task` / `update_task` / `complete_task`, `link_message`. *(Required so the board can be "automatically updated with new or modified tasks.")*
 - [ ] Cases link to vault context (entity / concept / source).
 - [x] Board persistence durability across devices decided — **hub & spoke** (the single file-backed
-      store stays on the hub; other machines are stateless clients over Tailscale, not a synced/durable
-      store). See [Multi-device](multi-device.md).
+      store stays on the hub; other machines reach it over Tailscale — a **spoke** when it runs agents,
+      a plain **browser viewer** when it only needs the UI — not a synced/durable store). See
+      [Multi-device](multi-device.md).
 
 **C. Channel bridges**
 - [ ] **OpenWhispr local MCP** built: `list_transcripts`, `get_transcript`, and a **processed-watermark** so the loop is idempotent. Modeled on `create-case-server`; sandbox-bridged.

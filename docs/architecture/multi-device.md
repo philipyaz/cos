@@ -2,15 +2,46 @@
 
 Cos runs across more than one machine with a **hub-and-spoke** topology. Exactly one machine — the
 **hub** — runs the state machine: the board on `:3000`, `cases.json` behind the single `mutate()`
-chokepoint, the sidecars, the encrypted backups, and the scheduled routines. Every other machine is a
-**spoke**: a full checkout with the same skills and thin MCP wrappers, but **no state of its own** —
-its browser and its board-facing wrappers talk to the hub's HTTP API over a private
-[Tailscale](https://tailscale.com) network. Nothing syncs, because there is nothing to sync; the
-single store is the single source of truth.
+chokepoint, the sidecars, the encrypted backups, and the scheduled routines. Another machine becomes a
+**spoke** only when it needs to run **agents** (Claude Code / Cowork) against the board: a checkout
+with the thin board-facing MCP wrappers pointed at the hub, but **no state of its own** — its wrappers
+talk to the hub's HTTP API over a private [Tailscale](https://tailscale.com) network. A device that
+only needs to *view* the board is **not** a spoke — it installs nothing and reaches the hub in a
+browser over the same tailnet (see [View vs. drive](#two-ways-to-reach-the-hub-view-vs-drive) below).
+Nothing syncs, because there is nothing to sync; the single store is the single source of truth.
 
 The whole design is one decision — **don't sync; keep one store and reach it.** A hub failure or a
 planned migration is handled by moving the *role*, not by reconciling two stores (see
 [Moving the hub role](#moving-the-hub-role) below).
+
+## Two ways to reach the hub — view vs. drive
+
+Hub & spoke exists for exactly one reason: so that **agents** — Claude Code and Claude Cowork on a
+second machine — can drive the board through **local** MCP tools. It is **not** required to *view* the
+board from another device. The decision is binary:
+
+- **View / use the board UI** → a **browser**, zero per-device setup. The hub runs the production board
+  behind `tailscale serve`; any tailnet device opens it. The browser writes through the same `/api/*`
+  HTTP API the wrappers use, so it is full read/write — not read-only.
+- **Act on the board with an agent on that device** → a **spoke**. Claude Cowork accepts **only local
+  stdio MCP servers**; it cannot consume a remote HTTP MCP over the tailnet (a hard, validated
+  constraint), so the only way to give a local agent board tools is the thin stdio wrappers
+  ([`spoke-setup`](https://github.com/philipyaz/cos/blob/main/.claude/skills/spoke-setup/SKILL.md))
+  forwarding tool calls to the hub's `/api/*`. A browser cannot hand a local agent those tools.
+
+**Easy mode (solo viewer)** — the simplest multi-device setup is one hub + browser viewers, no spoke:
+
+1. On the hub, run the **production** board — `cd board && npm run build && npm run start` (or install
+   the `boardapp` LaunchAgent). **Not** `next dev`: dev-mode on-demand compilation + lazy chunks are
+   unreliable through a reverse proxy, so the page loads but interactions (e.g. opening a case) can
+   silently fail.
+2. Expose it on the tailnet — `tailscale serve --bg 3000` (needs Tailscale HTTPS/MagicDNS on the
+   tailnet). The board is loopback-bound, so `tailscale serve` is the **only** door in — and the URL is
+   **portless** (HTTPS 443), never `:3000`.
+3. On any other tailnet device, open `https://<hub>.<tailnet>.ts.net` in a browser. Done — no
+   per-device setup.
+
+Add `spoke-setup` to a device **only** if you also want Claude/Cowork to act on the board there.
 
 ## Roles
 
@@ -72,8 +103,12 @@ There is no failover to coordinate because there is no second store — a hub sw
 The `hub-handover` skill is the data-safe ceremony: soak the new machine as a restore-hydrated hub
 while the old one stays authoritative; at cutover **stop the old board *before* the final backup** (so
 no write is stranded), restore the old hub's final snapshot on the new machine (producer-aware, no
-board answering, schema ≥ the snapshot), claim the lease, then demote the old machine to a spoke and
-diff its archived store against the final snapshot (any late write is quarantined, never lost). The
+board answering, schema ≥ the snapshot), claim the lease, then demote the old machine and
+diff its archived store against the final snapshot (any late write is quarantined, never lost).
+Demoting to a spoke is optional, not obligatory: if you only want to keep *viewing* the new hub from
+the old machine, it needs **nothing** installed — just open the new hub's `tailscale serve` URL in a
+browser, which makes it a **viewer**, not a spoke (run `spoke-setup` there only if you still want
+agents on it). Either way its own board and backup services are stopped as part of the handover. The
 same skill covers unplanned failover onto a warm-standby machine. The single irreversible hazard —
 running old code against a newer store — is blocked structurally by the
 [fail-closed schema guard](../reference/migration.md#store-schema-versions-schemaversion).

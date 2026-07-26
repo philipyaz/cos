@@ -78,10 +78,19 @@ writers are not coordinated beyond the single Next.js process.
 **Multi-device — decided: hub & spoke (not a synced store).** When the second device arrived, the
 answer was **not** to swap the store for SQLite/Postgres or a synced `cases.json` — every such design
 inherits merge conflicts and schema skew between two live stores. Instead the single file-backed store
-**stays on one machine (the hub)**, and other machines are **spokes**: stateless clients whose
-board-facing wrappers point at the hub's `BOARD_URL` over a private Tailscale network. Nothing syncs
+**stays on one machine (the hub)**, reached over a private Tailscale network; a machine that runs
+**agents** against it becomes a **spoke** (a stateless client whose board-facing wrappers point at the
+hub's `BOARD_URL`), while a device that only **views** the board installs nothing (see below). Nothing syncs
 because there is nothing to sync. The store implementation is unchanged; the HTTP API is the seam that
-already made this possible. See [Multi-device (hub & spoke)](../architecture/multi-device.md).
+already made this possible.
+
+A **spoke** is needed only where you want **agents** (Claude Code / Cowork) to act on the board — those
+clients accept only *local* stdio MCP servers, so the wrappers run locally and forward tool calls to the
+hub. To merely **view** the board from any other tailnet device you install nothing: the hub serves the
+production board behind `tailscale serve`, and you open the portless `https://<hub>.<tailnet>.ts.net` in a
+browser (full read/write UI — the browser writes through the same HTTP API). So a machine demoted in a hub
+swap (`hub-handover`) can stay a **pure browser viewer** of the new hub — add `spoke-setup` to it only if
+you also want agents there. See [Multi-device (hub & spoke)](../architecture/multi-device.md).
 
 ## Store schema versions (`schemaVersion`)
 

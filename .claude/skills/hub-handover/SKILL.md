@@ -1,13 +1,13 @@
 ---
 name: hub-handover
-description: Move the HUB role from one machine to another — promote a new machine to hub and demote the old one to a spoke (or retire it). The ceremony that makes the swap DATA-SAFE: it freezes the source board BEFORE the final backup (so no write is stranded), enforces a schema precondition on the promoting machine, restores the LEASE-HOLDER's newest snapshot producer-aware, verifies the archived store's digest against the final snapshot after demotion, and prints the non-automatable residue checklist. Use when making your Mac mini (or any machine) the main machine while an existing hub steps down, promoting a spoke to hub, doing a planned hub migration, or recovering from hub failure onto a warm-standby machine. NOT for adding a client (that's spoke-setup) or first-run setup (that's cos-setup).
+description: Move the HUB role from one machine to another — promote a new machine to hub and demote the old one to a browser viewer, a spoke, or retire it. The ceremony that makes the swap DATA-SAFE: it freezes the source board BEFORE the final backup (so no write is stranded), enforces a schema precondition on the promoting machine, restores the LEASE-HOLDER's newest snapshot producer-aware, verifies the archived store's digest against the final snapshot after demotion, and prints the non-automatable residue checklist. Use when making your Mac mini (or any machine) the main machine while an existing hub steps down, promoting a spoke to hub, doing a planned hub migration, or recovering from hub failure onto a warm-standby machine. NOT for adding a client (that's spoke-setup) or first-run setup (that's cos-setup).
 allowed-tools: Bash, Read
 ---
 
 # Hub handover — move the hub role between machines, safely
 
 The **hub** is the one machine that runs the state machine (board, store, backups, routines). Handover
-promotes a **new** machine to hub and demotes the **old** one (to a spoke, or retirement). The whole
+promotes a **new** machine to hub and demotes the **old** one (to a browser **viewer**, a spoke, or full retirement). The whole
 risk is a **write that lands after the final backup** (stranded forever) or a **restore under a live
 board** (silently reverted). This ceremony closes both, in order — do NOT freelance the sequence.
 
@@ -15,6 +15,36 @@ board** (silently reverted). This ceremony closes both, in order — do NOT free
 > machine; the MacBook becomes a spoke). Prereqs: both machines on the same Tailscale tailnet, the
 > **same recovery key** provisioned on both (backup-recovery §1.1 / §2), and the new machine at a code
 > checkout whose `SCHEMA_VERSION` is **≥** the store's schema (the migration's safe direction).
+
+## In plain terms — explain this to the user BEFORE you start
+Everything below this section is written for the machine (you, the agent). **This** section is for the
+**person** — most people asking for this just want *"make my new computer the main one without losing
+anything."* Before you touch a single command, walk the user through what's about to happen, in their
+words. Don't show them the ceremony; tell them this:
+
+- **What this does.** Right now one computer is the "main" machine — it holds your real board, notes,
+  and to-dos, and makes the nightly backups. This moves that "main" job to a *different* computer. The
+  old one keeps working afterwards, just as a remote screen onto the new main — you install nothing on it
+  to keep using it, you just open the new main's web address in a browser (a spoke is only if you also
+  want the AI to *act* on the board from the old machine).
+- **Why it's fussy (not just "copy the files").** In the wrong order, a to-do you add mid-switch could
+  vanish, or an old copy could quietly overwrite newer data. The steps are ordered so **nothing you've
+  typed can be lost** — that's the entire reason it looks elaborate.
+- **What you need ready** (I'll check these for you): both computers on the **same Tailscale network**;
+  the **same backup recovery password** set up on both (the key that unlocks your encrypted backups);
+  and the new computer running an **up-to-date copy of the app**.
+- **How long — two phases.** First a **"try it out" period of a day or more**: the new computer runs
+  alongside the old one so you can confirm everything looks right. Then a **~30-minute switchover** where
+  I briefly stop the old machine, take one final backup, and hand the "main" role to the new computer.
+- **The one rule for you.** Until I say the switchover is finished, **keep doing your real work on the
+  OLD computer.** Anything you type on the *new* one during the try-it-out period is just a rehearsal — it
+  gets wiped when we do the real handover, so don't rely on it yet.
+- **Can we undo it?** Yes. If the new machine turns out wrong after the switchover, there's a clean
+  rollback — no step here is a point of no return as long as we follow the order.
+
+Only once the user understands the above and says go, follow the exact sequence below — and narrate each
+CHECKPOINT to them in the same plain language ("the new machine now shows your real to-dos" rather than
+"SSE stream stays open"). **Do not improvise the order.**
 
 ## The order (each step gates the next — do not reorder)
 
@@ -72,7 +102,7 @@ Don't do real work on it until after cutover.
    is scheduled) `mcp/openwhispr-server/state/watermark.json`. The **Gmail-side** watermarks are labels
    (`cos/processed`, `cos/answer-checked`) — they live in Gmail, shared across machines, so nothing to copy.
 
-### 3 — Demote the OLD hub to a spoke
+### 3 — Demote the OLD hub (to a browser viewer, or a spoke)
 Order matters — the safety-net backup run must happen while the old machine is still a **hub**
 (`backup.mjs` exits 1 immediately for a spoke, before the lease/quarantine logic):
 
@@ -88,11 +118,20 @@ mv "$REPO_ROOT/board/data/cases.json" "$REPO_ROOT/board/data/cases.retired-$(dat
   changed local state** to `orphan/<id>-<ts>.enc` (exit 4). Then compare the archived store's digest
   against the final snapshot; if they differ, a late write slipped in — it's in the orphan blob (the old
   hub already pushed it), recover it via the new hub, never discard it.
-- c) Now **pull `main` freely** (with no live store, the schema-skew deadlock is gone), then run
-  `spoke-setup` — it sets `COS_DEVICE_ROLE=spoke` + `BOARD_URL=<new hub>` and wires only the board-facing
-  wrappers. `launchctl bootout` the old hub's stateful agents (boardapp, guard, sidecars, vault, backup).
+- c) Now **pull `main` freely** (with no live store, the schema-skew deadlock is gone) and `launchctl
+  bootout` the old hub's stateful agents (boardapp, guard, sidecars, vault, backup) — its hub job is over
+  regardless of what it becomes next. Then choose what the old machine BECOMES:
+  - **Pure viewer (the common case, zero setup).** If you only want to keep *seeing/using* the board on
+    the old machine, install NOTHING more — the person opens the new hub's **portless**
+    `https://<new-hub>.<tailnet>.ts.net` (its `tailscale serve` URL) in a browser and gets the full
+    read/write UI over the tailnet. That is a viewer, not a spoke; skip the rest of this step.
+  - **Agents on the old machine too?** ONLY then run `spoke-setup` — it sets `COS_DEVICE_ROLE=spoke` +
+    `BOARD_URL=<new hub>` and wires the board-facing MCP wrappers so Claude Code/Cowork there drive the new
+    hub. A browser can't hand a local agent those tools; wanting agents on the old machine is the SOLE
+    reason to add a spoke.
 
-**CHECKPOINT** — from the old machine (now a spoke): the new hub's board loads over the tailnet with a
+**CHECKPOINT** (spoke path only; a pure viewer needs no check beyond the browser loading the new hub's
+portless URL) — from the old machine (now a spoke): the new hub's board loads over the tailnet with a
 "Connected to <hub>" chip; a write from the spoke appears on the new hub's screen (SSE); `npm run dev`
 **and** a direct `npx next dev` write both REFUSE on the spoke (predev abort + the store's 503
 `spoke-role-refusal`).

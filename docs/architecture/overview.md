@@ -122,7 +122,11 @@ predictable.
   (Anthropic for the model; Gmail / Calendar / WhatsApp if you connect them). What leaves your machine
   is the **encrypted** backup blob — and, if you run [multi-device](multi-device.md), your board traffic
   to the hub over your **private Tailscale network** (WireGuard-encrypted, tailnet-only via
-  `tailscale serve` — never exposed to the public internet).
+  `tailscale serve` — never exposed to the public internet). Which devices need what follows a simple
+  split: **viewing** the board from another tailnet device needs nothing installed — the hub's
+  `tailscale serve` puts its full read/write UI a browser tab away — whereas a **spoke** exists only to
+  *act* on the board with a local agent, whose stdio MCP wrappers are required because Cowork accepts
+  only local stdio servers, not a remote HTTP URL over the tailnet.
 - **The single seam.** The board's **HTTP API is the one and only write path**. The UI is the human
   face of it; the board MCP is the agent's twin. Both write through the same routes, so there is no
   back door and no divergent logic. (The vault, symmetrically, is **knowledge-only** — its MCP has no

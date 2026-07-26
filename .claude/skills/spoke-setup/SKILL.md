@@ -1,6 +1,6 @@
 ---
 name: spoke-setup
-description: Add this machine to an EXISTING Cos as a SPOKE — a stateless client of the hub. It flips COS_DEVICE_ROLE=spoke, points BOARD_URL at the hub's tailnet URL, and wires ONLY the board-facing MCP wrappers (board, calendar, and any enabled add-on wrappers) so Claude Code + Cowork on this machine drive the hub's board over Tailscale. A spoke runs NO local board, NO store, NO backups (the hub owns all of that); its local store guard refuses writes by construction. Use when adding a second (or third) device to a Cos setup, "join my other machine to Cos", "set up my laptop as a spoke", when someone hands you a cos-join:// string, or when a machine should read/write the hub's board without running its own. NOT for the first machine (that's a HUB — use cos-setup).
+description: Add this machine to an EXISTING Cos as a SPOKE — a stateless client of the hub. It flips COS_DEVICE_ROLE=spoke, points BOARD_URL at the hub's tailnet URL, and wires ONLY the board-facing MCP wrappers (board, calendar, and any enabled add-on wrappers) so Claude Code + Cowork on this machine drive the hub's board over Tailscale. A spoke runs NO local board, NO store, NO backups (the hub owns all of that); its local store guard refuses writes by construction. Use when adding a second (or third) device to a Cos setup, "join my other machine to Cos", "set up my laptop as a spoke", when someone hands you a cos-join:// string, or when a machine should drive the hub's board with a local agent (Claude Code/Cowork) without running its own board (to merely view the board, no spoke is needed — just a browser over the hub's Tailscale URL). NOT for the first machine (that's a HUB — use cos-setup).
 allowed-tools: Bash, Read
 ---
 
@@ -14,6 +14,15 @@ single source of truth.
 
 > **This is NOT the first-machine path.** The first machine is a HUB — run `cos-setup`. Use this skill
 > only to add a machine to a Cos that already exists.
+
+> **Do you actually need a spoke?** If you only want to VIEW / use the board UI from this machine, you
+> need NOTHING here — open the hub's `tailscale serve` URL (`https://<hub>.<tailnet>.ts.net`, portless
+> HTTPS 443) in a browser and you get the full read/write UI (zero setup; the browser writes through the
+> same HTTP API). Run `spoke-setup` **only** to let **Claude Code / Cowork ACT on the board from this
+> machine** with local MCP tools. Why a spoke and not just the URL: Cowork accepts **only local stdio MCP
+> servers** (never a remote HTTP MCP over the tailnet), so a thin local wrapper pointed at the hub is the
+> only way to hand a local agent those tools — a browser can't. **VIEW it → browser; ACT with an agent →
+> spoke.**
 
 ## What you need first — the join string
 
