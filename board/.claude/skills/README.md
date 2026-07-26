@@ -13,6 +13,28 @@ one-line-triggered; see **[Authoring a skill](#authoring-a-skill--best-practice)
 This page indexes the skills that make good recurring automations, with **use-case ideas** to spark your
 own — because a scheduled task is just a prompt that happens to run on a timer.
 
+## Installing a skill into Cowork
+
+Cowork installs a skill from a **`.zip`**, not from a folder on disk — so every skill here is also
+packaged as a ready-to-upload bundle in **[`../skill-bundles/`](../skill-bundles/)**, one zip per
+skill (its `SKILL.md`, its `references/`, and any other supporting file, with the skill folder at
+the archive root).
+
+1. **Cowork Desktop → Settings → Capabilities → Skills → Upload skill.**
+2. Pick `board/.claude/skill-bundles/<skill>.zip`.
+3. The skill is now invocable as `/<skill>` — on demand, or as the trigger of a scheduled task
+   (below).
+
+The bundles are **generated**, never hand-edited. After changing any skill, rebuild and commit:
+
+```bash
+node scripts/pack-skills.mjs          # rewrite the bundles that changed
+node scripts/pack-skills.mjs --check  # what CI runs — fails if a bundle is stale
+```
+
+CI enforces this on every PR, because a stale zip silently keeps running last month's version of a
+procedure. See **[`../CLAUDE.md`](../CLAUDE.md)** for the full authoring + packaging philosophy.
+
 ## The skills worth scheduling
 
 | Skill | What a scheduled run does | Trigger to paste | Suggested cadence |
