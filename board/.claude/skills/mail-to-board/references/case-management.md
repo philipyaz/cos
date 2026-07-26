@@ -105,9 +105,10 @@ own, not a mere nudge; a notification / watch / want is dropped, not filed.
 ## `vaultLinks`
 
 The *titles* of the entity / concept / source vault pages the case draws on (exactly as they appear
-inside `[[…]]`), e.g. `["Marco Rivera", "DevForge OSS Project"]`. Cross-link both ways — but delegate
-the vault write (the `cases:` frontmatter + `Board:` line on the page) to `/second-brain-ingest`;
-this skill sets the case side.
+inside `[[…]]`), e.g. `["Marco Rivera", "DevForge OSS Project"]`. Cross-link both ways — but the
+vault write (the `cases:` frontmatter + `Board:` line on the page) is written by the **vault**, when
+the sweep submits its knowledge payload via the vault MCP (**`/vault-operations`**) with the case
+ids passed by reference; this skill sets the case side.
 
 ## `snoozeUntil`
 

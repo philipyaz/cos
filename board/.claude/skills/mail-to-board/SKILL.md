@@ -22,9 +22,10 @@ HTTP, and the MCP tools exist for exactly this.
 The skill **does not send or draft email**. The only thing it ever writes back to
 Gmail is the **`cos/processed`** watermark label. And it owns the *board* side only:
 the *knowledge* in an email — a fact, a decision, new context about the sender — is
-handed to **`/second-brain-ingest`**, which re-synthesizes the vault. This skill
-reconciles cases; the router synthesizes knowledge. (The vault is knowledge-only:
-never write task checkboxes into wiki pages — open work lives on the board.)
+submitted to the vault through the `vault` MCP's async `ingest`, driven per
+**`/vault-operations`**; the vault synthesizes knowledge, this skill reconciles cases.
+(The vault is knowledge-only: never write task checkboxes into wiki pages — open work
+lives on the board.)
 
 > **The headline guardrail.** The board is a *shared* surface — the human edits it by
 > hand in the UI, the agent edits it through this skill. An email can make the agent
@@ -336,16 +337,24 @@ finds nothing new simply no-ops.
 ## Step 9 — Entity resolution (brief)
 
 Resolve the sender's email address to *one canonical vault entity* — heuristic first (name, known
-email, existing wiki entity pages), then the vault **alias map** (`wiki/entities/Aliases.md` if
-present) for nicknames / secondary emails the heuristic can't catch. The resolved entity is a
+email, existing wiki entity pages), then the vault **alias map** (**`aliases.md`** at the vault
+root) for nicknames / secondary emails the heuristic can't catch. The resolved entity is a
 `vaultLinks` target, so a sender's address, a spoken name, and a board entity all collapse to the
-same page. Hand the *knowledge* in the email to **`/second-brain-ingest`** for the vault
-re-synthesis; this skill owns the board reconciliation.
+same page.
+
+At the end of the sweep, compose **one consolidated knowledge payload** for the run — the facts,
+decisions, and new sender-context worth keeping, with resolved entity names and the touched
+`CASE-<n>` ids — and submit it to the vault MCP: `ingest({ content, cases })` (omit `domain`; the
+vault classifies each input from its content). Drive the job to a terminal state per
+**`/vault-operations`** — don't restate the poll loop here, the skill name is the delegation. One
+job per run, not per thread: N jobs would mint N poll loops and N vault sessions for no benefit. If
+the run surfaced nothing worth keeping, skip the submission and say so in the report. In approval
+mode (Step 0), the composed payload is shown for confirmation like any other write.
 
 ## Step 10 — Log and report
 
 When `autoSync` is **on**, append every board write to the matching domain log — `work/log.md` or
-`life/log.md` (the same shape `/second-brain-ingest` uses):
+`life/log.md` (the same shape the vault's domain log uses):
 
     ## [YYYY-MM-DD] route | <thread one-liner>
     Board: updated CASE-12 (→ waiting_for_input, work) for [[Marco Rivera]] · completed T2 · linked M-9.
@@ -362,14 +371,20 @@ Then report, per thread:
 - **Watermarks advanced** — which threads are now `cos/processed`.
 - The **board URL** for anything actionable: `<BOARD_URL>/my-issues`.
 
+And once, for the run: **Vault ingest** — the job's terminal status (`completed` / `failed` /
+`interrupted` / `cancelled`) and what landed, or "no knowledge worth ingesting this run".
+
 ---
 
 ## What's next
 
 After a sweep, the user can:
-- **Ask "what's open / what am I waiting on"** → `/second-brain-query` (answers from the board by
-  domain and lane).
-- **Process the knowledge too** — `/second-brain-ingest` re-synthesizes the vault for the senders /
-  topics this sweep touched and writes the `vaultLinks` ↔ `cases:` cross-links.
+- **Ask "what's open / what am I waiting on"** → the **board** (board MCP `search`, or the board
+  UI) — open-work questions live there, not in the vault.
+- **Ask "what do I know about this person / company / matter"** → the vault MCP's **`query`**
+  (synchronous — see **`/vault-operations`**).
 - **Re-run the sweep** — it's idempotent, so extra cycles that find nothing new simply no-op (or let
   the next scheduled run hand it the next batch).
+
+The run's knowledge is already in flight (Step 9) — the report (Step 10) carries the ingest job's
+status.

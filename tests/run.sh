@@ -9,6 +9,11 @@
 #      HARD gate. Needs Node >= 22 (TS type-stripping for `node --test`); SKIPped
 #      (not failed) on older Node so the rest of the suite still runs.
 #   2. board-lint.mjs  — board invariants (HARD gate: any violation => FAIL).
+#   2b. skill-reachability.mjs — a skill under board/.claude/skills/ may only
+#      delegate to a slash-skill that has a Cowork bundle in
+#      board/.claude/skill-bundles/ (HARD gate). Static, read-only, no board
+#      needed — catches the class of bug where a sweep hands work to a skill
+#      Cowork never installed (cos-ops#1).
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration).
@@ -366,6 +371,21 @@ else
   echo "board-lint: FAIL"
   fail=1
   fail_reasons="${fail_reasons} board-lint"
+fi
+
+# --- 2b. skill-reachability (hard gate) --------------------------------------
+# A skill may only delegate to a slash-skill that exists in its own runtime:
+# every `/skill` named under board/.claude/skills/ must have a Cowork bundle in
+# board/.claude/skill-bundles/. Static, read-only, node-only — the class of bug
+# where a sweep hands work to a skill Cowork never installed (cos-ops#1).
+echo
+echo "--- [2b] skill-reachability (delegation targets) ------------"
+if node "${SCRIPT_DIR}/skill-reachability.mjs"; then
+  echo "skill-reachability: PASS"
+else
+  echo "skill-reachability: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} skill-reachability"
 fi
 
 # --- 3. vault property checks (grep; WARN-level) -----------------------------

@@ -36,13 +36,13 @@ flowchart LR
 3. **`ingest_status({ job_id })`** is polled until the status is terminal.
 4. **`ingest_cancel({ job_id })`** requests a cooperative stop (already-written pages stay).
 
-MCP clients should drive this via the [`vault-operations` skill](https://github.com/philipyaz/cos/blob/main/.claude/skills/vault-operations/SKILL.md),
-which encodes the loop and the never-re-submit rule. **Claude Code** auto-loads it from the repo's
-`.claude/skills/`; **Claude Cowork Desktop** adds custom skills through its UI — package the skill
-folder as a ZIP (`vault-operations/SKILL.md` at the ZIP root) and upload it via **Customize → `+`
-(Skills) → Create skill** (the [`setup-vault`](https://github.com/philipyaz/cos/tree/main/.claude/skills/setup-vault)
-skill scripts the `zip` step). Even without the skill, the `ingest` / `ingest_status` tool
-**descriptions** carry the same submit-then-poll guidance, so it reinforces rather than gates correctness.
+MCP clients should drive this via the [`vault-operations` skill](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/vault-operations/SKILL.md),
+which encodes the loop and the never-re-submit rule. The skill ships a committed bundle at
+`board/.claude/skill-bundles/vault-operations.zip` — install it into **Claude Cowork Desktop** the
+same way as every other skill (**Settings → Capabilities → Skills → Upload skill**); **Claude Code**
+auto-loads it from the repo's `board/.claude/skills/`. Even without the skill, the `ingest` /
+`ingest_status` tool **descriptions** carry the same submit-then-poll guidance, so it reinforces
+rather than gates correctness.
 
 ## Job states
 

@@ -31,8 +31,9 @@ and the **title / `summary`** of the containers *it* created (so it can rename a
 sloppy Initiative to the canonical entity name and give it a one-line description).
 It does **not** triage messages, create cases from channels, move lanes, add/close
 tasks, set labels, edit a case's body, or send anything. Reconciliation is the
-reconcilers' job; knowledge is `/second-brain-ingest`'s job; this skill files and
-labels the *structure* of what already exists.
+reconcilers' job; knowledge is the vault's job (the reconcilers submit it via
+`/vault-operations`); this skill files and labels the *structure* of what already
+exists.
 
 > **Guardrail 1 — the human's hand wins.** The board is a *shared* surface. **Never
 > re-home a node a human placed by hand.** Only an `agent`-placed or never-placed

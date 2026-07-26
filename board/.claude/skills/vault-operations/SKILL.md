@@ -1,6 +1,6 @@
 ---
 name: vault-operations
-description: Drive the `vault` MCP — `ingest` is async (submit, then poll `ingest_status` to a terminal state; never re-submit an in-flight job); `query` is synchronous. Use for any vault ingest or query.
+description: Drive the `vault` MCP — `ingest` is async (submit, then poll `ingest_status` to a terminal state; never re-submit an in-flight job); `query` is synchronous. Use for any vault ingest or query, e.g. "ingest this into my vault", "save this to my knowledge base", or "ask my vault about X".
 ---
 
 # Vault operations — the submit-then-poll lifecycle
@@ -23,7 +23,9 @@ not "done."**
 
 The loop you MUST follow:
 
-1. Call `ingest` with `content` (and/or `files`, `domain`, `cases`). Read `job_id` and
+1. Call `ingest` with `content` (and/or `files`). `domain` is optional — omit it and the vault
+   classifies each input from its content. Pass `cases` (board case ids) to link the ingest to the
+   board work that produced it; they are recorded by reference only. Read `job_id` and
    `poll_interval_ms` from the result's `structuredContent`.
 2. Call `ingest_status({ job_id })`. Repeat every `poll_interval_ms` while `status` is `working` or
    `running`.
@@ -60,5 +62,5 @@ reaches `cancelled`.
   no longer bounded by the client's tool-call timeout (Cowork's ~4-min cap). Submit it and poll.
 - **One unknown/expired `job_id`** from `ingest_status` means the job aged out of its retention
   window (default ~60 min) — re-submit the material rather than treating it as a hard failure.
-- **The vault is knowledge-only.** It never writes the board; a board case id you pass to `ingest` is
-  recorded by reference only. Open-to-do questions belong on the board, not in a `query`.
+- **The vault is knowledge-only.** It never writes the board. Open-to-do questions belong on the
+  board, not in a `query`.
