@@ -10,14 +10,21 @@
 //   node scripts/pack-skills.mjs --list     # print the skills + the files each bundle carries
 //
 // The zips are DETERMINISTIC — entries sorted by path, a fixed 1980-01-01 DOS timestamp, fixed
-// permissions, no extra fields — so rebuilding an unchanged skill produces byte-identical output.
-// That is what lets us commit them: the diff moves only when the skill actually changes, and
-// `--check` can compare bytes instead of keeping a separate checksum manifest.
+// permissions, no extra fields, and entries STORED rather than deflated — so rebuilding an
+// unchanged skill produces byte-identical output on any machine. That is what lets us commit them:
+// the diff moves only when the skill actually changes, and `--check` can compare bytes instead of
+// keeping a separate checksum manifest.
+//
+// WHY STORED, NOT DEFLATED: deflate output is NOT portable. Node bundles its own zlib and switched
+// flavors mid-life (zlib-ng in the newer majors), so the same input compresses to different bytes
+// on Node 22 vs Node 26 — which made every bundle read as "stale" in CI while being clean locally.
+// Storing costs ~2x on disk for Markdown, and it is the better trade anyway: git zlib-compresses
+// and deltas blobs itself, which works well on a stored (mostly plain-text) zip and barely at all
+// on a deflated one, since already-compressed data is incompressible noise to the packfile.
 //
 // Layout inside each archive is `<skill-name>/SKILL.md` (+ any references/, scripts/, assets/):
 // the skill FOLDER sits at the archive root, which is the shape Claude's skill uploader expects.
 
-import { deflateRawSync } from 'node:zlib'
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { REPO_ROOT } from '../config/load-config.mjs'
@@ -87,9 +94,10 @@ const DOS_DATE = 0x0021
 const DOS_TIME = 0x0000
 
 /**
- * Build a ZIP archive from `entries` ({ path, data }), deflate-compressed, in the given order.
- * Deliberately minimal: no zip64, no data descriptors, no extra fields — these bundles are a
- * handful of small Markdown files, well inside every 32-bit limit.
+ * Build a ZIP archive from `entries` ({ path, data }), STORED (method 0 — see the header note on
+ * why compression is off), in the given order. Deliberately minimal: no zip64, no data
+ * descriptors, no extra fields — these bundles are a handful of small Markdown files, well inside
+ * every 32-bit limit.
  */
 function makeZip(entries) {
   const locals = []
@@ -99,16 +107,12 @@ function makeZip(entries) {
   for (const { path, data } of entries) {
     const name = Buffer.from(path, 'utf8')
     const crc = crc32(data)
-    // Store rather than deflate when compression doesn't pay (tiny or incompressible files),
-    // so a bundle is never larger than its contents.
-    const deflated = deflateRawSync(data, { level: 9 })
-    const stored = deflated.length >= data.length
-    const method = stored ? 0 : 8
-    const body = stored ? data : deflated
+    const method = 0 // stored — the only portable choice; see the header note
+    const body = data
 
     const local = Buffer.alloc(30)
     local.writeUInt32LE(0x04034b50, 0) // local file header signature
-    local.writeUInt16LE(20, 4) // version needed (2.0 — deflate)
+    local.writeUInt16LE(10, 4) // version needed (1.0 — stored)
     local.writeUInt16LE(0x0800, 6) // flags: bit 11 = UTF-8 filenames
     local.writeUInt16LE(method, 8)
     local.writeUInt16LE(DOS_TIME, 10)
@@ -122,8 +126,8 @@ function makeZip(entries) {
 
     const central = Buffer.alloc(46)
     central.writeUInt32LE(0x02014b50, 0) // central directory header signature
-    central.writeUInt16LE(0x0314, 4) // version made by: 3 = unix, 20 = zip 2.0
-    central.writeUInt16LE(20, 6)
+    central.writeUInt16LE(0x030a, 4) // version made by: 3 = unix, 10 = zip 1.0
+    central.writeUInt16LE(10, 6) // version needed (1.0 — stored)
     central.writeUInt16LE(0x0800, 8)
     central.writeUInt16LE(method, 10)
     central.writeUInt16LE(DOS_TIME, 12)

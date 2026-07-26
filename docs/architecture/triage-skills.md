@@ -80,10 +80,16 @@ node scripts/pack-skills.mjs --check  # CI gate: fails if any bundle is stale, m
     the scheduled task keeps following the *old* procedure — with nothing at runtime to tell you.
     That is why `--check` is a hard CI gate rather than a convention.
 
-The archives are written **deterministically** (entries sorted, fixed 1980-01-01 timestamps, fixed
-permissions), so rebuilding an unchanged skill is byte-identical. That is what makes committing
-binaries tolerable: the diff moves only when a skill genuinely changes, and the freshness check is
-a byte comparison rather than a separate checksum manifest.
+The archives are written **deterministically** — entries sorted, fixed 1980-01-01 timestamps, fixed
+permissions, and entries *stored rather than compressed* — so rebuilding an unchanged skill is
+byte-identical on any machine. That is what makes committing binaries tolerable: the diff moves only
+when a skill genuinely changes, and the freshness check is a byte comparison rather than a separate
+checksum manifest.
+
+Compression is off deliberately. Node bundles its own zlib and changed flavors between majors, so
+deflate emits different bytes for identical input across Node versions — enough to make every bundle
+read as stale in CI while being clean locally. Storing also suits git better: git zlib-compresses and
+deltas blobs itself, which works on a mostly-plain-text stored zip and barely at all on a deflated one.
 
 ## The two reconcilers as one shared pipeline
 

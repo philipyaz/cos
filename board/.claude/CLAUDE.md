@@ -97,10 +97,18 @@ skill folder sits at the root (`mail-to-board/SKILL.md`, `mail-to-board/referenc
 the shape the uploader expects. `.DS_Store` and friends are excluded.
 
 The bundles are **committed**, which works only because they are **deterministic**: entries sorted,
-a fixed 1980-01-01 timestamp, fixed permissions. Rebuilding an unchanged skill produces
-byte-identical output, so the diff moves only when the skill genuinely changed — and `--check` can
-compare bytes instead of maintaining a checksum manifest. Never hand-edit a `.zip`; it is a build
-artifact of the folder next to it, in the same sense as `.mcp.json` and `docs/reference/labels.md`.
+a fixed 1980-01-01 timestamp, fixed permissions, and entries **stored rather than compressed**.
+Rebuilding an unchanged skill produces byte-identical output *on any machine*, so the diff moves
+only when the skill genuinely changed — and `--check` can compare bytes instead of maintaining a
+checksum manifest. Never hand-edit a `.zip`; it is a build artifact of the folder next to it, in
+the same sense as `.mcp.json` and `docs/reference/labels.md`.
+
+!!! danger "Don't turn compression back on"
+    Storing looks like a missed optimization; it isn't. Node bundles its own zlib and changed
+    flavors between majors, so deflate emits **different bytes for identical input** on Node 22 vs
+    Node 26 — which makes every bundle read as stale in CI while being clean locally. Storing also
+    suits git better: it zlib-compresses and deltas blobs itself, which works on a mostly-plain-text
+    stored zip and barely at all on a deflated one.
 
 CI runs `--check` on every PR. If it fails, you edited a skill and forgot the rebuild — run the
 packer and commit. That failure is the point: it is the only thing standing between a reworded
