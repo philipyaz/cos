@@ -101,11 +101,52 @@ const VAULT_TOOLS: VaultMcpTool[] = [
   },
 ];
 
+// ── Placeholder detection (MIRROR of config/secret-validation.mjs) ─────────────
+// config/secrets.env.example ships a structurally-plausible filler ("sk-ant-xxxxxxxx…" —
+// right prefix, no entropy), so "looks like a key" is not enough: a placeholder must read
+// as ABSENT, or /vault shows a green "ready" light for a key that will 401.
+//
+// WHY A MIRROR AND NOT AN IMPORT: the canonical implementation is
+// config/secret-validation.mjs, used by the setup tooling (scripts/gen-cowork-config.mjs,
+// scripts/check-cowork-secrets.mjs). board/ is a separate npm package with
+// `allowJs: false` and `moduleResolution: bundler`, so it cannot import a .mjs from above
+// its own root. Rather than loosen the board's tsconfig for one predicate, the logic is
+// duplicated here and PINNED by tests/unit/secret-validation.test.ts, which runs one
+// fixture table through BOTH implementations and fails the moment they disagree. If you
+// edit one, edit both — the test will tell you if you forgot.
+export function isPlaceholderSecret(value: string | undefined | null): boolean {
+  if (typeof value !== "string") return false;
+  const v = value.trim();
+  if (!v) return false; // absent is a DIFFERENT state from placeholder — callers separate them
+
+  const markers = [
+    "xxxx", // config/secrets.env.example's own filler
+    "placeholder",
+    "changeme",
+    "change-me",
+    "replace",
+    "your-key",
+    "your_key",
+    "yourkey",
+    "todo",
+    "example",
+    "dummy",
+    "fake-key",
+    "insert-",
+  ];
+  const lower = v.toLowerCase();
+  if (markers.some((m) => lower.includes(m))) return true;
+  if (lower.startsWith("your")) return true;
+  if (/[<>]/.test(v)) return true;
+  if (/(.)\1{5,}$/.test(v)) return true; // a trailing run of one char is filler, not entropy
+  return false;
+}
+
 // ── API key probe (config/secrets.env, fail-safe) ──────────────────────────────
 // secrets.env is a KEY=value shell file (gitignored), so parseCosEnv reads it the same
-// way it reads cos.env. The example value is "sk-ant-xxxxxxxx…": treat a value that
-// contains "xxxx" or starts with "your" (a placeholder/unset) as ABSENT. Any read
-// trouble ⇒ false (never invent a present key). The vault MCP NEEDS this for ingest/query.
+// way it reads cos.env. A placeholder value counts as ABSENT (isPlaceholderSecret above).
+// Any read trouble ⇒ false (never invent a present key). The vault MCP NEEDS this for
+// ingest/query.
 function readApiKeyPresent(): boolean {
   try {
     // config/secrets.env is a KEY=value shell file, same shape as cos.env — read it
@@ -134,9 +175,7 @@ function readApiKeyPresent(): boolean {
       }
     }
     if (!value) return false;
-    const lower = value.toLowerCase();
-    if (lower.includes("xxxx")) return false; // the example placeholder (sk-ant-xxxxxxxx…)
-    if (lower.startsWith("your")) return false; // a "your-key-here" placeholder
+    if (isPlaceholderSecret(value)) return false; // the template value ⇒ treat as unset
     return true;
   } catch {
     return false;
