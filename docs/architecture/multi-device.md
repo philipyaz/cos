@@ -25,6 +25,11 @@ board from another device. The decision is binary:
   HTTP API the wrappers use, so it is full read/write — not read-only. That includes phones: the app
   shell and every drawer size to the dynamic viewport (`dvh`) and reserve the iOS safe-area inset, so
   committing an edit — saving a drawer — works in iOS Safari, with the browser chrome expanded or not.
+  Navigation follows the same viewport: portrait gets a bottom tab bar (My Issues, Inbox with the live
+  unread badge, Reminders, Calendar, More — More carrying Priorities, Vault, the whole Review group,
+  every enabled add-on, and search), while landscape and desktop keep the sidebar, which now scrolls
+  its own overflow. Both surfaces are driven by one shared nav model, so an add-on enabled in
+  `/addons` appears in both with no second list to edit.
 - **Act on the board with an agent on that device** → a **spoke**. Claude Cowork accepts **only local
   stdio MCP servers**; it cannot consume a remote HTTP MCP over the tailnet (a hard, validated
   constraint), so the only way to give a local agent board tools is the thin stdio wrappers

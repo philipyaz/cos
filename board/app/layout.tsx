@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
+import { MobileNav } from "@/components/mobile-nav";
 import { CommandPalette } from "@/components/command-palette";
 import { SchemaAheadBanner } from "@/components/schema-ahead-banner";
 import { SpokeChip } from "@/components/spoke-chip";
@@ -60,10 +61,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <SpokeChip role={getDeviceRole()} />
         <div className="flex h-dvh-fallback w-full overflow-hidden bg-ink-50">
           <Sidebar unreadCount={unreadCount} addonGroups={addonGroups} />
-          <main className="flex-1 flex flex-col min-w-0 bg-white border-l border-ink-100">
+          <main className="flex-1 flex flex-col min-w-0 bg-white border-l border-ink-100 pb-tabbar">
             {children}
           </main>
         </div>
+        {/* Bottom tab bar + More sheet below `md` — shares Sidebar's SSR seeds + nav model. */}
+        <MobileNav unreadCount={unreadCount} addonGroups={addonGroups} />
         {/* Global Cmd/Ctrl+K palette — a self-sufficient client island; needs no props. */}
         <CommandPalette />
       </body>

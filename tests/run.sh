@@ -18,6 +18,9 @@
 #      app/components outside the one declared dvh fallback (HARD gate;
 #      static, node-only — the class of bug where a new drawer puts its Save
 #      button under the iOS toolbar).
+#   2d. mobile-nav.mjs — every href in the shared nav model (board/lib/nav.ts)
+#      is rendered by a below-`md` navigation surface (HARD gate; static — the
+#      class of bug where an add-on's pages are phone-invisible).
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -426,6 +429,21 @@ else
   echo "viewport-lint: FAIL"
   fail=1
   fail_reasons="${fail_reasons} viewport-lint"
+fi
+
+# --- 2d. mobile-nav (below-md navigation reachability) -----------------------
+# Every href in the shared nav model (board/lib/nav.ts) must be reachable from a
+# below-md navigation surface, and the sidebar must scroll its own overflow.
+# Static, read-only, node-only — the class of bug where an add-on's pages are
+# phone-invisible (cos-ops#10).
+echo
+echo "--- [2d] mobile-nav (below-md navigation reachability) --------"
+if node "${SCRIPT_DIR}/mobile-nav.mjs"; then
+  echo "mobile-nav: PASS"
+else
+  echo "mobile-nav: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} mobile-nav"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, one HARD sub-check) --
