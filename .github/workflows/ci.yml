@@ -3,11 +3,18 @@ name: CI
 # Runs on every PR into main and on pushes to main (so the required checks
 # have history on the default branch); also manually triggerable from the
 # Actions tab / `gh workflow run ci.yml`.
+#
+# `merge_group` is REQUIRED, not optional: the merge queue runs the required
+# checks against the *merged* tree on a temporary `gh-readonly-queue/main/...`
+# ref, and a required check that never reports there leaves every queued PR
+# stuck until the queue's timeout ejects it. This trigger is what the queue
+# waits on, so it has to exist on main before the queue is enabled.
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+  merge_group: {}
   workflow_dispatch: {}
 
 # Least-privilege token: CI only needs to read the repo.
