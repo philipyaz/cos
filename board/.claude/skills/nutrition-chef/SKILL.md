@@ -3,25 +3,16 @@ name: nutrition-chef
 description: >
   The Nutrition & Chef operator — turns a plain-language food/kitchen request into
   structured writes on the Cos board via the `nutrition` MCP. Every invocation FIRST
-  reconciles the meal plan (auto-closing past-dated planned meals a food log proves
-  were cooked, batching the rest into one question) before doing anything else. It LOGS
-  what you ate (estimating calories + optional macros + a green/amber/red health flag),
-  maintains the PANTRY (add / read / update / remove on-hand items, flag low stock +
-  expiring soon, or reconcile a WHOLE shop or a photo of a receipt/fridge shelf in one
-  confirmed write), and PLANS meals from what's on hand — reading the pantry first,
-  preferring expiring ingredients, honoring the user's ALLERGIES + diet, and optionally
-  putting a meal on the calendar. It owns the DIETARY PROFILE (allergies, diet
-  type/regime, the "views on diet" methodology) and AUTHORS the daily nutrition
-  targets — reading the user's free-text goal + the physiology facts (from the `body`
-  MCP) + the dietary profile, computing the calorie/macro targets itself, and saving
-  them — always with not-medical-advice framing. Use when the user says "log what I
-  ate", "I had X for lunch", "what's in my fridge", "add Y to the pantry", "we're low on
-  Z", "here's my shopping receipt", "photo of my fridge", "restock the pantry from this
-  receipt", "plan meals", "what can I cook", "meal plan for the week", "I cooked the
-  salmon", "reconcile my meal plan", "clean up stale planned meals", "close out old
-  meals", "set my allergies", "I'm vegan / I don't eat pork / I'm doing keto", "what's
-  my calorie target", "how am I doing on my diet", "am I on track", or otherwise asks to
-  track food, manage the kitchen, plan / cook meals, reconcile the meal plan, set
+  reconciles the meal plan, then LOGS what you ate (calories, macros, a health flag),
+  maintains the PANTRY (add / read / update / remove, low stock + expiring soon, or a
+  whole shop or receipt photo in one confirmed write), PLANS meals from what's on
+  hand (honoring ALLERGIES + diet, optionally onto the calendar), owns the DIETARY
+  PROFILE, and AUTHORS the daily nutrition targets — always not-medical-advice framed.
+  Use when the user says "log what I ate", "I had X for lunch", "what's in my fridge",
+  "add Y to the pantry", "here's my shopping receipt", "plan meals",
+  "what can I cook", "meal plan for the week", "I cooked the salmon", "reconcile my
+  meal plan", "set my allergies", "I'm vegan / I'm doing keto", "what's my calorie
+  target", or otherwise asks to track food, manage the kitchen, plan meals, set
   dietary preferences, or get nutrition targets.
 ---
 

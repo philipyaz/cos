@@ -1,6 +1,16 @@
 ---
 name: hub-handover
-description: Move the HUB role from one machine to another — promote a new machine to hub and demote the old one to a browser viewer, a spoke, or retire it. The ceremony that makes the swap DATA-SAFE: it freezes the source board BEFORE the final backup (so no write is stranded), enforces a schema precondition on the promoting machine, restores the LEASE-HOLDER's newest snapshot producer-aware, verifies the archived store's digest against the final snapshot after demotion, and prints the non-automatable residue checklist. Use when making your Mac mini (or any machine) the main machine while an existing hub steps down, promoting a spoke to hub, doing a planned hub migration, or recovering from hub failure onto a warm-standby machine. NOT for adding a client (that's spoke-setup) or first-run setup (that's cos-setup).
+description: >
+  Move the HUB role from one machine to another — promote a new machine to hub and
+  demote the old one to a browser viewer, a spoke, or retire it. The ceremony that
+  makes the swap DATA-SAFE — it freezes the source board BEFORE the final backup (so
+  no write is stranded), enforces a schema precondition on the promoting machine,
+  restores the LEASE-HOLDER's newest snapshot producer-aware, verifies the archived
+  store's digest against the final snapshot after demotion, and prints the
+  non-automatable residue checklist. Use when making your Mac mini (or any machine)
+  the main machine while an existing hub steps down, promoting a spoke to hub, doing a
+  planned hub migration, or recovering from hub failure onto a warm-standby machine.
+  NOT for adding a client (that's spoke-setup) or first-run setup (that's cos-setup).
 allowed-tools: Bash, Read
 ---
 

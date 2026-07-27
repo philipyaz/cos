@@ -8,11 +8,11 @@ description: >
   session, then YOU author a short brief — readiness (ready / caution / rest), the
   recommended session (the plan, adjusted to recovery), the warnings, the green lights,
   and a one-liner — and `save_pre_workout_brief` it (upserted by today's date). Always
-  with not-medical-advice framing. Use when the user says "should I train today", "am I
-  ready to train", "am I recovered", "pre-workout brief", "training brief", "what should
-  I do today", "what's on for today", "how's my readiness", or otherwise asks whether to
-  train, go easier, or rest. It does NOT make the weekly plan (fitness-training-plan owns
-  that) — it reads today's recovery and the planned session and gives the go / hold-back call.
+  not-medical-advice framed. Use when the user says "should I train today", "am I ready
+  to train", "am I recovered", "pre-workout brief", "training brief", "what should I do
+  today", "what's on for today", "how's my readiness", or otherwise asks whether to
+  train, go easier, or rest. It does NOT make the weekly plan (fitness-training-plan
+  owns that) — it reads today's recovery and gives the go / hold-back call.
 ---
 
 # Pre-workout brief (today's go / hold-back call)

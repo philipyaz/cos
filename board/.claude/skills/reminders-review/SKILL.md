@@ -3,21 +3,15 @@ name: reminders-review
 description: >
   The reminder janitor — a periodic sweep that reviews every OPEN reminder on the
   board and CLOSES the ones whose job is already done or whose moment has passed, so
-  the reminders list stays a live to-do surface instead of a graveyard of stale
-  nudges. For each open reminder it reads the full context via the `board` MCP (the
-  nudge, its due date, HOW LONG it has been sitting, its checklist, its linked emails,
-  and — when it links a case — that case's current state), then takes a CRITICAL look
-  and sorts each into CLOSE (the thing happened / got done → complete), DISMISS (no
-  longer relevant / the decision window lapsed / superseded → dismiss), KEEP-OPEN
-  (still live, or pinned by a star / priority), or NEEDS-YOU (a passed deadline it
-  can't prove is settled). It AUTO-closes ONLY what is PROVEN done (a finished
-  checklist, a linked case now closed, a delivery whose date clearly passed); every
-  judgment call — a lapsed job-alert, an old "decide whether to" nudge, a cold FYI,
-  anything tied to a starred node — it PROPOSES for your approval, and it NEVER
-  deletes. Use when the user says "review my reminders", "check my reminders", "what
-  reminders can I close", "clean up / clear out / tidy my reminders", "close the old /
-  stale / done reminders", "which reminders are still relevant / worth keeping", "go
-  through my reminders", or when the scheduled reminders-review sweep runs.
+  the reminders list stays a live to-do surface instead of a graveyard of stale nudges.
+  It reads each reminder's full context via the `board` MCP, then sorts it into CLOSE
+  (done), DISMISS (no longer relevant / superseded), KEEP-OPEN (still live, or pinned
+  by a star / priority), or NEEDS-YOU (a passed deadline it can't prove is settled). It
+  AUTO-closes ONLY what is PROVEN done; every judgment call it PROPOSES for your
+  approval, and it NEVER deletes. Use when the user says "review my reminders", "what
+  reminders can I close", "clean up / tidy my reminders", "close the old / stale / done
+  reminders", "which reminders are still relevant", "go through my reminders", or when
+  the scheduled reminders-review sweep runs.
 ---
 
 # Reminders → Review (the open-reminder sweep)

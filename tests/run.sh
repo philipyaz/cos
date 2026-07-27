@@ -21,6 +21,10 @@
 #   2d. mobile-nav.mjs — every href in the shared nav model (board/lib/nav.ts)
 #      is rendered by a below-`md` navigation surface (HARD gate; static — the
 #      class of bug where an add-on's pages are phone-invisible).
+#   2e. skill-frontmatter.mjs — every SKILL.md's frontmatter `description` must
+#      load: parseable YAML, <= 1024 chars folded, no XML-tag-shaped
+#      <placeholder> spans (HARD gate). Static, read-only, no board needed —
+#      catches a skill that packs fine but is REJECTED at install/load time.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -457,6 +461,21 @@ else
   echo "mobile-nav: FAIL"
   fail=1
   fail_reasons="${fail_reasons} mobile-nav"
+fi
+
+# --- 2e. skill-frontmatter (hard gate) ---------------------------------------
+# Every SKILL.md's frontmatter `description` must load: valid YAML, <= 1024 chars
+# (measured folded), and free of XML-tag-shaped <placeholder> spans. Static,
+# read-only, node-only — catches the class of bug where a skill packs fine and
+# is then REJECTED at install/load time by the client.
+echo
+echo "--- [2e] skill-frontmatter (description contract) -----------"
+if node "${SCRIPT_DIR}/skill-frontmatter.mjs"; then
+  echo "skill-frontmatter: PASS"
+else
+  echo "skill-frontmatter: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} skill-frontmatter"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, one HARD sub-check) --

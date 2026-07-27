@@ -1,6 +1,6 @@
 ---
 name: setup-vault
-description: Bootstrap a NEW private vault instance from the committed example-vault template — copy the template to vault/<name>, point the vault MCP bridge (:8005) at it via COS_VAULT_DIR, register it with Obsidian + capture its unique vault ID into settings.json (so the board's obsidian:// deep-links open the in-repo vault unambiguously), register it with backup, and confirm it is gitignored. Use when the user says "set up a new vault", "create my vault", "spin up a new knowledge base", wants a fresh private knowledge base, or when Obsidian vault deep-links from the board open the wrong vault — and as the vault step of the cos-setup orchestrator (which sequences the MCP bridge after this).
+description: Bootstrap a NEW private vault instance from the committed example-vault template — copy the template to vault/[name], point the vault MCP bridge (:8005) at it via COS_VAULT_DIR, register it with Obsidian + capture its unique vault ID into settings.json (so the board's obsidian:// deep-links open the in-repo vault unambiguously), register it with backup, and confirm it is gitignored. Use when the user says "set up a new vault", "create my vault", "spin up a new knowledge base", wants a fresh private knowledge base, or when Obsidian vault deep-links from the board open the wrong vault — and as the vault step of the cos-setup orchestrator (which sequences the MCP bridge after this).
 allowed-tools: Bash, Read, Write, Edit
 ---
 
