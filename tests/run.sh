@@ -11,7 +11,10 @@
 #   2. board-lint.mjs  — board invariants (HARD gate: any violation => FAIL).
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
-#      target; reported as WARN so the harness is usable mid-migration).
+#      target; reported as WARN so the harness is usable mid-migration), plus
+#      one HARD sub-check (3c): the board-assertion guardrail phrases must be
+#      present in every second-brain-query/SKILL.md under vault/ and in the
+#      caller-side vault-operations skill (cos-ops#3).
 # NOTE ON THE api-* STEPS (4-12): they drive a REAL board over HTTP, but against an
 # AUTO-STARTED, ISOLATED THROWAWAY board — an own-.next `next dev` on port 3999, its
 # store pointed at a sandbox seeded from tests/fixtures/board-seed.json (synthetic),
@@ -368,11 +371,13 @@ else
   fail_reasons="${fail_reasons} board-lint"
 fi
 
-# --- 3. vault property checks (grep; WARN-level) -----------------------------
+# --- 3. vault property checks (grep; mostly WARN-level, one HARD sub-check) --
 # Post-migration the vault holds knowledge only: no task checkboxes in wiki/,
 # and reminders are drained to the board (no open "- [ ]" left). These are the
 # migration *target*; flagged as WARN so the suite is runnable while the
-# vault-migration streams are still finishing.
+# vault-migration streams are still finishing. Sub-check 3c is different: it
+# is a HARD gate — the board-assertion guardrail (cos-ops#3) must be present
+# in every query skill and in vault-operations, or the suite FAILs.
 echo
 echo "--- [3] vault property checks (grep) ------------------------"
 
@@ -381,7 +386,7 @@ echo "--- [3] vault property checks (grep) ------------------------"
 # "- [ ]" syntax (e.g. a changelog line in wiki/log.md).
 CHECKBOX_RE='^[[:space:]]*- \[ \]'
 
-# 2a. No stray task checkboxes inside wiki/ pages.
+# 3a. No stray task checkboxes inside wiki/ pages.
 if grep -RIlqE -- "${CHECKBOX_RE}" "${COPY_VAULT}"/*/wiki 2>/dev/null; then
   echo "WARN: stray '- [ ]' task checkbox(es) found inside wiki/ (knowledge-only):"
   grep -RInE -- "${CHECKBOX_RE}" "${COPY_VAULT}"/*/wiki 2>/dev/null | sed 's#'"${TMP}"'#<sandbox>#' | sed 's/^/    /'
@@ -390,7 +395,7 @@ else
   echo "OK: no '- [ ]' checkboxes inside wiki/."
 fi
 
-# 2b. No open "- [ ]" item left under life/reminders or work/reminders.
+# 3b. No open "- [ ]" item left under life/reminders or work/reminders.
 # README.md is the transient-buffer note (it documents the "- [ ]" format with an
 # example line) — exclude it; a real undrained item only ever lives in a topic file.
 if grep -RIlqE --exclude=README.md -- "${CHECKBOX_RE}" "${COPY_VAULT}"/*/life/reminders "${COPY_VAULT}"/*/work/reminders 2>/dev/null; then
@@ -400,6 +405,66 @@ if grep -RIlqE --exclude=README.md -- "${CHECKBOX_RE}" "${COPY_VAULT}"/*/life/re
   warn=1
 else
   echo "OK: no open '- [ ]' items under life|work/reminders (all drained to board)."
+fi
+
+# 3c. HARD GATE — board-assertion guardrail (cos-ops#3). A vault query answer is
+# knowledge-as-recorded, never board state: every vault's second-brain-query skill
+# AND the caller-side vault-operations skill must carry the exact guardrail
+# phrases, so a future skill edit cannot silently drop the rule. Unlike 3a/3b
+# (WARN — migration targets), a miss here FAILS the suite.
+guardrail_fail=0
+
+# every vault's query skill (sandbox copy; CI has example-vault only)
+sbq_found=0
+for f in "${COPY_VAULT}"/*/.claude/skills/second-brain-query/SKILL.md; do
+  [ -f "${f}" ] || continue
+  sbq_found=1
+  for p in \
+    "Never assert what the board does or does not contain" \
+    "the board is authoritative" \
+    "as-of the page's \`updated:\` date"; do
+    if ! grep -qF -- "${p}" "${f}"; then
+      echo "FAIL: ${f#"${TMP}"/} is missing the guardrail phrase: ${p}"
+      guardrail_fail=1
+    fi
+  done
+done
+if [ "${sbq_found}" -eq 0 ]; then
+  echo "FAIL: no second-brain-query/SKILL.md under vault/*/.claude/skills — path drift?"
+  guardrail_fail=1
+fi
+
+# the caller-side vault-operations skill (repo tree, read-only; either home —
+# repo root today, board/.claude/skills after cos-ops#1 moves it)
+vo_found=0
+for f in "${REPO_ROOT}/.claude/skills/vault-operations/SKILL.md" \
+         "${REPO_ROOT}/board/.claude/skills/vault-operations/SKILL.md"; do
+  [ -f "${f}" ] || continue
+  vo_found=1
+  for p in \
+    "knowledge as recorded, not board state" \
+    "verified against the \`board\` MCP" \
+    "the board is authoritative" \
+    "as-of the page's \`updated:\` date"; do
+    if ! grep -qF -- "${p}" "${f}"; then
+      echo "FAIL: ${f#"${REPO_ROOT}"/} is missing the guardrail phrase: ${p}"
+      guardrail_fail=1
+    fi
+  done
+done
+if [ "${vo_found}" -eq 0 ]; then
+  echo "FAIL: vault-operations/SKILL.md at neither .claude/skills/ nor board/.claude/skills/."
+  guardrail_fail=1
+fi
+
+if [ "${guardrail_fail}" -ne 0 ]; then
+  echo "vault-board-guardrail: FAIL"
+  echo "  hint: the guardrail text lives in vault/example-vault/.claude/skills/second-brain-query/SKILL.md"
+  echo "  and the vault-operations skill — live-vault copies are updated by hand (no re-sync path)."
+  fail=1
+  fail_reasons="${fail_reasons} vault-board-guardrail"
+else
+  echo "OK: board-assertion guardrail present in every query skill + vault-operations."
 fi
 
 # --- start the throwaway TEST board (api steps [4]-[12] drive THIS, never live)
