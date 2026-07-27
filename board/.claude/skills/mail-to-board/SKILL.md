@@ -343,9 +343,13 @@ root) for nicknames / secondary emails the heuristic can't catch. The resolved e
 same page.
 
 At the end of the sweep, compose **one consolidated knowledge payload** for the run — the facts,
-decisions, and new sender-context worth keeping, with resolved entity names and the touched
-`CASE-<n>` ids — and submit it to the vault MCP: `ingest({ content, cases })` (omit `domain`; the
-vault classifies each input from its content). Drive the job to a terminal state per
+decisions, and new sender-context worth keeping, with resolved entity names and the ids of the
+cases the payload actually carries knowledge about — and submit it to the vault MCP:
+`ingest({ content, cases })` (omit `domain`; the vault classifies each input from its content). A
+case only lane-moved, watermarked, or task-ticked this run — with nothing about it in the payload —
+stays OUT of `cases`: `/vault-operations` stamps a receipt on every id in `cases` once the ingest
+completes, so over-including one here marks it "covered" when the vault heard nothing about it.
+Drive the job to a terminal state per
 **`/vault-operations`** — don't restate the poll loop here, the skill name is the delegation. One
 job per run, not per thread: N jobs would mint N poll loops and N vault sessions for no benefit. If
 the run surfaced nothing worth keeping, skip the submission and say so in the report. In approval
@@ -371,8 +375,16 @@ Then report, per thread:
 - **Watermarks advanced** — which threads are now `cos/processed`.
 - The **board URL** for anything actionable: `<BOARD_URL>/my-issues`.
 
-And once, for the run: **Vault ingest** — the job's terminal status (`completed` / `failed` /
-`interrupted` / `cancelled`) and what landed, or "no knowledge worth ingesting this run".
+And once, for the run:
+- **Vault ingest** — the job's terminal status (`completed` / `failed` / `interrupted` /
+  `cancelled`) and what landed, or "no knowledge worth ingesting this run".
+- **Vault coverage backlog** — once the vault job settles, call the `board` MCP's
+  `get_vault_coverage` and report the count as *"N matters the vault has not been told about"* (one
+  clean line at zero). Key the escalation on **growth**, not an absolute number: if this run's N is
+  higher than the last reported count (check the domain log's last "matters the vault has not been
+  told about" line), lead the WHOLE report with it (⚠) instead of burying it — a climbing number
+  means capture is losing ground. A large-but-shrinking N is the standing backlog draining, and
+  stays in the ordinary line.
 
 ---
 
@@ -387,4 +399,4 @@ After a sweep, the user can:
   the next scheduled run hand it the next batch).
 
 The run's knowledge is already in flight (Step 9) — the report (Step 10) carries the ingest job's
-status.
+status and the vault coverage backlog.

@@ -36,7 +36,7 @@ const VALID_LABEL_COLORS = new Set([
   "sky", "blue", "indigo", "violet", "fuchsia", "pink",
 ]); // labels — kept in lockstep with board/lib/types.ts VALID_LABEL_COLORS
 const VALID_REMINDER_STATUS = new Set(["open", "done", "dismissed"]); // reminders (v5) — board/lib/types.ts VALID_REMINDER_STATUS
-const SCHEMA_VERSION = 14; // board/lib/types.ts SCHEMA_VERSION (v12 fitness data; v13 fitness coaching; v14 "body" add-on db.bodyProfile/db.bodyObjective + nutrition db.dietProfile/db.nutritionTargets, db.weights re-homed to body, db.nutritionGoal dropped on next write)
+const SCHEMA_VERSION = 15; // board/lib/types.ts SCHEMA_VERSION (v12 fitness data; v13 fitness coaching; v14 "body" add-on db.bodyProfile/db.bodyObjective + nutrition db.dietProfile/db.nutritionTargets, db.weights re-homed to body, db.nutritionGoal dropped on next write; v15 adds CaseRecord.vaultIngestedAt, the per-case vault-ingest receipt)
 const REMINDER_TASK_ID_RE = (reminderId) =>
   new RegExp(`^${reminderId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-T\\d+$`); // reminder task ids (v6): REM-<n>-T<k>
 const CASE_ID_RE = /^CASE-\d+$/;
@@ -229,8 +229,8 @@ for (const [i, c] of cases.entries()) {
 
   // --- v3 CASE FIELDS (all optional; ERROR only when present-but-malformed) --
 
-  // ISO date fields: dueAt / startDate / snoozeUntil / archivedAt
-  for (const field of ["dueAt", "startDate", "snoozeUntil", "archivedAt"]) {
+  // ISO date fields: dueAt / startDate / snoozeUntil / archivedAt / vaultIngestedAt
+  for (const field of ["dueAt", "startDate", "snoozeUntil", "archivedAt", "vaultIngestedAt"]) {
     if (c?.[field] !== undefined && !isISOString(c[field])) {
       fail(
         "case dates (v3)",

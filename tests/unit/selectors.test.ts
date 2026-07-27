@@ -14,6 +14,7 @@ import {
   groupCases,
   todayCases,
   needsAttention,
+  selectVaultCoverage,
   isStale,
   dueStatus,
   slaStatus,
@@ -492,6 +493,103 @@ test("needsAttention", async (t) => {
     assert.deepEqual(r.agingWaiting, []);
     assert.deepEqual(r.untriaged, []);
     assert.deepEqual(r.unlinked, []);
+  });
+});
+
+// ── selectVaultCoverage ───────────────────────────────────────────────────────
+test("selectVaultCoverage", async (t) => {
+  await t.test("never: vaultLinks present, no receipt at all", () => {
+    const c = mkCase({ id: "a", vaultLinks: ["Acme"] });
+    const { gaps } = selectVaultCoverage([c], NOW);
+    assert.deepEqual(gaps.map((g) => g.id), ["a"]);
+    assert.equal(gaps[0].reason, "never");
+  });
+
+  await t.test("stale: receipt older than updatedAt", () => {
+    const c = mkCase({
+      id: "a",
+      vaultLinks: ["Acme"],
+      updatedAt: "2026-05-31T00:00:00.000Z",
+      vaultIngestedAt: "2026-05-20T00:00:00.000Z",
+    });
+    const { gaps } = selectVaultCoverage([c], NOW);
+    assert.deepEqual(gaps.map((g) => g.id), ["a"]);
+    assert.equal(gaps[0].reason, "stale");
+  });
+
+  await t.test("equal stamps read as covered (strict <, not <=)", () => {
+    const c = mkCase({
+      id: "a",
+      vaultLinks: ["Acme"],
+      updatedAt: "2026-05-20T00:00:00.000Z",
+      vaultIngestedAt: "2026-05-20T00:00:00.000Z",
+    });
+    assert.deepEqual(selectVaultCoverage([c], NOW).gaps, []);
+  });
+
+  await t.test("no vaultLinks: never a gap, receipted or not", () => {
+    const noLinks = mkCase({ id: "noLinks" });
+    const receipted = mkCase({ id: "receipted", vaultIngestedAt: "2020-01-01T00:00:00.000Z" });
+    assert.deepEqual(selectVaultCoverage([noLinks, receipted], NOW).gaps, []);
+  });
+
+  await t.test("empty vaultLinks array: never a gap", () => {
+    const c = mkCase({ id: "a", vaultLinks: [] });
+    assert.deepEqual(selectVaultCoverage([c], NOW).gaps, []);
+  });
+
+  await t.test("archived: excluded by default, included via includeArchived", () => {
+    const c = mkCase({ id: "a", vaultLinks: ["Acme"], archivedAt: "2026-05-30T00:00:00.000Z" });
+    assert.deepEqual(selectVaultCoverage([c], NOW).gaps, []);
+    const withArchived = selectVaultCoverage([c], NOW, { includeArchived: true }).gaps;
+    assert.deepEqual(withArchived.map((g) => g.id), ["a"]);
+  });
+
+  await t.test("future-snoozed: excluded by default (parity with applyBoardQuery's default)", () => {
+    const c = mkCase({ id: "a", vaultLinks: ["Acme"], snoozeUntil: "2026-12-01T00:00:00.000Z" });
+    assert.deepEqual(selectVaultCoverage([c], NOW).gaps, []);
+  });
+
+  await t.test("unparseable vaultIngestedAt reads as never (fail-closed)", () => {
+    const c = mkCase({ id: "a", vaultLinks: ["Acme"], vaultIngestedAt: "not-a-date" });
+    const { gaps } = selectVaultCoverage([c], NOW);
+    assert.equal(gaps[0]?.reason, "never");
+  });
+
+  await t.test("unparseable updatedAt with a valid receipt reads as stale, never silently covered", () => {
+    const c = mkCase({
+      id: "a",
+      vaultLinks: ["Acme"],
+      updatedAt: "not-a-date",
+      vaultIngestedAt: "2026-05-20T00:00:00.000Z",
+    });
+    const { gaps } = selectVaultCoverage([c], NOW);
+    assert.equal(gaps[0]?.reason, "stale");
+  });
+
+  await t.test("the gap projection carries exactly the documented fields", () => {
+    const c = mkCase({
+      id: "a",
+      title: "Acme renewal",
+      domain: "work",
+      status: "waiting_for_input",
+      vaultLinks: ["Acme", "Jane Doe"],
+      updatedAt: "2026-05-31T00:00:00.000Z",
+    });
+    const { gaps } = selectVaultCoverage([c], NOW);
+    assert.deepEqual(gaps, [
+      {
+        id: "a",
+        title: "Acme renewal",
+        domain: "work",
+        status: "waiting_for_input",
+        kind: undefined,
+        vaultLinks: ["Acme", "Jane Doe"],
+        updatedAt: "2026-05-31T00:00:00.000Z",
+        vaultIngestedAt: undefined,
+        reason: "never",
+      },
+    ]);
   });
 });
 

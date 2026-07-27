@@ -45,7 +45,9 @@ The loop you MUST follow:
 3. Stop only when `status` is **terminal**: `completed`, `failed`, `cancelled`, or `interrupted`.
 4. Then report to the user:
    - `completed` → `structuredContent.result` holds the ingest summary (pages synthesized, sources
-     created). Report what landed.
+     created). If the `ingest` call passed `cases`, immediately stamp the board-side receipt — call
+     the `board` MCP's `mark_vault_ingested({ ids })` with those same case ids — then report what
+     landed.
    - `failed` → `structuredContent.error.message` says why. If `error.retryable` is true, you may
      re-submit.
    - `cancelled` → the job was cancelled; already-written pages stayed (no rollback).
@@ -61,6 +63,16 @@ job was queued. Wait for `completed`.
 flight, you get back the **same `job_id`** (with `dedup: true`), and no second agent runs. That is
 the signal to **poll**, not to retry. Re-submitting identical content burns a turn and tells you
 nothing new — call `ingest_status` instead.
+
+## The board-side receipt
+
+The receipt is what lets the board answer *"what has the vault never been told?"* (`get_vault_coverage`
+on the `board` MCP) — stamp the receipt only on `completed`; a `failed`, `cancelled`, or `interrupted`
+job leaves it unset, because the field means *landed*, never *attempted*. Skip the call when the
+ingest named no `cases`.
+
+No separate approval is needed — the receipt records the completion of an ingest that was already
+confirmed, not a new judgment.
 
 ## Cancelling
 

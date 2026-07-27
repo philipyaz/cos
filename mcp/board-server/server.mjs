@@ -29,6 +29,7 @@
 //   priority: get_priorities, add_priority, update_priority, remove_priority, set_starred
 //   labels  : install_label_bundle, uninstall_label_bundle (configure the taxonomy)
 //   approval: propose, approve, reject
+//   vault   : get_vault_coverage, mark_vault_ingested (the vault-ingest receipt)
 //
 // v3.2: reminders are ENRICHED — create_reminder/update_reminder carry catalog
 // `labels` + a short `tasks` checklist, link_reminder_message attaches an email to
@@ -41,6 +42,13 @@
 // add/update/remove_priority), so the agent can ALIGN its work to the user's focus.
 // Priorities ride the board API (no new server/port); notes live at /api/priorities,
 // starring is PATCH /api/cases/{id} { starred }.
+//
+// v3.4: VAULT COVERAGE — the receipt half of the vault<->board bridge. A case's
+// `vaultLinks` is INTENT (it should be in the vault); `vaultIngestedAt` is the RECEIPT
+// (it landed). get_vault_coverage reads which vaultLinks cases have no/stale receipt —
+// the alarm for a capture pipeline that fails silently; mark_vault_ingested stamps the
+// receipt, called ONLY after the vault MCP confirms a `completed` ingest. Core (no
+// add-on gate); rides `/api/cases/vault-coverage` + `/api/cases/vault-receipt`.
 //
 // HIERARCHY (v3): the board is a strict 3-tier tree of MAX DEPTH 3, where ALL THREE
 // tiers are the SAME CaseRecord (id CASE-<n>) distinguished by a `kind` field:
@@ -84,7 +92,7 @@ import {
 const CRM_BASE_URL = baseUrl("CRM_BASE_URL", "http://localhost:3000");
 
 const server = new Server(
-  { name: "board", version: "3.3.0" },
+  { name: "board", version: "3.4.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -806,6 +814,51 @@ async function handleListUnansweredMessages(args) {
   return text(lines.join("\n"));
 }
 
+// ── Vault coverage tools ─────────────────────────────────────────────────────
+// The receipt half of the vault<->board bridge (see board/.claude/skills/vault-operations
+// SKILL.md). get_vault_coverage reads which cases the vault has never (or stalely) heard
+// about; mark_vault_ingested writes the receipt after a confirmed completed ingest.
+
+// List cases carrying vaultLinks whose ingest receipt is absent or stale — the sweep's
+// end-of-run backlog line ("N matters the vault has not been told about").
+async function handleGetVaultCoverage(args) {
+  const qs = args.includeArchived ? "?includeArchived=1" : "";
+  const { data, errorResult } = await api("GET", `/api/cases/vault-coverage${qs}`);
+  if (errorResult) return errorResult;
+
+  const gaps = data.gaps ?? [];
+  const count = typeof data.count === "number" ? data.count : gaps.length;
+  if (count === 0) {
+    return text("0 matters the vault has not been told about — capture coverage is clean.");
+  }
+  const lines = [`${count} ${count === 1 ? "matter" : "matters"} the vault has not been told about.`];
+  for (const g of gaps) {
+    const links = Array.isArray(g.vaultLinks) ? g.vaultLinks.map((v) => `[[${v}]]`).join(", ") : "";
+    const receiptClause =
+      g.reason === "stale" && g.vaultIngestedAt ? ` · receipt ${g.vaultIngestedAt.slice(0, 10)}` : "";
+    lines.push(
+      `  - ${g.id} [${g.reason}] ${g.title} — vault: ${links} · updated ${g.updatedAt.slice(0, 10)}${receiptClause}`
+    );
+  }
+  return text(lines.join("\n"));
+}
+
+// Stamp the vault-ingest receipt on the given cases. Call ONLY after ingest_status
+// reports `completed` for an ingest that named them — see SKILL.md for the contract.
+async function handleMarkVaultIngested(args) {
+  const ids = Array.isArray(args.ids) ? args.ids.filter((x) => typeof x === "string" && x.trim() !== "") : [];
+  if (!ids.length) return err("'ids' must be a non-empty array of case ids.");
+
+  const { data, errorResult } = await api("POST", "/api/cases/vault-receipt", { ids });
+  if (errorResult) return errorResult;
+
+  const marked = data.marked ?? [];
+  const unknown = data.unknown ?? [];
+  const lines = [`Receipt stamped on ${marked.length} case(s): ${marked.join(", ")}.`];
+  if (unknown.length) lines.push(`Skipped ${unknown.length} unknown id(s): ${unknown.join(", ")}.`);
+  return text(lines.join("\n"));
+}
+
 // ── Reminder tools ───────────────────────────────────────────────────────────
 // Reminders are lightweight nudges (CHECK/DO) that ride the board API at
 // /api/reminders. reminder.caseId optionally links to ANY tier (initiative/
@@ -1461,6 +1514,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleMarkMessageAnswered(args);
     case "list_unanswered_messages":
       return handleListUnansweredMessages(args);
+    // vault coverage
+    case "get_vault_coverage":
+      return handleGetVaultCoverage(args);
+    case "mark_vault_ingested":
+      return handleMarkVaultIngested(args);
     // reminders
     case "create_reminder":
       return handleCreateReminder(args);

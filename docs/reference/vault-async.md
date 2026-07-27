@@ -44,6 +44,15 @@ auto-loads it from the repo's `board/.claude/skills/`. Even without the skill, t
 `ingest_status` tool **descriptions** carry the same submit-then-poll guidance, so it reinforces
 rather than gates correctness.
 
+**The receipt bookend.** On `completed`, the agent stamps a per-case receipt
+(`CaseRecord.vaultIngestedAt`) on the cases the ingest named — the `board` MCP's
+`mark_vault_ingested` / `POST /api/cases/vault-receipt` — never on a `failed`, `cancelled`, or
+`interrupted` job. The board can then answer *"what has the vault never been told?"*
+deterministically: `GET /api/cases/vault-coverage` / the `get_vault_coverage` tool report every
+case carrying `vaultLinks` whose receipt is absent or older than its own `updatedAt` — the alarm
+that makes a silent capture outage visible instead of indistinguishable from a healthy one. See
+[migration](migration.md) for the schema bump.
+
 ## Job states
 
 | Status | Meaning |
