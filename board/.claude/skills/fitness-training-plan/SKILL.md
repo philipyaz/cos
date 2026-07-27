@@ -2,21 +2,19 @@
 name: fitness-training-plan
 description: >
   The Fitness coach's HEADLINE skill — generate a personalised WEEKLY TRAINING
-  PLAN for the athlete with deliberate VARIETY / ROTATION (rotate sports, focus,
-  and intensity week to week; alternate hard/easy; progressive overload toward the
-  goal date), then PERSIST it via `save_training_plan` so it lands on the
-  /fitness/training-plan history feed. It reads the athlete profile (training
-  focus, goal date, days/week, max session, sports, equipment) AND the body add-on
-  (training status, current weight, the free-text body goal), the last ~4 weeks of
-  actual workouts, the recovery state (HRV / sleep / resting HR / form score), and
-  the LAST few plans — and deliberately varies the new week against
-  them so no two weeks look the same. Use when the user says "make me a training
-  plan", "plan my week of workouts", "generate this week's training plan", "build
-  my weekly training plan", "plan my training", "what should I train this week",
-  "I'm training for <an event>, plan my week", or otherwise asks for a forward
-  week of structured sessions. (For ingesting/reading watch data use
-  fitness-health-data; for the past week use fitness-weekly-review; for the daily
-  go/no-go brief use fitness-pre-workout-brief.)
+  PLAN for the athlete with deliberate VARIETY / ROTATION (rotate sports and
+  intensity; alternate hard/easy; progressive overload toward the goal date),
+  then PERSIST it via `save_training_plan` so it lands on the
+  /fitness/training-plan history feed. It reads the athlete profile (focus, goal
+  date, availability, sports, equipment), the body add-on (training status, weight,
+  the body goal), the last ~4 weeks of actual workouts, the recovery state (HRV /
+  sleep / resting HR / form score), and the LAST few plans — varying the new week
+  against them. Use when the user says "make me a training plan", "plan my week
+  of workouts", "generate this week's training plan", "what should I train this
+  week", "I'm training for a race, plan my week", or otherwise
+  asks for a forward week of structured sessions. (Watch data → fitness-health-data;
+  the past week → fitness-weekly-review; the daily go/no-go brief →
+  fitness-pre-workout-brief.)
 ---
 
 # Fitness — weekly training plan (the headline coaching skill)

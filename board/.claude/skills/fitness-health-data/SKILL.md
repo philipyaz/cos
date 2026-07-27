@@ -3,18 +3,17 @@ name: fitness-health-data
 description: >
   The Fitness DATA-PLANE operator — ingests, queries, and maintains Apple Watch
   health data on the Cos board via the `fitness` MCP, and pushes a health report to
-  the vault. It INGESTS canonical health entries (push workout / sleep / HRV /
-  resting-HR / steps / VO2max, dedup by id, 90-day auto-purge), READS the data back
-  (raw entries, a per-type summary, multi-day trends, a full daily health + nutrition
-  summary), FIXES bad rows (hard-delete by id or date range), and composes + persists a
-  HEALTH REPORT to the vault. It does NOT design plans / reviews / briefs and does NOT
-  edit the athlete profile — those are the coaching + profile skills. Always with
-  not-medical-advice framing on any interpretation. Use when the user says "push my
-  watch data", "log my workout", "log my sleep", "log my HRV", "I ran 5k", "how did I
-  sleep", "what's my HRV trend", "summarize my health today", "how was my day", "show my
-  resting HR over two weeks", "delete that bad entry", "remove the duplicate sleep
-  entry", "save my health summary to the vault", "log this week's training to my
-  knowledge base", or otherwise asks to ingest, read, fix, or vault-archive health data.
+  the vault. It INGESTS canonical health entries (workout / sleep / HRV / resting-HR /
+  steps / VO2max, dedup by id, 90-day auto-purge), READS the data back (raw entries,
+  per-type summaries, multi-day trends, a daily health + nutrition summary), FIXES bad
+  rows (hard-delete by id or date range), and persists a HEALTH REPORT to the vault. It
+  does NOT design plans / reviews / briefs and does NOT edit the athlete profile —
+  those are the coaching + profile skills. Not medical advice. Use when
+  the user says "push my watch data", "log my workout", "log my sleep", "log my HRV",
+  "I ran 5k", "how did I sleep", "what's my HRV trend", "summarize my health today",
+  "how was my day", "show my resting HR over two weeks", "delete that bad entry",
+  "save my health summary to the vault", or otherwise asks to ingest, read, fix, or
+  vault-archive health data.
 ---
 
 # Fitness — health data (the data-plane operator)
