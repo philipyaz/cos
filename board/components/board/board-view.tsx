@@ -1158,7 +1158,7 @@ export function BoardView({
         <div
           role="toolbar"
           aria-label="Bulk actions"
-          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[55] flex items-center gap-2 px-3 py-2 rounded-lg shadow-card text-[12.5px] bg-ink-900 text-white"
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[55] flex items-center gap-2 px-3 py-2 rounded-lg shadow-card text-[12.5px] bg-ink-900 text-white mb-safe"
         >
           <span className="font-medium tabular-nums pl-1 pr-1">{picked.size} selected</span>
           <span className="w-px h-5 bg-white/15" aria-hidden />
@@ -1238,7 +1238,7 @@ export function BoardView({
         <div
           role="status"
           aria-live="polite"
-          className={`fixed left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 px-3.5 py-2 rounded-lg shadow-card text-[12.5px] bg-ink-900 text-white ${
+          className={`fixed left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 px-3.5 py-2 rounded-lg shadow-card text-[12.5px] bg-ink-900 text-white mb-safe ${
             picked.size > 0 ? "bottom-20" : "bottom-4"
           }`}
         >
