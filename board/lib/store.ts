@@ -190,6 +190,9 @@ const nowISO = (): string => new Date().toISOString();
 // when it is an object (the "fitness" add-on — mirrors db.weights/db.nutritionGoal).
 // v13 carries db.coachingArtifacts forward when it is an array (the "fitness" add-on's
 // polymorphic AI coaching artifacts — mirrors db.healthEntries).
+// v15 (CaseRecord.vaultIngestedAt, the per-case vault-ingest receipt) is a no-op here too —
+// the optional rides through migrateCase's spread verbatim, exactly like starred (v7) and
+// MessageRecord.url (v8): absent stays absent, present rides through unchanged.
 export function migrate(raw: unknown): DBShape {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
@@ -824,6 +827,8 @@ export function applyCaseUpdate(caseRec: CaseRecord, patch: Record<string, unkno
   if ("starred" in patch) caseRec.starred = patch.starred ? true : undefined;
   if ("snoozeUntil" in patch) caseRec.snoozeUntil = toOptionalString(patch.snoozeUntil);
   if ("archivedAt" in patch) caseRec.archivedAt = toOptionalString(patch.archivedAt); // null clears
+  // vaultIngestedAt is deliberately NOT in this whitelist — nothing writes it except
+  // POST /api/cases/vault-receipt, which server-stamps it in the same instant as updatedAt.
   caseRec.updatedAt = nowISO();
   return caseRec;
 }

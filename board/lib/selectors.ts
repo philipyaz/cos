@@ -362,6 +362,65 @@ export function needsAttention(
   };
 }
 
+// One case in the vault-coverage gap set — a trimmed projection, not a full CaseRecord
+// (the read is an answer, not a case dump).
+export interface VaultCoverageGap {
+  id: string;
+  title: string;
+  domain: CaseDomain;
+  status: CaseStatus;
+  kind?: CaseKind;
+  vaultLinks: string[];
+  updatedAt: string;
+  vaultIngestedAt?: string;
+  reason: "never" | "stale";
+}
+
+// The vault-ingest coverage gap: cases carrying vaultLinks (intent — the vault SHOULD
+// know about this) whose receipt (vaultIngestedAt) is absent ("never") or older than the
+// case's own updatedAt ("stale"). The complement of needsAttention().unlinked above (that
+// bucket is cases with NO vaultLinks; this one is cases WITH vaultLinks the vault hasn't
+// heard about) — this is the alarm that makes a silently-dead capture pipeline visible.
+// A case with no vaultLinks is never a gap, receipted or not. Visibility mirrors
+// applyBoardQuery's default (archived + future-snoozed excluded unless includeArchived).
+// Fail-closed: an absent/unparseable vaultIngestedAt reads as "never"; an unparseable
+// updatedAt also reads as "stale" — a gap is never silently swallowed by a bad timestamp.
+export function selectVaultCoverage(
+  cases: CaseRecord[],
+  now: Date = new Date(),
+  opts?: { includeArchived?: boolean },
+): { gaps: VaultCoverageGap[] } {
+  const includeArchived = opts?.includeArchived ?? false;
+  const gaps: VaultCoverageGap[] = [];
+
+  for (const c of cases) {
+    if (!isVisible(c, now, includeArchived)) continue;
+    if (!Array.isArray(c.vaultLinks) || c.vaultLinks.length === 0) continue;
+
+    const receiptMs = ms(c.vaultIngestedAt);
+    const reason: "never" | "stale" | null = Number.isNaN(receiptMs)
+      ? "never"
+      : Number.isNaN(ms(c.updatedAt)) || receiptMs < ms(c.updatedAt)
+        ? "stale"
+        : null;
+    if (!reason) continue;
+
+    gaps.push({
+      id: c.id,
+      title: c.title,
+      domain: c.domain,
+      status: c.status,
+      kind: c.kind,
+      vaultLinks: c.vaultLinks,
+      updatedAt: c.updatedAt,
+      vaultIngestedAt: c.vaultIngestedAt,
+      reason,
+    });
+  }
+
+  return { gaps };
+}
+
 // A case is "stale" if it hasn't been touched in `days` days and isn't already
 // finished/archived — a nudge that something's been sitting.
 export function isStale(c: CaseRecord, now: Date = new Date(), days = 5): boolean {

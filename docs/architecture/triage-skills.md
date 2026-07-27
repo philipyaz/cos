@@ -103,8 +103,11 @@ drive the board exclusively through the `board` MCP (Cowork's sandbox blocks out
 HTTP, which is the whole reason the MCP exists) — and at the end of a run they compose
 the run's knowledge into one payload and submit it through the vault MCP's async
 `ingest`, driving the job to a terminal state per the
-[`vault-operations`](../reference/vault-async.md) skill; the run's report carries the
-job's terminal status. WhatsApp triage is additionally **read-only on its own
+[`vault-operations`](../reference/vault-async.md) skill — which, on `completed`, also
+stamps the per-case receipt (`mark_vault_ingested`) on the cases the payload named. The
+run's report carries the job's terminal status **and the vault coverage backlog**
+("N matters the vault has not been told about" — the deterministic read over cases
+whose receipt is absent or stale). WhatsApp triage is additionally **read-only on its own
 channel**: it uses only the `whatsapp` MCP read tools and can never send a message.
 
 The contract is best understood as a fixed sequence of guarantees, identical across both

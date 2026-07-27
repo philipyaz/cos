@@ -39,9 +39,11 @@ email or inference seems to conflict with a manual action, **add a note** (or
 
 The server exposes the full v3 case / task / message lifecycle plus board ops, the
 **v3.2** reminder enrichment (catalog `labels`, a short `tasks` checklist, and linked emails via
-`link_reminder_message`; reminders are searched and each hit flags its nature), and the **v3.3**
+`link_reminder_message`; reminders are searched and each hit flags its nature), the **v3.3**
 **priorities** family (`get_priorities` reads the user's starred nodes + free-text priority notes;
-`add`/`update`/`remove_priority` manage the notes; `set_starred` pins any node). `[x]` marks optional
+`add`/`update`/`remove_priority` manage the notes; `set_starred` pins any node), and the **v3.4**
+**vault coverage** pair (`get_vault_coverage` reads which `vaultLinks` cases the vault has no/stale
+receipt for; `mark_vault_ingested` stamps the receipt after a confirmed ingest). `[x]` marks optional
 args.
 
 ### Reads
@@ -280,6 +282,28 @@ message **drops out of the Unanswered view**. It does **not** cascade to any lin
 `GET /api/messages?status=unanswered`. Lists every message still awaiting a reply (newest first) — the
 contents of the Unanswered view. A read tool (no actor). `limit` trims the summary client-side. Use it
 to **dedup** before flagging and to see what's outstanding.
+
+### Vault coverage
+
+A case's `vaultLinks` is **intent** — it names the vault entity the case belongs to; it says nothing
+about whether that knowledge ever **landed**. `vaultIngestedAt` is the **receipt**: a timestamp set
+only after a confirmed ingest, so a case with `vaultLinks` and no (or a stale) receipt is a case the
+vault has never really been told about — the complement of `get_case`'s "unlinked" attention bucket
+(cases with **no** `vaultLinks` at all). These two tools are the read/write pair for that alarm; see
+[`vault-operations`](../../board/.claude/skills/vault-operations/SKILL.md) for when a sweep calls
+`mark_vault_ingested` in the ingest lifecycle.
+
+#### `get_vault_coverage([includeArchived])`
+`GET /api/cases/vault-coverage`. Lists cases carrying `vaultLinks` whose receipt is absent (`never`)
+or older than the case's `updatedAt` (`stale`). Read-only. The headline count is the sweep's
+end-of-run backlog line ("N matters the vault has not been told about"); `includeArchived` widens the
+default (archived + future-snoozed excluded) to the full set.
+
+#### `mark_vault_ingested(ids)`
+`POST /api/cases/vault-receipt` `{ ids }`. Stamps `vaultIngestedAt` (server-side time) on the given
+cases. Call this **only** after the vault MCP's `ingest_status` reports `completed` for an ingest that
+named them — the receipt means the knowledge **landed**, never that it was attempted. Unknown ids
+(e.g. merged/deleted between submit and completion) are skipped and reported back, not a batch failure.
 
 ### Reminders
 

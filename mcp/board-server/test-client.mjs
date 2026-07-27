@@ -1,11 +1,13 @@
 // End-to-end check: spawn server.mjs over stdio, list tools, then drive the full
-// v3.3 case/task/message + reminder lifecycle against a running board.
+// v3.4 case/task/message + reminder + vault-coverage lifecycle against a running board.
 // Requires the board dev server running (CRM_BASE_URL, default http://localhost:3000).
 //
 // Lifecycle exercised (the CASE / REM ids are parsed out of create — never hardcoded):
-//   create_case (domain + tasks + dueAt + priority) → get_case → add_task →
+//   create_case (domain + tasks + dueAt + priority + vaultLinks) → get_case → add_task →
 //   complete_task → update_case (move lane) → add_note → link_message →
 //   archive_case → restore_case → search → get_case again →
+//   get_vault_coverage (case shows [never]) → mark_vault_ingested → get_vault_coverage
+//   again (case no longer listed) →
 //   create_reminder (linked to the case) → get_reminder → list_reminders (by caseId) →
 //   update_reminder → complete_reminder → link_reminder (unlink) → delete_reminder
 // Plus a negative (missing-title) check. Each result prints its isError flag.
@@ -17,7 +19,7 @@ const transport = new StdioClientTransport({
   args: ["server.mjs"],
   env: { ...process.env, CRM_BASE_URL: process.env.CRM_BASE_URL || "http://localhost:3000" },
 });
-const client = new Client({ name: "test-client", version: "3.3.0" }, { capabilities: {} });
+const client = new Client({ name: "test-client", version: "3.4.0" }, { capabilities: {} });
 await client.connect(transport);
 
 // Pretty-printer: shows the isError flag + text for a tool result.
@@ -131,12 +133,30 @@ show("search", await client.callTool({ name: "search", arguments: { q: "v3 lifec
 // 11) get_case again — confirm lane move, completed task, note, message, and activity.
 show("get_case (after lifecycle)", await client.callTool({ name: "get_case", arguments: { id: caseId } }));
 
+// ── Vault coverage: the receipt half of the vault<->board bridge ──────────────
+// The case was created with vaultLinks (step 1) and has no receipt yet, so it should
+// appear in the gap list with reason "never". mark_vault_ingested stamps the receipt
+// (simulating a completed vault ingest); the case should then drop out of coverage.
+
+// 12) get_vault_coverage — the case should appear with reason "never" (no receipt yet).
+show("get_vault_coverage (before receipt)", await client.callTool({ name: "get_vault_coverage", arguments: {} }));
+
+// 13) mark_vault_ingested — stamp the receipt on the case (as vault-operations would
+// after a completed ingest).
+show(
+  "mark_vault_ingested",
+  await client.callTool({ name: "mark_vault_ingested", arguments: { ids: [caseId] } })
+);
+
+// 14) get_vault_coverage again — the case should no longer be listed (receipt === updatedAt).
+show("get_vault_coverage (after receipt)", await client.callTool({ name: "get_vault_coverage", arguments: {} }));
+
 // ── Reminders: a lightweight nudge, linked to the case we just exercised ──────
 // create_reminder (linked to caseId) → get_reminder → list_reminders (filter by
 // caseId) → update_reminder → complete_reminder → link_reminder (unlink via
 // caseId:null) → delete_reminder. The REM-<n> id is parsed out of create.
 
-// 12) create_reminder — linked to the case (PREFER-LINKING: set caseId so the node lists it).
+// 15) create_reminder — linked to the case (PREFER-LINKING: set caseId so the node lists it).
 const remCreated = show(
   "create_reminder (linked to case)",
   await client.callTool({
@@ -160,13 +180,13 @@ if (!remId) {
 }
 console.log(`\n(using ${remId} for the rest of the reminder lifecycle)`);
 
-// 13) get_reminder — confirm title/status/detail/dueAt/domain + the linked caseId.
+// 16) get_reminder — confirm title/status/detail/dueAt/domain + the linked caseId.
 show("get_reminder", await client.callTool({ name: "get_reminder", arguments: { id: remId } }));
 
-// 14) list_reminders — filter by the case it's linked to (should include remId).
+// 17) list_reminders — filter by the case it's linked to (should include remId).
 show("list_reminders (by caseId)", await client.callTool({ name: "list_reminders", arguments: { caseId } }));
 
-// 15) update_reminder — tweak the detail + due date (partial patch).
+// 18) update_reminder — tweak the detail + due date (partial patch).
 show(
   "update_reminder",
   await client.callTool({
@@ -175,13 +195,13 @@ show(
   })
 );
 
-// 16) complete_reminder — sugar that flips status to done (stamps completedAt).
+// 19) complete_reminder — sugar that flips status to done (stamps completedAt).
 show("complete_reminder", await client.callTool({ name: "complete_reminder", arguments: { id: remId } }));
 
-// 17) link_reminder — unlink it to standalone via caseId:null.
+// 20) link_reminder — unlink it to standalone via caseId:null.
 show("link_reminder (unlink)", await client.callTool({ name: "link_reminder", arguments: { id: remId, caseId: null } }));
 
-// 18) delete_reminder — hard-remove the reminder.
+// 21) delete_reminder — hard-remove the reminder.
 show("delete_reminder", await client.callTool({ name: "delete_reminder", arguments: { id: remId } }));
 
 // Negative case: missing title should be a tool error, not a crash.
