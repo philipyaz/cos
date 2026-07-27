@@ -82,6 +82,15 @@
 #      date filters, GET-by-id, PATCH persist (an x-actor:agent write round-trips),
 #      the missing-date/slot/description + non-number-calories + bad-slot/bad-health
 #      400s, and delete. Snapshots+restores cases.json. Skipped when no board is up.
+#  10e2. api-nutrition-pantry-reconcile — ONLY if a board is running: the v14 bulk pantry
+#      RECONCILE write (POST /api/nutrition/pantry/reconcile). A fresh name ADDS a row; a
+#      resubmit of a normalised variant (case/whitespace/plural/accent) UPDATES that same row
+#      instead of minting a duplicate; a batch of N new items bumps db.version exactly ONCE
+#      with N distinct ids; an in-batch duplicate is reported SKIPPED, not double-added; a
+#      malformed item (or an empty items array) rejects the WHOLE batch with nothing written;
+#      the pantry count never reduces; and the GATE mirrors api-nutrition-gate (a DISABLED
+#      add-on 404s the write while GET stays 200). Snapshots+restores cases.json. Skipped when
+#      no board is up.
 #  10g. api-body-weight — ONLY if a board is running: the v14 weigh-in lifecycle
 #      (/api/body/weight[/:id]) after enabling the "body" add-on:
 #      create→WEIGHT-<n>+version bump (weightKg + note persist), body-composition
@@ -99,6 +108,15 @@
 #      404 while its GETs stay 200; PATCH /api/addons/fitness flips the gate live + bumps db.version;
 #      unknown-id 404 + non-boolean-enabled 400. Snapshots+restores cases.json (settings.addons +
 #      healthEntries + athleteProfile live there). Skipped when no board.
+#  10h3. api-nutrition-status — ONLY if a board is running: the v14 RECONCILIATION status contract
+#      (GET /api/nutrition/status + get_nutrition_status). All seven fields present + typed; an empty
+#      store returns zeroes/nulls/false (asserted only after observing the store is actually empty);
+#      a past-dated planned meal-plan entry with a same-date+slot food log naming its MEAL-<n> id is
+#      counted in provablyCooked and NOT double-counted; a decoy log naming the WRONG id does not
+#      prove that meal; a future-dated planned entry is counted in neither stale nor provable; an
+#      expired pantry item is surfaced; a fresh nutrition-targets save flips hasNutritionTargets; the
+#      read stays 200 with the add-on DISABLED (ungated). Snapshots+restores cases.json. Skipped when
+#      no board is up.
 #  10i. api-fitness-push — ONLY if a board is running: a push INGEST → SUMMARIZE round-trip that
 #      kills the split-brain-taxonomy bug — POST /api/fitness/push a realistic HAE payload (sleep +
 #      heart_rate_variability metrics + a workout), then assert GET /api/fitness/summary returns
@@ -777,6 +795,27 @@ else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
+# --- 10e2. api-nutrition-pantry-reconcile (only when a board is healthy) -----
+# The v14 bulk pantry RECONCILE write (board/app/api/nutrition/pantry/reconcile): upsert by a
+# normalised name (case/whitespace/plural/accent), one version bump per batch with distinct
+# minted ids, in-batch duplicates skipped (not double-added), fail-closed on any malformed item
+# (incl. an empty items array), never reduces the pantry count, and the GATE (a DISABLED add-on
+# 404s the write while GET stays 200). Snapshots + restores board/data/cases.json (pantryItems +
+# settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10e2] api-nutrition-pantry-reconcile (live board) ------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-pantry-reconcile.mjs"; then
+    echo "api-nutrition-pantry-reconcile: PASS"
+  else
+    echo "api-nutrition-pantry-reconcile: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-pantry-reconcile"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
 # --- 10f. api-nutrition-mealplan (only when a board is healthy) --------------
 # The v9 meal-plan API (board/app/api/nutrition/plan[/:id]) with the add-on ENABLED:
 # create bumps version + mints a MEAL-<n> id (date/slot/title persist; status defaults
@@ -882,6 +921,27 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-nutrition-diet-profile: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-nutrition-diet-profile"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10h3. api-nutrition-status (only when a board is healthy) ---------------
+# The v14 RECONCILIATION status contract (GET /api/nutrition/status + get_nutrition_status): all
+# seven fields present + typed; empty-store zeroes (observed, not assumed); a past-dated planned
+# meal proven by a same-date+slot food log naming its MEAL-<n> id (and NOT double-counted); a decoy
+# naming the wrong id does not prove it; a future-dated planned entry counts in neither; an expired
+# pantry item surfaces; saving a target flips hasNutritionTargets; ungated while the add-on is
+# disabled. Snapshots + restores cases.json. Skipped when no board.
+echo
+echo "--- [10h3] api-nutrition-status (live board) ----------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-status.mjs"; then
+    echo "api-nutrition-status: PASS"
+  else
+    echo "api-nutrition-status: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-status"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."

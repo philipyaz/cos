@@ -68,6 +68,19 @@ export function addDays(day: string, n: number): string {
   return `${yy}-${mm}-${dd}`;
 }
 
+// Whole-day difference (toDay − fromDay) between two "YYYY-MM-DD" strings, UTC-MIDNIGHT anchored
+// (floor, not rounded) — the age-in-days arithmetic every nutrition-status staleness figure uses.
+// This is a DIFFERENT anchor/rounding than body-baseline.ts's private dayDiff (UTC-noon, rounded);
+// that one is a live surface and stays as-is — this is nutrition-status's one home for the idiom,
+// so a THIRD copy never gets minted alongside it.
+export function wholeDaysBetween(fromDay: string, toDay: string): number {
+  const [fy, fm, fd] = fromDay.split("-").map((s) => parseInt(s, 10));
+  const [ty, tm, td] = toDay.split("-").map((s) => parseInt(s, 10));
+  const from = Date.UTC(fy, fm - 1, fd);
+  const to = Date.UTC(ty, tm - 1, td);
+  return Math.floor((to - from) / 86_400_000);
+}
+
 // ── Adherence + guardrail value types (re-homed from the retired engine, v14) ─────────────────
 // Per-day adherence status, judged against a daily calorie target (consumed by the food-log view).
 export type AdherenceStatus = "under" | "on_track" | "over" | "well_over";
@@ -86,4 +99,20 @@ export interface GuardrailFlag {
   id: string; // stable key (e.g. "low-calorie")
   level: GuardrailLevel;
   message: string;
+}
+
+// ── Pantry name normalisation (v14 bulk-reconcile upsert key) ─────────────────────────────────
+// The deterministic identity key POST /api/nutrition/pantry/reconcile upserts on: strip accents
+// (Unicode-decompose, drop the combining marks), lowercase, trim + collapse internal whitespace,
+// then drop ONE trailing "s" (only when the result is ≥4 chars and doesn't already end "ss") so a
+// re-shop's spelling/case/plural drift still lands on the same row. It deliberately does NOT
+// resolve synonyms, translations, or pack-size math (two rows of one food in different languages
+// or sizes) — merging those stays the agent's judgement call (see nutrition-chef's pantry-capture
+// reference), the ADR 0001 line between mechanics and generative reasoning.
+export function normalizePantryName(name: string): string {
+  const stripped = name.normalize("NFD").replace(/\p{M}/gu, "");
+  const collapsed = stripped.toLowerCase().trim().replace(/\s+/g, " ");
+  return collapsed.length >= 4 && collapsed.endsWith("s") && !collapsed.endsWith("ss")
+    ? collapsed.slice(0, -1)
+    : collapsed;
 }

@@ -44,7 +44,7 @@ procedure. See **[`../CLAUDE.md`](../CLAUDE.md)** for the full authoring + packa
 | **[`/whatsapp-triage`](./whatsapp-triage/SKILL.md)** | The same reconciliation for **WhatsApp** (DMs **and** groups), turning chats into tracked cases on the board. | `Run /whatsapp-triage` | ~15 min |
 | **[`/board-organize`](./board-organize/SKILL.md)** | Tidies the case tree into a clean **Initiative ▸ Workstream ▸ Case** hierarchy, grounded in your starred / priority items — never re-homing what you placed by hand. | `Run /board-organize` | every 2–6 h / daily |
 | **[`/reminders-review`](./reminders-review/SKILL.md)** | Reviews every **open reminder** and **closes** the ones already done or past their moment — auto-closing only what's *proven* done (finished checklist, linked case closed, delivery date passed) and **proposing** the rest (cold job-alerts, lapsed RSVPs) — so the reminders list stays a live to-do surface, not a graveyard. | `Run /reminders-review` | daily / every few hours |
-| **[`/nutrition-chef`](./nutrition-chef/SKILL.md)** | Food, pantry & meal-planning operator — e.g. plan the week's meals from what's on hand (preferring what's expiring), or check how you're tracking to your calorie target. | `Run /nutrition-chef plan this week's meals` | weekly / daily |
+| **[`/nutrition-chef`](./nutrition-chef/SKILL.md)** | Reconciles the meal plan first — auto-closing past-dated planned meals a food log proves were cooked, batching the rest into one question — then plans the week's meals from what's on hand (preferring what's expiring), or checks how you're tracking to your calorie target. | `Run /nutrition-chef plan this week's meals` | weekly / daily |
 
 ## Called skills
 

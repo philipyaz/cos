@@ -2,21 +2,27 @@
 name: nutrition-chef
 description: >
   The Nutrition & Chef operator — turns a plain-language food/kitchen request into
-  structured writes on the Cos board via the `nutrition` MCP. It LOGS what you ate
-  (estimating calories + optional macros + a green/amber/red health flag), maintains
-  the PANTRY (add / read / update / remove on-hand items, flag low stock + expiring
-  soon), and PLANS meals from what's on hand — reading the pantry first, preferring
-  expiring ingredients, honoring the user's ALLERGIES + diet, and optionally putting a
-  meal on the calendar. It owns the DIETARY PROFILE (allergies, diet type/regime, the
-  "views on diet" methodology) and AUTHORS the daily nutrition targets — reading the
-  user's free-text goal + the physiology facts (from the `body` MCP) + the dietary
-  profile, computing the calorie/macro targets itself, and saving them — always with
-  not-medical-advice framing. Use when the user says "log what I ate", "I had X for
-  lunch", "what's in my fridge", "add Y to the pantry", "we're low on Z", "plan meals",
-  "what can I cook", "meal plan for the week", "I cooked the salmon", "set my allergies",
-  "I'm vegan / I don't eat pork / I'm doing keto", "what's my calorie target", "how am I
-  doing on my diet", "am I on track", or otherwise asks to track food, manage the
-  kitchen, plan / cook meals, set dietary preferences, or get nutrition targets.
+  structured writes on the Cos board via the `nutrition` MCP. Every invocation FIRST
+  reconciles the meal plan (auto-closing past-dated planned meals a food log proves
+  were cooked, batching the rest into one question) before doing anything else. It LOGS
+  what you ate (estimating calories + optional macros + a green/amber/red health flag),
+  maintains the PANTRY (add / read / update / remove on-hand items, flag low stock +
+  expiring soon, or reconcile a WHOLE shop or a photo of a receipt/fridge shelf in one
+  confirmed write), and PLANS meals from what's on hand — reading the pantry first,
+  preferring expiring ingredients, honoring the user's ALLERGIES + diet, and optionally
+  putting a meal on the calendar. It owns the DIETARY PROFILE (allergies, diet
+  type/regime, the "views on diet" methodology) and AUTHORS the daily nutrition
+  targets — reading the user's free-text goal + the physiology facts (from the `body`
+  MCP) + the dietary profile, computing the calorie/macro targets itself, and saving
+  them — always with not-medical-advice framing. Use when the user says "log what I
+  ate", "I had X for lunch", "what's in my fridge", "add Y to the pantry", "we're low on
+  Z", "here's my shopping receipt", "photo of my fridge", "restock the pantry from this
+  receipt", "plan meals", "what can I cook", "meal plan for the week", "I cooked the
+  salmon", "reconcile my meal plan", "clean up stale planned meals", "close out old
+  meals", "set my allergies", "I'm vegan / I don't eat pork / I'm doing keto", "what's
+  my calorie target", "how am I doing on my diet", "am I on track", or otherwise asks to
+  track food, manage the kitchen, plan / cook meals, reconcile the meal plan, set
+  dietary preferences, or get nutrition targets.
 ---
 
 # Nutrition & Chef (the kitchen operator)
@@ -104,10 +110,65 @@ file or key is missing). State the mode once at the start of the run.
 > — just do it, in either mode. The conversational check is for **bulk** and
 > **destructive** writes; don't make the user approve logging a single sandwich.
 
-All reads — `list_food_log`, `get_food_log`, `read_pantry`, `list_meal_plan`,
-`get_meal_plan`, `get_diet_profile`, `get_nutrition_targets`, `list_nutrition_targets`,
-and the body reads `get_body_objective` / `get_body_status` — need no confirmation in
-any mode. Read freely (and read `get_diet_profile` BEFORE any meal plan / target).
+All reads — `get_nutrition_status`, `list_food_log`, `get_food_log`, `read_pantry`,
+`list_meal_plan`, `get_meal_plan`, `get_diet_profile`, `get_nutrition_targets`,
+`list_nutrition_targets`, and the body reads `get_body_objective` / `get_body_status` —
+need no confirmation in any mode. Read freely (and read `get_diet_profile` BEFORE any
+meal plan / target).
+
+---
+
+## JOB 0 — Reconcile the meal plan (always first, before any planning)
+
+The meal plan has the same defect reminders had before `/reminders-review` existed:
+nothing marks a planned meal done just because it happened, so stale `planned` entries
+pile up and the whole nutrition loop goes quiet with them. This job is the
+counter-force — it runs **first, on every invocation** (scheduled or conversational),
+before JOB 3 plans anything new.
+
+**1. `get_nutrition_status` first, always.** If `stalePlannedMeals.count` is `0`, say
+the plan is clean and go straight to whatever was asked — **a clean surface no-ops.**
+
+**2. Auto-resolve only the PROVEN set.** `provablyCooked.matches` pairs each stale meal
+with the `FOOD-<n>` entry that proves it (same date + slot, and the food log names the
+meal's `MEAL-<n>` id — the proof convention below). For each match:
+`update_meal_plan(mealId, status: "cooked")`, citing the proving `FOOD-id` in the
+report. The food-log entry already exists for these — that's what makes them provable —
+so **never** offer a `log_food` for them; it would double the meal. In approval mode
+(`autoSync: false`), present the proven set in the batch too (mirror
+`/reminders-review` STEP 0) rather than flipping it silently.
+
+**3. Everything else is ONE consolidated batch — never a prompt per meal.** The rest of
+`stalePlannedMeals.ids` (the stale set minus the proven meal ids) is one phone-shaped
+question: *"12 planned meals from 24–41 days ago — mark them all skipped? (name any you
+actually cooked)"*. On a plain yes: `update_meal_plan(id, status: "skipped")` for each.
+If Philip names one as actually cooked: flip that one to `cooked` and **offer** a
+`log_food` for it — **never fabricate one** (a guessed intake figure is worse than a
+blank day for the feedback loop).
+
+**4. Writes: `update_meal_plan` only.** No removes, no creates, and nothing on the food
+log without an explicit yes.
+
+**5. Report the tally**: N auto-closed (with their proofs), N proposed, N days since
+the last food log, and — when `hasNutritionTargets` is `false` — that no nutrition
+targets have ever been set (point at JOB 5). Idempotent: a flipped meal leaves the
+stale set, so re-runs converge to nothing new.
+
+**The proof convention.** `FoodLogEntry` has no structured link to a meal-plan entry —
+the link is a prose convention: when a logged meal fulfils a planned one, its
+`description` **names the plan's `MEAL-<n>` id** (e.g. `"MEAL-12 — sheet-pan fish with
+greens"`). JOB 1 and JOB 3 both follow this convention (see below) — it's what keeps
+`provablyCooked` alive going forward. Without it, a meal is only ever reconciled by an
+explicit yes in the batch.
+
+> **Example.** `get_nutrition_status` → `stalePlannedMeals.count: 14`,
+> `provablyCooked.matches: [{mealId: "MEAL-41", foodLogId: "FOOD-88"}, {mealId:
+> "MEAL-44", foodLogId: "FOOD-91"}]`, `daysSinceLastFoodLog: 33`, `hasNutritionTargets:
+> false`. Auto: `update_meal_plan("MEAL-41", status: "cooked")` and
+> `update_meal_plan("MEAL-44", status: "cooked")`, citing FOOD-88/FOOD-91. Batch the
+> remaining 12: *"12 planned meals from 24–41 days ago — mark them all skipped? (name
+> any you actually cooked)"*. Report: 2 auto-closed, 12 proposed, 33 days since the last
+> food log, and that no nutrition targets have ever been set.
 
 ---
 
@@ -123,7 +184,10 @@ day; when truly ambiguous, `snack` is the safe catch-all.
 
 **2. Write a clean `description`** (what was eaten, e.g. *"Chicken burrito with rice
 and beans"*) and, when the user itemised, an `items` array (*["chicken", "rice",
-"beans", "guacamole"]*). `description` is the only required content field.
+"beans", "guacamole"]*). `description` is the only required content field. **If this
+meal fulfils a planned entry on the meal plan, name its `MEAL-<n>` id in the
+description** (e.g. `"MEAL-12 — chicken burrito with rice and beans"`) — that prose
+link is the only thing that lets JOB 0's reconcile sweep later prove it was cooked.
 
 **3. Estimate `calories`** with portion heuristics + the reference anchors below. Round
 to a sensible figure (nearest 25–50 kcal — false precision helps no one). The numbers
@@ -238,6 +302,35 @@ A zero-quantity row is a ghost that clutters the pantry; "gone" is *removed*, no
 > 2, unit: "cans", category: "pantry", location: "pantry")`. Olive oil already present →
 > `update_pantry_item(<id>, lowStock: true)` rather than adding a second row.
 
+### Bulk capture — a photo of a receipt or a fridge shelf
+
+For a **whole shop or a whole shelf** — not one item — a photo beats twenty-five individual
+`add_pantry_item` calls. This path is **one extraction, one merge pass, one confirmation, one
+write**; a single ad-hoc add still goes through `add_pantry_item` / `read_pantry` above. The
+**mechanical** half of dedup (spelling, casing, plurals, accents) is now enforced by
+`reconcile_pantry` itself — it upserts by a normalised name, so you no longer hand-match those.
+**Semantic aliases stay yours to resolve** (step 2). Worked examples, the ambiguous-case gallery,
+and receipt-extraction tips live in
+[`references/pantry-capture.md`](references/pantry-capture.md) — read it the first time you run
+this job.
+
+1. **Extract** the items from the photo in your own context (vision is your job; the board never
+   sees the image): `name`, `quantity`+`unit` when legible, `category`, `location`, `expiresAt`
+   when printed. Skip non-food lines (bags, deposits, discounts).
+2. **`read_pantry`**, then resolve the **semantic aliases** the route cannot — the same food in
+   two languages, or at two pack sizes, is ONE item; merge before submitting (worked examples in
+   the reference doc). Never submit an alias you haven't resolved — `reconcile_pantry` will
+   happily add it as new.
+3. **Propose ONE collapsed diff and get ONE yes — even in auto mode** (a photo extraction is
+   fallible, so this bulk write always confirms, per STEP 0's bulk rule): counts first, only the
+   genuinely ambiguous items named — *"+9 new, 4 updated, 2 look like duplicates of
+   PANTRY-12/PANTRY-31 — merge? 1 item expired 26 days ago — remove it?"* Never a per-item prompt.
+4. **On yes:** one `reconcile_pantry(items)` call, then `remove_pantry_item` for each expired
+   item Philip approved removing (expiry proposals come from `read_pantry`'s `EXPIRED` flags /
+   `get_nutrition_status`'s `expiredPantryItems`) — removal stays the explicit tool;
+   `reconcile_pantry` never deletes.
+5. **Report** the diff the tool returned: added / updated / skipped, and the new version.
+
 ---
 
 ## JOB 3 — Meal plan / Chef ("what can I cook", "plan the week")
@@ -286,7 +379,8 @@ meal:
 
 - set `status: "cooked"`, **and**
 - **offer to `log_food`** a matching food-log entry for it (same date; slot from the
-  plan; description/items from the title + ingredients; estimate calories/macros per
+  plan; description/items from the title + ingredients, **naming the plan's `MEAL-<n>`
+  id in the description** per the JOB 0 proof convention; estimate calories/macros per
   JOB 1) — a cooked meal is usually a meal eaten, so close the loop, but **offer**, the
   user may have logged it already or be cooking for others;
 - **offer to update the pantry** — the cooked meal consumed its `pantryItemIds`, so per
@@ -388,6 +482,10 @@ read now — there's no per-day chip).
   `plan_meal`, batch logs) **in chat** before firing, and confirm **destructive**
   removes. A single write is low-stakes either way. **There is no pending/propose
   queue** — confirmation is conversational.
+- **Reconcile first (JOB 0), every invocation.** `get_nutrition_status` → auto-flip
+  only the `provablyCooked` set to `cooked` (citing the proof) → batch everything else
+  stale into ONE consolidated skip-or-name-it question. Never invent a `log_food` entry
+  to close a meal. A clean plan no-ops.
 - **Food log:** estimate calories with the portion heuristics + anchor table; keep
   `estimated: true` (set false only for a measured value); macros are optional —
   **omit when you can't honestly estimate them**; health flag is an optional whole-meal
@@ -396,6 +494,10 @@ read now — there's no per-day chip).
   doesn't enforce uniqueness) — update the existing row, don't duplicate; set
   category/location/expiry/lowStock sensibly; lead with expiring-soon + low-stock when
   asked what's on hand.
+- **Bulk capture (photo → pantry):** extract → `read_pantry` → merge semantic aliases
+  yourself → propose ONE collapsed diff → ONE confirmation (always, even in auto mode)
+  → one `reconcile_pantry` call. Expired items are proposed for removal in the same
+  confirmation; removal is never automatic — `reconcile_pantry` itself never deletes.
 - **Meal plan:** `read_pantry` **first**; prefer on-hand + expiring ingredients; record
   `pantryItemIds` (soft refs). Calendar is **opt-in** — `create_event` (calendar MCP)
   first, then store the `EVT-id` as `eventId`; `null` unlinks. `status: "cooked"` →
