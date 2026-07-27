@@ -176,3 +176,15 @@ never the data: update the code (`git pull`) and restart the board.
   `bodyProfile`, weight/target on the body add-on). **New enums:** `TrainingStatus`,
   `NutritionTargetKind`; **removed:** `AthleteLevel`, `NutritionGoal`. Body **hard auto-enables** under
   Nutrition or Fitness. Full design: [Body](../features/body.md) + [Nutrition](../features/nutrition.md).
+- **v14 → v15 — the per-case vault-ingest RECEIPT.** Adds the optional
+  `CaseRecord.vaultIngestedAt?: string` — an ISO timestamp set **only** by
+  `POST /api/cases/vault-receipt`, after the agent confirms the vault MCP reports a
+  `completed` ingest that named the case (never on a `failed`/`cancelled`/`interrupted` job —
+  the field means *landed*, never *attempted*). **Purely additive + back-compatible:** old v14
+  files read unchanged — `migrate()` is a no-op for it (the optional rides through
+  `migrateCase`'s spread verbatim, exactly like `starred` (v7) and `MessageRecord.url` (v8)),
+  and an absent receipt reads as *the vault has never been told about this case* (fail-closed).
+  **No new enums.** The coverage read (`GET /api/cases/vault-coverage` / `get_vault_coverage`)
+  answers *"what has the vault never been told?"* — cases carrying `vaultLinks` whose receipt
+  is absent or older than the case's own `updatedAt` — the deterministic alarm for a capture
+  pipeline that fails silently. Full design: [vault-async](vault-async.md).

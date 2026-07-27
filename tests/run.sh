@@ -24,9 +24,12 @@
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
-#      one HARD sub-check (3c): the board-assertion guardrail phrases must be
+#      two HARD sub-checks: (3c) the board-assertion guardrail phrases must be
 #      present in every second-brain-query/SKILL.md under vault/ and in the
-#      caller-side vault-operations skill (cos-ops#3).
+#      caller-side vault-operations skill (cos-ops#3); (3d) the vault-ingest
+#      receipt contract — vault-operations must carry the exact "stamp the
+#      receipt only on `completed`" phrases, so a future skill edit can't
+#      silently drop the only-on-completed rule (cos-ops#2).
 # NOTE ON THE api-* STEPS (4-12): they drive a REAL board over HTTP, but against an
 # AUTO-STARTED, ISOLATED THROWAWAY board — an own-.next `next dev` on port 3999, its
 # store pointed at a sandbox seeded from tests/fixtures/board-seed.json (synthetic),
@@ -201,6 +204,16 @@
 #      bumps a device, a header-less request invents nothing, a malformed id is
 #      sanitized, a write path records via resolveActor), and the null join blob when
 #      COS_HUB_PUBLIC_URL is unset. In-memory + read-only (net-zero).
+#  13d4. api-vault-coverage — ONLY if a board is running: the v15 vault-ingest RECEIPT +
+#      coverage-read contract (GET /api/cases/vault-coverage + POST /api/cases/vault-receipt):
+#      a case with vaultLinks and no receipt is a gap (reason "never"); a case with NO
+#      vaultLinks is never a gap; POST vault-receipt stamps the receipt (server-stamped,
+#      EQUAL to updatedAt — the equal-stamp invariant) and the case drops out of coverage;
+#      updating the case past its receipt makes it a gap again (reason "stale"); a mixed
+#      known/unknown receipt POST marks the known id and reports the unknown one back
+#      (never fails the batch) while an empty `ids` array 400s; an archived gap is hidden
+#      by default and shown under ?includeArchived=1. Snapshots+restores cases.json. Skipped
+#      when no board is up.
 #  13e. backup-hardening — hermetic multi-producer backup pipeline test (NO board,
 #      NO Keychain, NO network, NO live data: synthetic repo-root skeleton + a local
 #      BARE git "remote" + per-device clones in a mktemp sandbox, HOME sandboxed).
@@ -540,6 +553,36 @@ if [ "${guardrail_fail}" -ne 0 ]; then
   fail_reasons="${fail_reasons} vault-board-guardrail"
 else
   echo "OK: board-assertion guardrail present in every query skill + vault-operations."
+fi
+
+# 3d. HARD GATE — vault-ingest receipt contract (cos-ops#2). The board can only
+# answer "what has the vault never been told?" if the receipt is stamped ONLY on a
+# `completed` ingest — a receipt on a failed/attempted job would make coverage lie
+# (ADR 0014: a load-bearing rule is a gate, not prose alone — mirrors 3c).
+receipt_gate_fail=0
+vo_file="${REPO_ROOT}/board/.claude/skills/vault-operations/SKILL.md"
+if [ -f "${vo_file}" ]; then
+  for p in \
+    "stamp the receipt only on \`completed\`" \
+    "the field means *landed*, never *attempted*"; do
+    if ! grep -qF -- "${p}" "${vo_file}"; then
+      echo "FAIL: ${vo_file#"${REPO_ROOT}"/} is missing the receipt-contract phrase: ${p}"
+      receipt_gate_fail=1
+    fi
+  done
+else
+  echo "FAIL: vault-operations/SKILL.md not found at board/.claude/skills/."
+  receipt_gate_fail=1
+fi
+
+if [ "${receipt_gate_fail}" -ne 0 ]; then
+  echo "vault-receipt-contract: FAIL"
+  echo "  hint: the receipt-only-on-completed rule lives in vault-operations/SKILL.md's"
+  echo "  \"The board-side receipt\" section — a future edit must keep both exact phrases."
+  fail=1
+  fail_reasons="${fail_reasons} vault-receipt-contract"
+else
+  echo "OK: vault-ingest receipt contract present in vault-operations."
 fi
 
 # --- start the throwaway TEST board (api steps [4]-[12] drive THIS, never live)
@@ -1245,6 +1288,24 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-devices: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-devices"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 13d4. api-vault-coverage (only when a board is healthy) -----------------
+# The v15 vault-ingest RECEIPT + coverage-read contract (never/stale/covered,
+# equal-stamp invariant, mixed known/unknown receipt ids, archive visibility).
+# Snapshots+restores cases.json — net-zero.
+echo
+echo "--- [13d4] api-vault-coverage (sandbox board) ----------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-vault-coverage.mjs"; then
+    echo "api-vault-coverage: PASS"
+  else
+    echo "api-vault-coverage: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-vault-coverage"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."

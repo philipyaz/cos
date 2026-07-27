@@ -659,6 +659,53 @@ const LIST_UNANSWERED_MESSAGES_TOOL = {
   },
 };
 
+// ── Vault coverage (2) ───────────────────────────────────────────────────────
+// The receipt half of the vault<->board bridge: get_vault_coverage READS "what has
+// the vault never been told about" (cases carrying vaultLinks with no/stale
+// vaultIngestedAt receipt — the complement of needsAttention's `unlinked` bucket);
+// mark_vault_ingested WRITES the receipt. Both are core (no add-on gate) since
+// vaultLinks is core case state. See board/.claude/skills/vault-operations/SKILL.md
+// for when to call mark_vault_ingested in the ingest lifecycle.
+
+const GET_VAULT_COVERAGE_TOOL = {
+  name: "get_vault_coverage",
+  description:
+    "List every case the vault has NOT been told about — cases carrying `vaultLinks` whose ingest " +
+    "receipt is absent (never ingested) or older than their last update (stale). The backlog number " +
+    "for a sweep's run report; 0 means capture is healthy. Use at the end of a capture sweep, or " +
+    "whenever asked whether the second brain is actually being fed. `GET /api/cases/vault-coverage`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      includeArchived: {
+        type: "boolean",
+        description: "OPTIONAL — include archived cases in the gap set. Defaults false.",
+      },
+    },
+  },
+};
+
+const MARK_VAULT_INGESTED_TOOL = {
+  name: "mark_vault_ingested",
+  description:
+    "Stamp the vault-ingest RECEIPT (`vaultIngestedAt`) on the given cases. Call ONLY after the vault " +
+    "MCP's `ingest_status` reports `completed` for an ingest that named these cases — the receipt " +
+    "means the knowledge LANDED, never that it was attempted; an in-flight, failed, or interrupted " +
+    "job must leave it unset. The board stamps the time server-side. Unknown ids are skipped and " +
+    "reported back. `POST /api/cases/vault-receipt`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      ids: {
+        type: "array",
+        items: { type: "string" },
+        description: "Case ids the completed ingest named, e.g. ['CASE-1','CASE-4'].",
+      },
+    },
+    required: ["ids"],
+  },
+};
+
 // ── Reminders (8) ──────────────────────────────────────────────────────────
 // A reminder is a LIGHTWEIGHT NUDGE — "a reminder to CHECK or to DO something" —
 // for a minor matter that doesn't justify a full Case (no kanban lanes, no
@@ -1298,6 +1345,9 @@ export const TOOLS = [
   MARK_MESSAGE_UNANSWERED_TOOL,
   MARK_MESSAGE_ANSWERED_TOOL,
   LIST_UNANSWERED_MESSAGES_TOOL,
+  // vault coverage (2)
+  GET_VAULT_COVERAGE_TOOL,
+  MARK_VAULT_INGESTED_TOOL,
   // reminders (8)
   CREATE_REMINDER_TOOL,
   LIST_REMINDERS_TOOL,

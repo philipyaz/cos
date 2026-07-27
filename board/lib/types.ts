@@ -123,7 +123,13 @@ export const VALID_BIOLOGICAL_SEX: BiologicalSex[] = ["male", "female"];
 // bodyObjective from the legacy db.nutritionGoal (clock-free, idempotent) and STOPS carrying
 // nutritionGoal forward (dropped on next write; the legacy goal route + engine are removed). New
 // enums: TrainingStatus, NutritionTargetKind. Old engine board/lib/nutrition-targets.ts is retired.
-export const SCHEMA_VERSION = 14;
+// v15 adds CaseRecord.vaultIngestedAt (the per-case vault-ingest RECEIPT) — additive optional,
+// read-compatible; migrate() is a no-op for it (rides through migrateCase's spread verbatim,
+// exactly as starred/v8's url/v11's flags did). Written ONLY by POST /api/cases/vault-receipt,
+// after the agent confirms the vault MCP reports a completed ingest that named the case. An
+// absent receipt === the vault has never been told about this case (fail-closed); a receipt
+// older than the case's updatedAt === told, but stale since. No new enums.
+export const SCHEMA_VERSION = 15;
 
 // Who performed a mutation — drives activity attribution + note authorship.
 export type Actor = "human" | "agent" | "system";
@@ -252,6 +258,10 @@ export interface CaseRecord {
   tags?: string[];
   labels?: string[]; // catalog-backed label ids (see db.labels / LabelDef)
   vaultLinks?: string[];
+  vaultIngestedAt?: string; // ISO — the vault-ingest RECEIPT: set ONLY via POST /api/cases/vault-receipt,
+  // by the agent after the vault MCP reports a `completed` ingest that named this case. Absent === the
+  // vault has NEVER been told about this case; receipt < updatedAt === told, but stale since. Additive
+  // optional (read-compatible like starred/archivedAt); never written by the generic case-update path.
   tasks: Task[];
   messageIds: string[];
   createdAt: string;
