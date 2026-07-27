@@ -6,6 +6,9 @@ Cos has three families of skills, and the distinction matters before you read fu
   [`board/.claude/skills/`](https://github.com/philipyaz/cos/tree/main/board/.claude/skills)
   and run inside **Claude Cowork**, the agent that drives the board. They are
   prompt-defined routines, not code: a `SKILL.md` is a procedure the operator follows.
+  The family also includes a **called** procedure, [`vault-operations`](../reference/vault-async.md),
+  that the reconcilers below invoke for the vault half of their runs rather than a
+  schedulable sweep of its own.
 - **Vault knowledge skills** — `second-brain-ingest` / `-query` / `-lint`, in
   `vault/example-vault/.claude/skills/`. They own the wiki; they never touch lanes or
   tasks. See [The vault agent](vault-agent.md).
@@ -97,8 +100,11 @@ deltas blobs itself, which works on a mostly-plain-text stored zip and barely at
 reconcile a channel's **state** onto the board: link each message to a case, advance or
 close tasks, move the lane, set catalog labels. Both are **board-only writers** — they
 drive the board exclusively through the `board` MCP (Cowork's sandbox blocks outbound
-HTTP, which is the whole reason the MCP exists), and they delegate the *knowledge* in a
-message to the vault router. WhatsApp triage is additionally **read-only on its own
+HTTP, which is the whole reason the MCP exists) — and at the end of a run they compose
+the run's knowledge into one payload and submit it through the vault MCP's async
+`ingest`, driving the job to a terminal state per the
+[`vault-operations`](../reference/vault-async.md) skill; the run's report carries the
+job's terminal status. WhatsApp triage is additionally **read-only on its own
 channel**: it uses only the `whatsapp` MCP read tools and can never send a message.
 
 The contract is best understood as a fixed sequence of guarantees, identical across both
@@ -268,8 +274,9 @@ approved, and a clean board no-ops. See the
 
 - [Prompt-injection guard](../security/guard.md) — the fail-closed scanner, trust model,
   and quarantine the guard-first step relies on.
-- [The vault agent](vault-agent.md) — `second-brain-ingest` and the knowledge half of the
-  loop these skills delegate to.
+- [The vault agent](vault-agent.md) — what happens server-side once `ingest` lands
+  (`second-brain-ingest`'s synthesis); the sweeps above reach it only through the vault
+  MCP's async `ingest`, never directly.
 - [Case hierarchy](hierarchy.md) — the Initiative ▸ Workstream ▸ Case model `board-organize`
   files into.
 - [Platform API](platform-api.md) — the single board HTTP write seam behind every `board`

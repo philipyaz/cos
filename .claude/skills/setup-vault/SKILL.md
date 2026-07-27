@@ -130,22 +130,18 @@ tail -n 3 "$REPO_ROOT/mcp/logs/vaultjobs.err.log"      # expect "[vault-jobs] ru
 ```
 
 **Load the `vault-operations` skill in Cowork** — the
-[`vault-operations`](https://github.com/philipyaz/cos/tree/main/.claude/skills/vault-operations) skill
+[`vault-operations`](https://github.com/philipyaz/cos/tree/main/board/.claude/skills/vault-operations) skill
 teaches the model the async **submit-then-poll** ingest lifecycle (and never to re-submit an in-flight
-job). Claude **Code** auto-loads it from the repo's `.claude/skills/` — nothing to do there. Claude
-**Cowork Desktop** does NOT read the repo filesystem (`~/.claude/skills/` is Claude Code CLI only);
-custom skills are added through its **UI** by uploading a ZIP. Build the ZIP (the skill **folder** must
-be at the ZIP root — `vault-operations/SKILL.md`, not loose files), then upload it:
+job). Claude **Code** auto-loads it from the repo's `board/.claude/skills/` — nothing to do there.
+Claude **Cowork Desktop** does NOT read the repo filesystem; custom skills are added through its
+**UI** by uploading a ZIP — upload the already-committed
+`board/.claude/skill-bundles/vault-operations.zip` (same two clicks as every other skill; no zip step
+to run yourself):
 
-```sh
-source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-( cd "$REPO_ROOT/.claude/skills" && rm -f /tmp/vault-operations-skill.zip && zip -r /tmp/vault-operations-skill.zip vault-operations )
-echo "Now upload /tmp/vault-operations-skill.zip in Cowork → Customize → + (next to Skills) → Create skill"
-```
-
-In Claude Cowork Desktop: **Customize → `+` next to Skills → Create skill → select the ZIP**. It is
-available immediately (no restart needed) across all Cowork sessions; re-run the `zip` + re-upload to
-update it.
+In Claude Cowork Desktop: **Customize → `+` next to Skills → Create skill → select
+`board/.claude/skill-bundles/vault-operations.zip`**. It is available immediately (no restart needed)
+across all Cowork sessions; a future edit to the skill is picked up by re-uploading the bundle
+`scripts/pack-skills.mjs` rewrites.
 
 > Belt-and-braces: even if the skill isn't loaded, the `ingest` / `ingest_status` tool **descriptions**
 > already instruct the model to submit-then-poll and not to re-submit an in-flight job — the skill
@@ -316,7 +312,7 @@ echo "backup:    scopes vault/$name (cos.env VAULT_NAME=$(grep -m1 '^VAULT_NAME=
 echo "gitignore: $(git check-ignore "vault/$name" || echo 'NOT IGNORED')"
 ```
 Tell the user: **vault `<name>` is ready.** To populate it, drop files in its `raw/` folder or call
-the **vault MCP `ingest` tool** (via Cowork or Claude Code) — or run the **second-brain-ingest** skill,
+the **vault MCP `ingest` tool** (via Cowork or Claude Code, driven per **`/vault-operations`**),
 which classifies and files items into the per-domain (`work/`, `life/`, `shared/`) wikis.
 
 ---

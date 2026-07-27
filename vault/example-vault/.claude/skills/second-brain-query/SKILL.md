@@ -7,7 +7,8 @@ description: >
   associated artifacts (files under raw/assets linked from the cited pages). Use
   when the user asks what they know about something, wants to explore connections
   between topics, or says "what do I know about X". The vault has no board access:
-  decline pure open-work / to-do questions.
+  decline pure open-work / to-do questions, and never assert what the board contains
+  inside an answer — cases: references are cited as recorded, board authoritative.
 allowed-tools: Read Glob Grep
 ---
 
@@ -77,6 +78,22 @@ Then, if there's a knowledge angle (context on the person/project), answer **tha
 from the wiki. Mixed questions ("what's the latest with [Person]?") get the **context**
 from the wiki with the one-line note that current open work lives on the board.
 
+## Board claims inside an in-scope answer
+
+Declining pure open-work questions is not the whole boundary. Even in a legitimate
+knowledge answer, this session has no board access, so what it may say about the board is
+limited to what the pages record:
+
+- **Never assert what the board does or does not contain.** In particular, never infer an
+  absence ("there is no case for X yet") from the wiki's silence — the vault is selective
+  by design, and its silence carries no information about the board.
+- **A `cases:` reference is a pointer the vault cannot follow**, not a fact it can vouch
+  for. When one matters to the answer, cite it as-of the page's `updated:` date and say
+  that the board is authoritative for current state — e.g. "recorded against CASE-12 as
+  of 2026-06-14; the board is authoritative for what's current."
+- **Never present case ids as the current or complete board context** for a topic — only
+  as what was recorded when the page was last written.
+
 ## Conventions
 
 - **Read-only.** Never write, edit, or run commands. No `raw/assets` copies, no page edits.
@@ -85,5 +102,6 @@ from the wiki with the one-line note that current open work lives on the board.
 - **Always surface associated artifacts** — list the `raw/assets/` paths linked from the
   pages you cite.
 - **Decline pure open-work questions** with the one-line board note; the vault has no board.
+- **Never assert board contents.** `cases:` refs are as-of pointers; the board is authoritative.
 - **Domain-aware.** Pick work / life / both up front; use `shared/wiki` for dual entities.
 - Use `[[wikilinks]]` for all internal references. Never raw file paths.

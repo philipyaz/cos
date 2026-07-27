@@ -209,10 +209,9 @@ the last N days (default 7) and returns `{ vault_ingest_content, domain: "life",
 It **does NOT write to the vault itself** — it's an ungated read that just builds the report.
 
 **2. Persist — hand it to the `vault` MCP.** Take the returned `vault_ingest_content` and pass it
-as the **`content`** argument (with **`domain: "life"`**) to the **`vault`** MCP's **`ingest`**
-tool. The vault ingest is **async** — submit, then poll **`ingest_status`** to a terminal state;
-never re-submit an in-flight job (see `/vault-operations`). Report the vault job's outcome once it
-lands.
+as the **`content`** argument (with **`domain: "life"`** — correct here, health is always
+life-domain) to the **`vault`** MCP's **`ingest`** tool, and drive the job per **`/vault-operations`**
+to its terminal state. Report the outcome once it lands.
 
 Use this for *"save my health summary to my knowledge base"*, *"log this week's training to the
 vault"*. The compose step is an ungated read; the vault write is governed by the vault add-on.
