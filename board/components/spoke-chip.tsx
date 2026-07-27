@@ -45,7 +45,7 @@ export function SpokeChip({ role }: { role: "hub" | "spoke" }) {
 
   return (
     <div
-      className={"fixed bottom-3 right-3 z-40 flex items-center gap-1.5 rounded-full px-3 py-1 text-[11.5px] font-medium shadow-md " + tone.bg}
+      className={"fixed bottom-3 right-3 z-40 flex items-center gap-1.5 rounded-full px-3 py-1 text-[11.5px] font-medium shadow-md mb-safe " + tone.bg}
       role="status"
       title={tone.text}
     >

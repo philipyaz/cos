@@ -49,3 +49,28 @@ body {
 .board-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ── Mobile viewport (iOS Safari) ────────────────────────────────────────────
+   THE one sanctioned static-viewport height in board/ — every full-height
+   element uses this class. The static unit ships first as a pre-dvh
+   fallback, with the dynamic unit overriding where supported: it tracks the
+   REAL visible height as the Safari toolbars expand/collapse, which the
+   static unit does not (it assumes them retracted). tests/viewport-lint.mjs
+   bans the raw static unit everywhere else.
+   These are plain global classes, not Tailwind utilities — variant prefixes
+   (`md:pb-safe`, `sm:h-dvh-fallback`) would silently do nothing; anyone
+   needing a variant must extend this block, not prefix the class. */
+.h-dvh-fallback {
+  height: 100vh; /* viewport-lint-allow */
+  height: 100dvh;
+}
+/* Reserve the iOS home-indicator strip (0px elsewhere). Padding form for
+   in-flow footers/scroll bodies; margin form for fixed bottom-anchored chrome
+   (margin composes with the existing bottom-* offset without inflating the
+   element's own box). */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}

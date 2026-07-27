@@ -22,7 +22,9 @@ board from another device. The decision is binary:
 
 - **View / use the board UI** → a **browser**, zero per-device setup. The hub runs the production board
   behind `tailscale serve`; any tailnet device opens it. The browser writes through the same `/api/*`
-  HTTP API the wrappers use, so it is full read/write — not read-only.
+  HTTP API the wrappers use, so it is full read/write — not read-only. That includes phones: the app
+  shell and every drawer size to the dynamic viewport (`dvh`) and reserve the iOS safe-area inset, so
+  committing an edit — saving a drawer — works in iOS Safari, with the browser chrome expanded or not.
 - **Act on the board with an agent on that device** → a **spoke**. Claude Cowork accepts **only local
   stdio MCP servers**; it cannot consume a remote HTTP MCP over the tailnet (a hard, validated
   constraint), so the only way to give a local agent board tools is the thin stdio wrappers

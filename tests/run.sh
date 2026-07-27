@@ -14,6 +14,10 @@
 #      board/.claude/skill-bundles/ (HARD gate). Static, read-only, no board
 #      needed — catches the class of bug where a sweep hands work to a skill
 #      Cowork never installed (cos-ops#1).
+#   2c. viewport-lint.mjs — no `h-screen`/`min-h-screen`/raw `100vh` in board
+#      app/components outside the one declared dvh fallback (HARD gate;
+#      static, node-only — the class of bug where a new drawer puts its Save
+#      button under the iOS toolbar).
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -407,6 +411,21 @@ else
   echo "skill-reachability: FAIL"
   fail=1
   fail_reasons="${fail_reasons} skill-reachability"
+fi
+
+# --- 2c. viewport-lint (mobile viewport units) -------------------------------
+# board/app/ + board/components/ chrome must size to the DYNAMIC viewport: no
+# h-screen/min-h-screen/raw 100vh outside the one declared dvh fallback in
+# globals.css. Static, read-only, node-only — the class of bug where a new
+# drawer puts its Save button under the iOS Safari toolbar (cos-ops#9).
+echo
+echo "--- [2c] viewport-lint (mobile viewport units) ---------------"
+if node "${SCRIPT_DIR}/viewport-lint.mjs"; then
+  echo "viewport-lint: PASS"
+else
+  echo "viewport-lint: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} viewport-lint"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, one HARD sub-check) --

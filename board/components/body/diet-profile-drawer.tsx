@@ -56,7 +56,7 @@ export function DietProfileDrawer({
   return (
     <>
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} aria-hidden />
-      <aside role="dialog" aria-label="Edit dietary profile" className="fixed top-0 right-0 h-screen w-full sm:w-[480px] bg-white border-l border-ink-200 shadow-xl z-50 flex flex-col">
+      <aside role="dialog" aria-label="Edit dietary profile" className="fixed top-0 right-0 h-dvh-fallback w-full sm:w-[480px] bg-white border-l border-ink-200 shadow-xl z-50 flex flex-col">
         <div className="px-5 h-12 flex items-center border-b border-ink-100 gap-2">
           <span className="text-[13px] font-semibold text-ink-900">Dietary profile</span>
           <button onClick={onClose} aria-label="Close drawer" className="ml-auto text-[12px] text-ink-500 hover:text-ink-900 px-2 py-1 rounded hover:bg-ink-50">Close · Esc</button>
@@ -123,7 +123,7 @@ export function DietProfileDrawer({
           </details>
         </div>
 
-        <div className="px-5 h-14 flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
+        <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           <div className="ml-auto flex items-center gap-2">
             <button onClick={onClose} disabled={saving} className="text-[12px] text-ink-600 hover:text-ink-900 px-2.5 py-1 rounded-md border border-ink-200 hover:bg-white disabled:opacity-50">Cancel</button>
             <button onClick={onSave} disabled={saving} className="text-[12px] px-3 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>

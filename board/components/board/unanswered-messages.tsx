@@ -82,7 +82,7 @@ export function UnansweredMessages({
       <aside
         role="dialog"
         aria-label="Unanswered messages"
-        className="fixed top-0 right-0 h-screen w-full sm:w-[520px] bg-white border-l border-ink-200 shadow-xl z-[61] flex flex-col"
+        className="fixed top-0 right-0 h-dvh-fallback w-full sm:w-[520px] bg-white border-l border-ink-200 shadow-xl z-[61] flex flex-col"
       >
         <div className="px-5 h-12 flex items-center border-b border-ink-100 gap-2">
           <span className="text-[13px] font-semibold text-ink-900">Unanswered</span>
@@ -104,7 +104,7 @@ export function UnansweredMessages({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto px-5 py-4 pb-safe">
           {messages.length === 0 ? (
             <div className="text-[12.5px] text-ink-400 py-10 text-center">
               Nothing waiting — you&apos;re all caught up
