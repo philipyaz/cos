@@ -1,6 +1,6 @@
 ---
 name: vault-operations
-description: Drive the `vault` MCP — `ingest` is async (submit, then poll `ingest_status` to a terminal state; never re-submit an in-flight job); `query` is synchronous. Use for any vault ingest or query, e.g. "ingest this into my vault", "save this to my knowledge base", or "ask my vault about X".
+description: Drive the `vault` MCP — `ingest` is async (submit, then poll `ingest_status` to a terminal state; never re-submit an in-flight job); `query` is synchronous, and a query answer is knowledge-as-recorded — verify any board claim in it against the `board` MCP before repeating or acting on it. Use for any vault ingest or query, e.g. "ingest this into my vault", "save this to my knowledge base", or "ask my vault about X", and when reading a vault answer that mentions board cases.
 ---
 
 # Vault operations — the submit-then-poll lifecycle
@@ -13,6 +13,19 @@ them behave very differently, and getting the difference right is the whole poin
 `query` runs a fast read-only session and returns the answer directly. Call it once and use the
 result. **Do not poll it.** It declines purely-open-work questions ("what's overdue?") with a board
 pointer — that's expected.
+
+## Reading a query answer — board claims are not facts
+
+A `query` answer is **knowledge as recorded, not board state**. The vault writes board
+case ids by reference at ingest and cannot verify, refresh, or follow them — so an answer
+can only tell you what a page recorded, as-of that page's `updated:` date.
+
+- Any claim an answer makes about what the board contains — **especially an absence**
+  ("no case for X") — must be **verified against the `board` MCP** (`get_case`, `search`)
+  before it is repeated to the user or acted on.
+- `cases:` ids in an answer are pointers as-of the page's `updated:` date. Resolve the
+  ones that matter with `get_case`, and never restate them as current:
+  the board is authoritative for current state.
 
 ## ingest is ASYNCHRONOUS — submit, then poll to a terminal state
 
