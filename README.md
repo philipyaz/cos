@@ -140,7 +140,13 @@ When it finishes, open the board at your `$BOARD_URL` (`http://localhost:$BOARD_
 > machines, run **`hub-handover`**. Nothing syncs — one store, on the hub. See
 > [Multi-device](https://philipyaz.github.io/cos/architecture/multi-device/).
 
-> **Skills in Cowork.** Claude **Code** loads the repo's `.claude/skills/` directly. Claude **Cowork Desktop** adds custom skills through its **UI** (it doesn't read the repo filesystem), so `cos-setup` (via `setup-vault`) packages the runtime **`vault-operations`** skill — which drives the vault's async **submit-then-poll** ingest — into a ZIP for you to upload via **Customize → `+` (Skills) → Create skill**. (Even without it, the `ingest`/`ingest_status` tool descriptions carry the same guidance.)
+> **Skills in Cowork.** Claude **Code** auto-loads skills from the repo's `board/.claude/skills/`
+> (and `.claude/skills/` for setup skills) directly. Claude **Cowork Desktop** adds custom skills
+> through its **UI** (it doesn't read the repo filesystem) — upload the committed
+> `board/.claude/skill-bundles/vault-operations.zip`, which drives the vault's async
+> **submit-then-poll** ingest, via **Customize → `+` (Skills) → Create skill**, the same as every
+> other bundle in `board/.claude/skill-bundles/`. (Even without it, the `ingest`/`ingest_status`
+> tool descriptions carry the same guidance.)
 
 ### Manual quickstart (just the board)
 

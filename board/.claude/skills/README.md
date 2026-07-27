@@ -46,6 +46,15 @@ procedure. See **[`../CLAUDE.md`](../CLAUDE.md)** for the full authoring + packa
 | **[`/reminders-review`](./reminders-review/SKILL.md)** | Reviews every **open reminder** and **closes** the ones already done or past their moment — auto-closing only what's *proven* done (finished checklist, linked case closed, delivery date passed) and **proposing** the rest (cold job-alerts, lapsed RSVPs) — so the reminders list stays a live to-do surface, not a graveyard. | `Run /reminders-review` | daily / every few hours |
 | **[`/nutrition-chef`](./nutrition-chef/SKILL.md)** | Food, pantry & meal-planning operator — e.g. plan the week's meals from what's on hand (preferring what's expiring), or check how you're tracking to your calorie target. | `Run /nutrition-chef plan this week's meals` | weekly / daily |
 
+## Called skills
+
+Not every skill here is meant to be scheduled on its own. **[`/vault-operations`](./vault-operations/SKILL.md)**
+is a *called* skill — the submit-then-poll procedure for the `vault` MCP's async `ingest` and
+synchronous `query`. `/mail-to-board`, `/whatsapp-triage`, and `/fitness-health-data` each invoke it
+for the vault half of their runs; you can also invoke it directly on demand ("ingest this into my
+vault", "ask my vault about X"). It has a bundle and installs like every other skill here — it's just
+not a row in the table above, because nothing schedules it standalone.
+
 ## Use-case ideas (steal these)
 
 - **"What do I owe a reply to?"** — `/unanswered-messages` every 15 min keeps a live list of the DMs and

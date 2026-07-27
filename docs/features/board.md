@@ -20,7 +20,7 @@ The Cos Board is the action surface of a local-first, agent-native personal oper
 Any feature must respect these:
 
 - **Local-first.** Files on disk (JSON store + Obsidian vault). No cloud DB, no auth system, no realtime/websocket server, single user.
-- **One ingest path.** Everything inbound flows through `/second-brain-ingest`; classify → route → entity-resolve → dedupe → cross-link → watermark.
+- **One ingest path.** Everything inbound flows through the vault MCP's async `ingest` (driven per `/vault-operations`); classify → route → entity-resolve → dedupe → cross-link → watermark.
 - **Agent-native parity.** Every human gesture maps 1:1 to an existing board MCP verb. Human and agent mutate through one identical path; no human-only or agent-only mutation surfaces.
 - **Two surfaces, cross-linked bidirectionally.** Board cases ↔ vault entity pages, both directions.
 - **Deduplicate aggressively, entity-resolved.** Same input twice → one canonical record.
