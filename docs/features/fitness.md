@@ -244,21 +244,24 @@ medical advice** — a low-HRV / poor-sleep "train easy" read is a conservative 
 substitute for clinical judgement.
 
 A saved plan can be **materialized onto the calendar** via
-**`POST /api/fitness/push-plan-to-calendar`** (body `{ artifactId? | periodKey? }` — exactly one
-required; gated on the fitness add-on) or the **`push_plan_to_calendar`** tool on the `fitness`
-MCP. This is a **reconciling** push, not a blind create, built on the shared placement engine
-([`board/lib/placement.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/placement.ts)):
-each session's calendar link is a receipt (`payload.days[i].eventId`) carried on the artifact
-itself, so re-running the push after the plan changes **creates** new sessions, **updates** ones
-that already exist, and **skips** the rest — never duplicating the week. Placement is
+**`POST /api/fitness/push-plan-to-calendar`** (body `{ artifactId? | periodKey?, busyWindows? }` —
+exactly one of `artifactId`/`periodKey` required; gated on the fitness add-on) or the
+**`push_plan_to_calendar`** tool on the `fitness` MCP. This is a **reconciling** push, not a blind
+create, built on the shared placement engine — see **[Calendar placement](placement.md)** for the
+engine contract, the optional `busyWindows` input (the agent's own read of the real calendar, used
+once and never stored), and the `workingHours` preference that keeps a session out of the working
+day. In short: each session's calendar link is a receipt (`payload.days[i].eventId`) carried on the
+artifact itself, so re-running the push after the plan changes **creates** new sessions, **updates**
+ones that already exist, and **skips** the rest — never duplicating the week. Placement is
 **overlap-safe** (a session lands in a free slot within the day's candidate windows and is never
-placed on top of an existing timed event) and **rest / active-recovery days are always skipped**,
-never placed. A session time edited by hand — yours or Philip's — is **never moved back** by a
-re-push; only its title/description refresh. The response reports `{ results: [{date, action,
-reason?, eventId?}], created, updated, skipped, version }`; a `skipped` result carries a `reason`
-(`rest_day`, `no_free_slot`, or `past`) — when a skipped rest day still carries an `eventId`, the
-plan changed since that day was last pushed and a stale session remains on the calendar (a known
-limit: the board never deletes it — the agent offers removal via the calendar MCP).
+placed on top of an existing timed event or inside working hours) and **rest / active-recovery days
+are always skipped**, never placed. A session time edited by hand — yours or Philip's — is **never
+moved back** by a re-push; only its title/description refresh. The response reports `{ results:
+[{date, action, reason?, eventId?}], created, updated, skipped, version }`; a `skipped` result
+carries a `reason` (`rest_day`, `no_free_slot`, `outside_working_hours`, or `past`) — when a skipped
+rest day still carries an `eventId`, the plan changed since that day was last pushed and a stale
+session remains on the calendar (a known limit: the board never deletes it — the agent offers
+removal via the calendar MCP).
 
 ### Correlations
 

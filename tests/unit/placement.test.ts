@@ -11,8 +11,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { planPlacement } from "../../board/lib/placement.ts";
-import type { PlacementRequest } from "../../board/lib/placement.ts";
+import { planPlacement, DEFAULT_WORKING_HOURS } from "../../board/lib/placement.ts";
+import type { PlacementRequest, WorkingHours } from "../../board/lib/placement.ts";
 import type { CalendarEvent } from "../../board/lib/types.ts";
 
 const TODAY = "2026-01-01"; // fixed reference "now" for every test below
@@ -163,4 +163,112 @@ test("planPlacement: an all-day event never blocks placement", () => {
   });
   assert.equal(ops[0].op, "create");
   assert.equal((ops[0] as { startTime: string }).startTime, "09:00");
+});
+
+// ── ops#25 — the working-hours policy (2026-02-02 is a Monday; 2026-02-07/08 are Sat/Sun) ──
+
+test("planPlacement: no policy at all means NO working-hours protection — additive-only", () => {
+  // The same lunch window the "margins" test below finds fully protected — with no policy
+  // supplied, it simply places. This is the concrete proof step-1 callers are unaffected.
+  const ops = planPlacement({
+    requests: [req({ key: "1", date: "2026-02-02", durationMin: 30, windows: [{ start: "12:00", end: "13:00" }] })],
+    events: [],
+    today: TODAY,
+  });
+  assert.equal(ops[0].op, "create");
+  assert.equal((ops[0] as { startTime: string }).startTime, "12:00");
+});
+
+test("planPlacement (margins policy): a weekday window ENTIRELY inside working hours is never usable — skip reason outside_working_hours, not no_free_slot", () => {
+  const ops = planPlacement({
+    requests: [req({ key: "1", date: "2026-02-02" /* Monday */, durationMin: 30, windows: [{ start: "12:00", end: "13:00" }] })],
+    events: [], // no real conflict at all — the policy alone explains the skip
+    policy: { mode: "margins", workingHours: DEFAULT_WORKING_HOURS },
+    today: TODAY,
+  });
+  assert.deepEqual(ops, [{ op: "skip", key: "1", date: "2026-02-02", reason: "outside_working_hours" }]);
+});
+
+test("planPlacement (margins policy): the SAME lunch window on a weekend is unprotected — it places", () => {
+  const ops = planPlacement({
+    requests: [req({ key: "1", date: "2026-02-07" /* Saturday */, durationMin: 30, windows: [{ start: "12:00", end: "13:00" }] })],
+    events: [],
+    policy: { mode: "margins", workingHours: DEFAULT_WORKING_HOURS },
+    today: TODAY,
+  });
+  assert.equal(ops[0].op, "create");
+  assert.equal((ops[0] as { startTime: string }).startTime, "12:00");
+});
+
+test("planPlacement (margins policy): a fully-busy evening margin falls through to the morning margin — the margins themselves sit outside working hours", () => {
+  const ops = planPlacement({
+    requests: [req({
+      key: "1", date: "2026-02-02", durationMin: 60,
+      windows: [{ start: "18:00", end: "21:30" }, { start: "06:30", end: "09:00" }],
+    })],
+    events: [event({ id: "EVT-1", startTime: "18:00", endTime: "21:30" })],
+    policy: { mode: "margins", workingHours: DEFAULT_WORKING_HOURS },
+    today: TODAY,
+  });
+  assert.equal(ops[0].op, "create");
+  assert.equal((ops[0] as { startTime: string }).startTime, "06:30", "falls through to the morning margin, untouched by working-hours protection");
+});
+
+test("planPlacement (margins policy): both margins fully booked by REAL events ⇒ no_free_slot, never outside_working_hours", () => {
+  const ops = planPlacement({
+    requests: [req({
+      key: "1", date: "2026-02-02", durationMin: 60,
+      windows: [{ start: "18:00", end: "21:30" }, { start: "06:30", end: "09:00" }],
+    })],
+    events: [
+      event({ id: "EVT-1", startTime: "18:00", endTime: "21:30" }),
+      event({ id: "EVT-2", startTime: "06:30", endTime: "09:00" }),
+    ],
+    policy: { mode: "margins", workingHours: DEFAULT_WORKING_HOURS },
+    today: TODAY,
+  });
+  assert.deepEqual(ops, [{ op: "skip", key: "1", date: "2026-02-02", reason: "no_free_slot" }]);
+});
+
+test("planPlacement (within policy): a candidate window is CLAMPED to the working window, not just checked against it", () => {
+  const ops = planPlacement({
+    requests: [req({ key: "1", date: "2026-02-02", durationMin: 60, windows: [{ start: "08:00", end: "19:00" }] })],
+    events: [],
+    policy: { mode: "within", workingHours: DEFAULT_WORKING_HOURS },
+    today: TODAY,
+  });
+  assert.equal(ops[0].op, "create");
+  assert.equal((ops[0] as { startTime: string }).startTime, "09:00", "clamped to the working window's start, not the request window's own 08:00");
+  assert.equal((ops[0] as { endTime: string }).endTime, "10:00");
+});
+
+test("planPlacement (within policy): a Saturday request is refused outright — outside_working_hours", () => {
+  const ops = planPlacement({
+    requests: [req({ key: "1", date: "2026-02-07" /* Saturday */, durationMin: 60, windows: [{ start: "09:00", end: "17:00" }] })],
+    events: [],
+    policy: { mode: "within", workingHours: DEFAULT_WORKING_HOURS },
+    today: TODAY,
+  });
+  assert.deepEqual(ops, [{ op: "skip", key: "1", date: "2026-02-07", reason: "outside_working_hours" }]);
+});
+
+test("planPlacement (within policy): a CUSTOM workingHours is respected, not the shipped default", () => {
+  const weekendOnly: WorkingHours = { days: [6], start: "10:00", end: "14:00" }; // Saturday-only, 10:00-14:00
+
+  const onCustomDay = planPlacement({
+    requests: [req({ key: "1", date: "2026-02-07" /* Saturday */, durationMin: 60, windows: [{ start: "09:00", end: "18:00" }] })],
+    events: [],
+    policy: { mode: "within", workingHours: weekendOnly },
+    today: TODAY,
+  });
+  assert.equal(onCustomDay[0].op, "create");
+  assert.equal((onCustomDay[0] as { startTime: string }).startTime, "10:00", "clamped to the CUSTOM working window, not DEFAULT_WORKING_HOURS");
+
+  const offCustomDay = planPlacement({
+    requests: [req({ key: "2", date: "2026-02-02" /* Monday — not in the custom days */, durationMin: 60, windows: [{ start: "09:00", end: "18:00" }] })],
+    events: [],
+    policy: { mode: "within", workingHours: weekendOnly },
+    today: TODAY,
+  });
+  assert.deepEqual(offCustomDay, [{ op: "skip", key: "2", date: "2026-02-02", reason: "outside_working_hours" }]);
 });

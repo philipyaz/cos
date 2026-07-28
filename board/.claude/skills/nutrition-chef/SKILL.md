@@ -356,16 +356,24 @@ plan, assemble:
 > covering both the plan AND putting it on the calendar, before firing either. In
 > auto mode, plan it, push it, and report. **One** planned meal is low-stakes either way.
 
-**4. Push the week to the calendar — by default.** After planning or reconciling
-meals for a window, call the `nutrition` MCP's **`push_meal_plan_to_calendar({ from,
-to })`** for that window (omit both for today through the next 7 days). It is
-**idempotent and overlap-safe**: a meal lands in a free slot within its slot's
-candidate window and is never placed on top of an existing timed event;
-`cooked`/`skipped` entries in the window are reported skipped/`not_planned` and left
-alone. Re-running it reconciles rather than duplicates, so it's safe every time this
-job runs. This is the **same** approval-mode confirmation as the plan itself (see the
-gate above) — one combined yes for "plan the week AND put it on the calendar", never
-a second prompt.
+**4. Push the week to the calendar — by default.** Before pushing, **read the user's
+REAL calendar** (your own Google Calendar connector) for the window and collect its
+busy times — **only** `{date, start, end}`, never a title, attendee, or any other
+content; skip this if you can't reach a real calendar, it's optional. Then call the
+`nutrition` MCP's **`push_meal_plan_to_calendar({ from, to, busy_windows: [...] })`**
+for that window (omit `from`/`to` for today through the next 7 days; omit
+`busy_windows` if you have none). **Never ask Cos to store this calendar data** — the
+tool uses it for this one call only and discards it. It is **idempotent and
+overlap-safe**: a meal lands in a free slot within its slot's candidate window and is
+never placed on top of an existing timed event or inside the user's **working hours**
+(Mon–Fri 09:00–18:00 by default, or whatever the board has stored — automatic, you
+don't set it here; this is why a weekday lunch/breakfast/snack can come back
+`skipped`/`outside_working_hours` while the same day's dinner still places — tell the
+user that's a policy skip, not a fully-booked day). `cooked`/`skipped` entries in the
+window are reported skipped/`not_planned` and left alone. Re-running it reconciles
+rather than duplicates, so it's safe every time this job runs. This is the **same**
+approval-mode confirmation as the plan itself (see the gate above) — one combined yes
+for "plan the week AND put it on the calendar", never a second prompt.
 
 **Explicit-time requests still go the manual route.** When the user names a specific
 time (*"put dinner on my calendar at 7"*), the `eventId` must reference an
@@ -505,10 +513,12 @@ read now — there's no per-day chip).
 - **Meal plan:** `read_pantry` **first**; prefer on-hand + expiring ingredients; record
   `pantryItemIds` (soft refs). Calendar push is the **default** —
   `push_meal_plan_to_calendar` after planning/reconciling, idempotent + overlap-safe,
-  folded into the same approval-mode confirmation as the plan. An explicit named time
-  still goes the manual route: `create_event` (calendar MCP) first, then store the
-  `EVT-id` as `eventId`; `null` unlinks. `status: "cooked"` → **offer** a `log_food`
-  entry **and** a pantry decrement.
+  folded into the same approval-mode confirmation as the plan. Read the user's real
+  calendar first and pass its busy times as `busy_windows` (date/start/end only —
+  never store the content); working hours are protected automatically either way. An
+  explicit named time still goes the manual route: `create_event` (calendar MCP)
+  first, then store the `EVT-id` as `eventId`; `null` unlinks. `status: "cooked"` →
+  **offer** a `log_food` entry **and** a pantry decrement.
 - **Dietary profile (JOB 4):** `get_diet_profile` / `set_diet_profile` (MERGE — a sent
   list REPLACES it, so add by sending the full array). `allergies` is the SAFETY list you
   honor everywhere; `philosophy` is the methodology you apply when authoring targets.

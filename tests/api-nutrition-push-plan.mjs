@@ -14,12 +14,14 @@
 //                          never reaches the engine (no event minted for it)
 //   • the description IS the payload — recipe, ingredient list, servings, and the entry's own
 //     note (defrost/prep text) all appear on the created event, nothing invented
+//   • margins rule (ops#25) — a WEEKDAY lunch is skipped/outside_working_hours (its only window
+//     sits entirely inside the default Mon-Fri 09:00-18:00), while the SAME weekday's dinner
+//     still places — dinner sits outside working hours by construction
 //   • the add-on GATE    — disabled → 404
 //
-// Deliberately DINNER + WEEKEND fixtures only: a weekday lunch/breakfast/snack's placement
-// changes once ops#25 (working-hours margins) lands, and this file must stay green through that —
-// dinner is safe on any day, and any slot is safe on a day outside the default Mon-Fri working
-// window, so a weekend lunch is included for a little extra coverage without going stale.
+// The main flow above is deliberately DINNER + WEEKEND: dinner is safe on any day, and any slot
+// is safe on a weekend (outside the default Mon-Fri working window), so those assertions stay
+// green regardless of the margins rule below. The margins rule itself gets its own weekday probe.
 //
 // Snapshots board/data/cases.json first and restores it in a `finally`. Requires a running board:
 //   cd board && npm run dev
@@ -167,6 +169,34 @@ async function main() {
 
     const lunchAfterPush = await GET(`/api/nutrition/plan/${lunchId}`);
     check(typeof lunchAfterPush.body.entry?.eventId === "string", "the SAT lunch entry also carries an eventId receipt");
+
+    // ── ops#25: a weekday lunch is protected by working hours; the same-day dinner is not ────
+    const WED = addDays(SAT, 4); // a WEEKDAY, always in the future — the margins rule applies here
+    const wedLunch = await POST("/api/nutrition/plan", { date: WED, slot: "lunch", title: "Weekday lunch (margins probe)" });
+    check(wedLunch.status === 201, `plan a WEEKDAY lunch → 201 (got ${wedLunch.status})`);
+    const wedLunchId = wedLunch.body.entry?.id;
+    const wedDinner = await POST("/api/nutrition/plan", { date: WED, slot: "dinner", title: "Weekday dinner (margins probe)" });
+    check(wedDinner.status === 201, `plan the SAME weekday's dinner → 201 (got ${wedDinner.status})`);
+    const wedDinnerId = wedDinner.body.entry?.id;
+
+    const pushWed = await POST("/api/nutrition/push-plan-to-calendar", { from: WED, to: addDays(WED, 1) });
+    check(pushWed.status === 200, `push the weekday window → 200 (got ${pushWed.status})`);
+    check(
+      pushWed.body.created === 1 && pushWed.body.skipped === 1,
+      `1 created (dinner) + 1 skipped (lunch) (got created=${pushWed.body.created}, skipped=${pushWed.body.skipped})`,
+    );
+
+    const wedSkipped = pushWed.body.results.find((r) => r.action === "skipped");
+    check(
+      wedSkipped?.reason === "outside_working_hours",
+      `the weekday lunch is skipped/outside_working_hours — a POLICY skip, not no_free_slot (got ${wedSkipped?.reason})`,
+    );
+
+    const wedLunchAfter = await GET(`/api/nutrition/plan/${wedLunchId}`);
+    check(!wedLunchAfter.body.entry?.eventId, "the weekday lunch entry was never given an eventId — working hours protected the slot");
+
+    const wedDinnerAfter = await GET(`/api/nutrition/plan/${wedDinnerId}`);
+    check(typeof wedDinnerAfter.body.entry?.eventId === "string", "the SAME weekday's dinner still carries an eventId — dinner sits outside working hours");
 
     // ── GATE: disabled add-on → 404 (mirrors api-nutrition-gate.mjs) ─────────
     const disabled = await PATCH("/api/addons/nutrition", { enabled: false });

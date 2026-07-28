@@ -183,19 +183,20 @@ The meal plan's cross-link to the rest of the board is the optional **`eventId`*
 `MealPlanEntry`: a planned meal shows up on the board's calendar by pointing at a `CalendarEvent`.
 There are two ways it gets set, and one is now the default.
 
-**The default — `POST /api/nutrition/push-plan-to-calendar`** (body `{ from?, to? }`, ISO days,
-half-open `[from, to)`, defaulting to today through the next 7 days) or the
+**The default — `POST /api/nutrition/push-plan-to-calendar`** (body `{ from?, to?, busyWindows? }`,
+ISO days, half-open `[from, to)`, defaulting to today through the next 7 days) or the
 **`push_meal_plan_to_calendar`** tool on the `nutrition` MCP. It is built on the same shared
-placement engine
-([`board/lib/placement.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/placement.ts)) as
-the [Fitness](fitness.md) training-plan push: **reconciling** (idempotent by `entry.eventId` — a
-re-run creates/updates/skips rather than duplicating) and **overlap-safe** (a meal lands in a free
-slot within its slot's candidate window — breakfast 07:00–09:00, lunch 12:00–14:00, snack
-16:00–17:30, dinner 18:30–21:00 — and is never placed on top of an existing timed event).
-`cooked`/`skipped` entries in the window are reported `skipped`/`not_planned` and left untouched. A
-meal time edited by hand is never moved back by a re-push; only its title/description refresh. The
-response mirrors the fitness push: `{ results: [{date, action, reason?, eventId?}], created,
-updated, skipped, version }`.
+placement engine as the [Fitness](fitness.md) training-plan push — see
+**[Calendar placement](placement.md)** for the full engine contract, the optional `busyWindows`
+input, and the `workingHours` preference. In short: **reconciling** (idempotent by `entry.eventId`
+— a re-run creates/updates/skips rather than duplicating) and **overlap-safe** (a meal lands in a
+free slot within its slot's candidate window — breakfast 07:00–09:00, lunch 12:00–14:00, snack
+16:00–17:30, dinner 18:30–21:00 — and is never placed on top of an existing timed event or inside
+working hours, so a weekday breakfast/lunch/snack can come back `skipped`/`outside_working_hours`
+while dinner still places). `cooked`/`skipped` entries in the window are reported
+`skipped`/`not_planned` and left untouched. A meal time edited by hand is never moved back by a
+re-push; only its title/description refresh. The response mirrors the fitness push: `{ results:
+[{date, action, reason?, eventId?}], created, updated, skipped, version }`.
 
 **The manual path, for an explicit time** (*"put dinner on my calendar at 7"*) — the order is still
 a contract:

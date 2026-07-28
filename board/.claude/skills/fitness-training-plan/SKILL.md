@@ -185,27 +185,40 @@ refused.
 
 ### 8. Push the week to the calendar — `push_plan_to_calendar`
 
-Once the plan is saved, put the sessions on the calendar **by default** — call the
-`fitness` MCP's **`push_plan_to_calendar({ period_key: "<the week>" })`**. It is
-**idempotent and overlap-safe**: a session lands in a free slot within its day's
-candidate windows and is never placed on top of an existing timed event; rest /
-active-recovery days are always skipped, never placed. Re-running it after the plan
-changes **reconciles** the week (creates new sessions, refreshes changed ones, never
-duplicates) instead of re-creating it — safe to call every time this skill runs. A
-session time you or Philip edited by hand is **never moved back** by a re-push; only
-its title/description refresh.
+Once the plan is saved, put the sessions on the calendar **by default**. **First, read
+the user's REAL calendar** (your own Google Calendar connector) for the week's date
+range and collect the busy times — **only** `{date, start, end}`, never a title,
+attendee, or any other content. Then call the `fitness` MCP's
+**`push_plan_to_calendar({ period_key: "<the week>", busy_windows: [...] })`** —
+`busy_windows` is optional (omit it if you can't read the real calendar), but pass it
+whenever you can, so a session never lands on top of a real meeting the board's own
+`db.events` doesn't know about. **Never ask Cos to store this calendar data** — the
+tool uses it for this one call only and discards it; it is not a sync.
+
+The push is also **idempotent and overlap-safe**: a session lands in a free slot
+within its day's candidate windows and is never placed on top of an existing timed
+event or inside the user's **working hours** (Mon–Fri 09:00–18:00 by default, or
+whatever the board has stored — this happens automatically, you don't set it here);
+rest / active-recovery days are always skipped, never placed. Re-running it after the
+plan changes **reconciles** the week (creates new sessions, refreshes changed ones,
+never duplicates) instead of re-creating it — safe to call every time this skill
+runs. A session time you or Philip edited by hand is **never moved back** by a
+re-push; only its title/description refresh.
 
 This is a **bulk** write (a whole week of events), so in **approval mode** it is the
 ONE confirmation STEP 0 reserves for the whole run — lay the week out and get a
 single yes before calling it. In auto mode, call it and report.
 
 **Relay every `skipped` result with its reason** — `rest_day` (expected, no action
-needed) or `no_free_slot` (the day was fully booked; tell the user which day). When a
-skipped rest day's result carries an `eventId`, the plan changed since that day was
-last pushed and a stale session is still on the calendar — tell the user and offer to
-remove it via the `calendar` MCP's delete tool (the board itself never deletes it).
-(The `/fitness/training-plan` page's own "Add to calendar" button calls the same
-route server-side; either path works.)
+needed), `no_free_slot` (the day was genuinely fully booked; tell the user which
+day), or `outside_working_hours` (every candidate slot fell inside working hours —
+this is a policy skip, not congestion; tell the user their working day left no
+margin). When a skipped rest day's result carries an `eventId`, the plan changed
+since that day was last pushed and a stale session is still on the calendar — tell
+the user and offer to remove it via the `calendar` MCP's delete tool (the board
+itself never deletes it). (The `/fitness/training-plan` page's own "Add to calendar"
+button calls the same route server-side; either path works, but only this skill's
+path can supply `busy_windows`.)
 
 ### 9. Tell the user
 
@@ -243,7 +256,9 @@ the **not-medical-advice** framing.
 - **Calendar push is the DEFAULT, not an offer** — `push_plan_to_calendar` runs
   after every save; it's idempotent + overlap-safe, rest/active-recovery days are
   always skipped, and a human-edited event time is never moved back. Bulk, so
-  confirm once in approval mode.
+  confirm once in approval mode. Read the user's real calendar first and pass its
+  busy times as `busy_windows` (date/start/end only — never store the content);
+  working hours are protected automatically either way.
 - **NOT MEDICAL ADVICE** — informational estimate; defer injuries / pain / symptoms /
   medical conditions / pregnancy / under-18 to a professional; don't push hard
   training on poor recovery.

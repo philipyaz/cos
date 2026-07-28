@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { mutate, nextEventId, findEvent } from "@/lib/store";
 import { assertAddonEnabled } from "@/lib/addons";
-import { resolveActor, storeErrorToResponse, isISODate } from "@/lib/route-helpers";
-import { planPlacement, type CandidateWindow, type PlacementRequest } from "@/lib/placement";
+import { resolveActor, storeErrorToResponse, isISODate, isHHMM } from "@/lib/route-helpers";
+import { planPlacement, DEFAULT_WORKING_HOURS, type BusyWindow, type CandidateWindow, type PlacementRequest } from "@/lib/placement";
 import { todayISO } from "@/lib/selectors";
 import { addDays } from "@/lib/nutrition-format";
 import type { CalendarEvent, MealSlot } from "@/lib/types";
@@ -46,13 +46,20 @@ function mealDescription(entry: { recipe?: string; ingredients?: string[]; servi
 
 // POST /api/nutrition/push-plan-to-calendar — the meal-plan twin of the fitness training-plan
 // push: reconciling materialisation of PLANNED meal-plan entries onto the calendar (db.events)
-// via the placement engine (lib/placement.ts). Body: { from?, to? } — ISO days, half-open
-// [from, to), defaulting to today -> today+7. Idempotent (entry.eventId receipts, live-checked
-// — a dangling id is treated as absent and the event is recreated); overlap-safe. cooked/skipped
-// entries in the window are reported as skipped/not_planned and never reach the engine. GATED
-// on the "nutrition" add-on (assertAddonEnabled is the first statement inside mutate()).
+// via the placement engine (lib/placement.ts). Body: { from?, to?, busyWindows? } — ISO days,
+// half-open [from, to), defaulting to today -> today+7. Idempotent (entry.eventId receipts,
+// live-checked — a dangling id is treated as absent and the event is recreated); overlap-safe.
+// cooked/skipped entries in the window are reported as skipped/not_planned and never reach the
+// engine. GATED on the "nutrition" add-on (assertAddonEnabled is the first statement inside
+// mutate()).
+//
+// `busyWindows` (ops#25) is the agent's own read of the user's REAL calendar — per-call only,
+// used-and-discarded by the engine, NEVER persisted. The working-hours preference
+// (db.settings.workingHours, default Mon-Fri 09:00-18:00) is passed as a "margins" policy: the
+// working window is treated as busy on a working day, so a weekday lunch/breakfast/snack never
+// lands inside Philip's working hours (dinner windows sit outside it by construction).
 export async function POST(req: NextRequest) {
-  let body: { from?: unknown; to?: unknown } = {};
+  let body: { from?: unknown; to?: unknown; busyWindows?: unknown } = {};
   try {
     const raw = await req.text();
     body = raw ? JSON.parse(raw) : {};
@@ -67,6 +74,26 @@ export async function POST(req: NextRequest) {
   }
   if (body.to !== undefined && !isISODate(body.to)) {
     return NextResponse.json({ error: "'to' must be 'YYYY-MM-DD'." }, { status: 400 });
+  }
+
+  // Optional caller-supplied busy windows (ops#25) — the agent's own read of the REAL
+  // calendar, used-and-discarded by the engine; never persisted anywhere below.
+  const rawBusyWindows = body.busyWindows !== undefined ? body.busyWindows : [];
+  if (!Array.isArray(rawBusyWindows)) {
+    return NextResponse.json({ error: "'busyWindows' must be an array." }, { status: 400 });
+  }
+  const busyWindows: BusyWindow[] = [];
+  for (const raw of rawBusyWindows) {
+    const date = (raw as Record<string, unknown> | null)?.date;
+    const start = (raw as Record<string, unknown> | null)?.start;
+    const end = (raw as Record<string, unknown> | null)?.end;
+    if (!isISODate(date) || !isHHMM(start) || !isHHMM(end) || start >= end) {
+      return NextResponse.json(
+        { error: "Each 'busyWindows' entry needs 'date' (YYYY-MM-DD) and 'start' < 'end' (HH:MM)." },
+        { status: 400 },
+      );
+    }
+    busyWindows.push({ date, start, end });
   }
 
   resolveActor(req, body);
@@ -102,7 +129,14 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const ops = planPlacement({ requests, events: db.events, today });
+      const workingHours = db.settings?.workingHours ?? DEFAULT_WORKING_HOURS;
+      const ops = planPlacement({
+        requests,
+        events: db.events,
+        busyWindows,
+        policy: { mode: "margins", workingHours },
+        today,
+      });
 
       const opResultById = new Map<string, PushResult>();
       for (const op of ops) {

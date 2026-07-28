@@ -30,6 +30,31 @@ export interface CandidateWindow {
   end: string; // "HH:MM"
 }
 
+// The working-hours / protected-window preference (mirrors Settings.workingHours in
+// types.ts — declared separately here, not imported, so this leaf module never depends
+// on types.ts beyond CalendarEvent). ISO weekday numbers: Mon=1 … Sun=7.
+export interface WorkingHours {
+  days: number[];
+  start: string; // "HH:MM"
+  end: string; // "HH:MM"
+}
+
+// The shipped default (ops#25): Mon-Fri 09:00-18:00, so the preference needs no setup
+// step. Callers resolve `db.settings?.workingHours ?? DEFAULT_WORKING_HOURS`.
+export const DEFAULT_WORKING_HOURS: WorkingHours = { days: [1, 2, 3, 4, 5], start: "09:00", end: "18:00" };
+
+// How a caller wants the working window enforced:
+//  - "margins" (this unit's callers — training/meal placements): on a working day the
+//    working window is PROTECTED — added to the busy set, so life placements never land
+//    inside it. Non-working days are unprotected.
+//  - "within" (a future work-placement caller, e.g. ops#24): candidate windows are
+//    CLAMPED to the working window; a non-working day refuses the request outright.
+// No policy at all ⇒ today's board-only behaviour (busyWindows/events only) — additive.
+export interface PlacementPolicy {
+  mode: "margins" | "within";
+  workingHours: WorkingHours;
+}
+
 export interface PlacementRequest {
   key: string; // opaque — day index or MEAL-id; echoed back on the resulting op
   date: string; // "YYYY-MM-DD"
@@ -64,6 +89,33 @@ function toHHMM(mins: number): string {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// ISO weekday (Mon=1 … Sun=7) for a naive "YYYY-MM-DD" day — the same TZ-independent
+// Date.UTC-parse idiom the push routes use for their own weekend checks.
+function isoWeekday(dateISO: string): number {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const sundayZero = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun..6=Sat
+  return sundayZero === 0 ? 7 : sundayZero;
+}
+
+function isWorkingDay(dateISO: string, wh: WorkingHours): boolean {
+  return wh.days.includes(isoWeekday(dateISO));
+}
+
+// The part of `window` that falls inside the working window, or null when they don't
+// overlap at all ("within" mode clamps a candidate window to this).
+function intersectWorkingHours(window: CandidateWindow, wh: WorkingHours): CandidateWindow | null {
+  const start = Math.max(toMinutes(window.start), toMinutes(wh.start));
+  const end = Math.min(toMinutes(window.end), toMinutes(wh.end));
+  return start < end ? { start: toHHMM(start), end: toHHMM(end) } : null;
+}
+
+// True when `window` never pokes outside the working window at all — the "margins"-mode
+// case where the window can NEVER be used on a protected day, regardless of real events
+// (a weekday lunch inside 09:00-18:00), as opposed to one only partly protected.
+function isFullyInsideWorkingHours(window: CandidateWindow, wh: WorkingHours): boolean {
+  return toMinutes(window.start) >= toMinutes(wh.start) && toMinutes(window.end) <= toMinutes(wh.end);
 }
 
 // Sort-and-merge overlapping/touching intervals into the minimal covering set.
@@ -108,6 +160,7 @@ export function planPlacement(input: {
   requests: PlacementRequest[];
   events: CalendarEvent[]; // the board's own events; only TIMED ones (!allDay && startTime) are busy
   busyWindows?: BusyWindow[]; // caller-supplied, used-and-discarded; default [] === today's board-only behaviour
+  policy?: PlacementPolicy; // the working-hours preference; absent === today's behaviour (additive)
   today: string; // "YYYY-MM-DD" — the injected clock
 }): PlacementOp[] {
   const busyWindows = input.busyWindows ?? [];
@@ -152,9 +205,33 @@ export function planPlacement(input: {
 
     // Rule 4/5 — walk the candidate windows in the caller's preference order; within
     // each, take the earliest gap that fits. Never falls back outside the given windows.
+    // A `policy` reshapes each window BEFORE the free-gap search: "margins" protects a
+    // working day's working window (added to the busy set; a window entirely inside it
+    // is never usable at all); "within" clamps every window to the working window and
+    // refuses a non-working day outright. `sawUsableWindow` records whether ANY window
+    // was ever allowed to be searched, so the skip reason below can tell "never allowed"
+    // (outside_working_hours) apart from "allowed, but real congestion ate it" (no_free_slot).
+    const policy = input.policy;
     let placed = false;
+    let sawUsableWindow = false;
     for (const window of req.windows) {
-      const gap = freeGaps(window, busyFor(req.date)).find((g) => g.end - g.start >= req.durationMin);
+      let searchWindow = window;
+      let busy = busyFor(req.date);
+
+      if (policy && policy.mode === "within") {
+        const wh = policy.workingHours;
+        if (!isWorkingDay(req.date, wh)) continue;
+        const clipped = intersectWorkingHours(window, wh);
+        if (!clipped) continue;
+        searchWindow = clipped;
+      } else if (policy && policy.mode === "margins" && isWorkingDay(req.date, policy.workingHours)) {
+        const wh = policy.workingHours;
+        if (isFullyInsideWorkingHours(window, wh)) continue;
+        busy = [...busy, { start: toMinutes(wh.start), end: toMinutes(wh.end) }];
+      }
+
+      sawUsableWindow = true;
+      const gap = freeGaps(searchWindow, busy).find((g) => g.end - g.start >= req.durationMin);
       if (!gap) continue;
       const startTime = toHHMM(gap.start);
       const endTime = toHHMM(gap.start + req.durationMin);
@@ -164,7 +241,8 @@ export function planPlacement(input: {
       break;
     }
     if (!placed) {
-      ops.push({ op: "skip", key: req.key, date: req.date, reason: "no_free_slot" });
+      const reason = policy && !sawUsableWindow ? "outside_working_hours" : "no_free_slot";
+      ops.push({ op: "skip", key: req.key, date: req.date, reason });
     }
   }
 

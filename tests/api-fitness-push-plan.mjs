@@ -24,6 +24,10 @@
 //   • regenerate-to-rest  — flipping a day that already has a live event to rest/active_recovery
 //                           in a regenerated plan reports skipped/rest_day WITH the stale eventId,
 //                           and the event itself is left untouched (never deleted)
+//   • caller-only busy    — a conflict that exists ONLY in a caller-supplied `busyWindows` entry
+//                           (ops#25) is avoided just as if it were a real event — the session falls
+//                           through to the morning margin — and the windows are NEVER persisted:
+//                           after the call, the raw store file contains neither sentinel time
 //   • the add-on GATE     — disabled → 404 (mirrors api-fitness-gate.mjs)
 //
 // Snapshots board/data/cases.json first and restores it in a `finally` (net-zero — settings.addons
@@ -100,11 +104,11 @@ const baseDays = () => [
   { date: day(6), type: "technique", sport: "swimming_pool", duration_min: 35, intensity: "easy", description: "Technique drills" },
 ];
 
-const savePlan = (days, notes = "push-plan-to-calendar test") =>
+const savePlan = (days, notes = "push-plan-to-calendar test", week = WEEK) =>
   POST("/api/fitness/coaching", {
     kind: "training_plan",
     source: "agent",
-    payload: { week: WEEK, recovery_status: "good", days, weekly_notes: notes },
+    payload: { week, recovery_status: "good", days, weekly_notes: notes },
   });
 
 const resultByDate = (body) => Object.fromEntries(body.results.map((r) => [r.date, r]));
@@ -212,6 +216,42 @@ async function main() {
 
     const satEventStill = await GET(`/api/events/${satEventId}`);
     check(satEventStill.status === 200, "Saturday's old event is UNTOUCHED (not deleted) after flipping to rest");
+
+    // ── ops#25: a conflict that exists ONLY in busyWindows is avoided, and never persisted ───
+    const WEEK2 = "2099-W02"; // a separate artifact — no carry-forward receipt to interfere
+    const busyProbeDate = day(10); // a weekday untouched by anything above
+    const saved2 = await savePlan(
+      [{ date: busyProbeDate, type: "endurance", sport: "running", duration_min: 45, intensity: "easy", description: "busyWindows probe" }],
+      "busy-windows probe",
+      WEEK2,
+    );
+    check(saved2.status === 201, `POST a fresh single-day plan (${WEEK2}) → 201 (got ${saved2.status})`);
+
+    const pushBusy = await POST("/api/fitness/push-plan-to-calendar", {
+      periodKey: WEEK2,
+      busyWindows: [{ date: busyProbeDate, start: "18:07", end: "21:23" }],
+    });
+    check(pushBusy.status === 200, `push with a caller-only busyWindows conflict → 200 (got ${pushBusy.status})`);
+    check(pushBusy.body.created === 1, `the probe day is created (got ${pushBusy.body.created})`);
+    check(pushBusy.body.results[0]?.action === "created", "the probe day is placed, not skipped");
+
+    const probeEvent = await GET(`/api/events/${pushBusy.body.results[0].eventId}`);
+    check(
+      probeEvent.body.event?.startTime === "06:30",
+      `the session falls through to the MORNING margin — the evening conflict exists ONLY in busyWindows, not db.events (got ${probeEvent.body.event?.startTime})`,
+    );
+
+    // Quote-bounded, not a loose substring search: an ISO createdAt/updatedAt timestamp
+    // minted during this very test run (e.g. "...T18:07:45.230Z") legitimately CONTAINS
+    // "18:07" without a leading/trailing '"' — a bare .includes("18:07") is a false-positive
+    // trap at whatever wall-clock minute the suite happens to run. `"18:07"` (as a complete,
+    // quoted JSON string value) is what an actually-leaked CalendarEvent startTime/endTime
+    // would look like, and an ISO timestamp never produces that exact quoted token.
+    const rawStoreAfterBusy = await fs.readFile(DATA_FILE, "utf8");
+    check(
+      !rawStoreAfterBusy.includes('"18:07"') && !rawStoreAfterBusy.includes('"21:23"'),
+      "the busyWindows sentinel times appear NOWHERE in the raw store file after the call — used-and-discarded, never persisted",
+    );
 
     // ── GATE: disabled add-on → 404 (mirrors api-fitness-gate.mjs) ───────────
     const disabled = await PATCH("/api/addons/fitness", { enabled: false });

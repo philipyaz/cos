@@ -9,8 +9,8 @@ import {
   BadRequestError,
 } from "@/lib/store";
 import { assertAddonEnabled } from "@/lib/addons";
-import { resolveActor, storeErrorToResponse, isISODate } from "@/lib/route-helpers";
-import { planPlacement, type CandidateWindow, type PlacementRequest } from "@/lib/placement";
+import { resolveActor, storeErrorToResponse, isISODate, isHHMM } from "@/lib/route-helpers";
+import { planPlacement, DEFAULT_WORKING_HOURS, type BusyWindow, type CandidateWindow, type PlacementRequest } from "@/lib/placement";
 import { todayISO } from "@/lib/selectors";
 import type { CalendarEvent } from "@/lib/types";
 
@@ -60,14 +60,20 @@ function sessionDescription(day: PlanDay): string {
 
 // POST /api/fitness/push-plan-to-calendar — reconciling materialisation of a PERSISTED
 // training plan onto the calendar (db.events), via the placement engine (lib/placement.ts).
-// Body: { artifactId? , periodKey? } — exactly one required. Idempotent (per-day eventId
-// receipts on the artifact payload; carried forward across a regenerate by
-// upsertCoachingArtifact), overlap-safe, and REST/ACTIVE-RECOVERY days are a DENY-list
-// (never an allow-list on "training" — the skill's own day-type enum is open, so an
-// allow-list would skip every session of the next generated plan). GATED on the "fitness"
-// add-on (assertAddonEnabled is the first statement inside mutate()).
+// Body: { artifactId? , periodKey?, busyWindows? } — exactly one of artifactId/periodKey
+// required. Idempotent (per-day eventId receipts on the artifact payload; carried forward
+// across a regenerate by upsertCoachingArtifact), overlap-safe, and REST/ACTIVE-RECOVERY
+// days are a DENY-list (never an allow-list on "training" — the skill's own day-type enum
+// is open, so an allow-list would skip every session of the next generated plan). GATED on
+// the "fitness" add-on (assertAddonEnabled is the first statement inside mutate()).
+//
+// `busyWindows` (ops#25) is the agent's own read of the user's REAL calendar — per-call
+// only, used-and-discarded by the engine, NEVER persisted. The working-hours preference
+// (db.settings.workingHours, default Mon-Fri 09:00-18:00) is passed as a "margins" policy:
+// the working window is treated as busy on a working day, so a training session never
+// lands inside Philip's working hours.
 export async function POST(req: NextRequest) {
-  let body: { artifactId?: unknown; periodKey?: unknown };
+  let body: { artifactId?: unknown; periodKey?: unknown; busyWindows?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -84,6 +90,26 @@ export async function POST(req: NextRequest) {
       { error: "Body must contain exactly one of 'artifactId' or 'periodKey'." },
       { status: 400 },
     );
+  }
+
+  // Optional caller-supplied busy windows (ops#25) — the agent's own read of the REAL
+  // calendar, used-and-discarded by the engine; never persisted anywhere below.
+  const rawBusyWindows = body.busyWindows !== undefined ? body.busyWindows : [];
+  if (!Array.isArray(rawBusyWindows)) {
+    return NextResponse.json({ error: "'busyWindows' must be an array." }, { status: 400 });
+  }
+  const busyWindows: BusyWindow[] = [];
+  for (const raw of rawBusyWindows) {
+    const date = (raw as Record<string, unknown> | null)?.date;
+    const start = (raw as Record<string, unknown> | null)?.start;
+    const end = (raw as Record<string, unknown> | null)?.end;
+    if (!isISODate(date) || !isHHMM(start) || !isHHMM(end) || start >= end) {
+      return NextResponse.json(
+        { error: "Each 'busyWindows' entry needs 'date' (YYYY-MM-DD) and 'start' < 'end' (HH:MM)." },
+        { status: 400 },
+      );
+    }
+    busyWindows.push({ date, start, end });
   }
 
   const actor = resolveActor(req, body);
@@ -151,7 +177,14 @@ export async function POST(req: NextRequest) {
         });
       });
 
-      const ops = planPlacement({ requests, events: db.events, today });
+      const workingHours = db.settings?.workingHours ?? DEFAULT_WORKING_HOURS;
+      const ops = planPlacement({
+        requests,
+        events: db.events,
+        busyWindows,
+        policy: { mode: "margins", workingHours },
+        today,
+      });
 
       const opResultByIndex = new Map<number, PushResult>();
       for (const op of ops) {
