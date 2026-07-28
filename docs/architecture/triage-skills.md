@@ -15,10 +15,16 @@ Cos has three families of skills, and the distinction matters before you read fu
 - **Machine setup skills** — `cos-setup`, `guard-setup`, `mcp-bridge-setup`,
   `backup-recovery`, in `.claude/skills/`. One-time bootstrap, out of scope here.
 
-The operator family has four members: two **reconcilers** that pull channels onto the
-board (`mail-to-board`, `whatsapp-triage`), one **housekeeper** that organizes what they
-leave behind (`board-organize`), and a **catalog of recipes** that describes how each is
-scheduled.
+Every operator skill declares exactly one **automation class**, recorded in
+[`automation.json`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/automation.json) —
+**scheduled** (a sweep worth a Cowork timer, with a suggested trigger + cadence), **called**
+(invoked by other skills mid-run, like `vault-operations` above), or **on-demand only**
+(deliberately timerless, with the reason written down). Two **reconcilers** pull channels onto the
+board (`mail-to-board`, `whatsapp-triage`); one **housekeeper** organizes what they leave behind
+(`board-organize`); the rest span the health, fitness, and messaging domains. The
+[skills README](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/README.md) is the
+**catalog of recipes** that describes how each `scheduled` skill runs — **generated** from
+`automation.json` by `scripts/pack-skills.mjs` (`--check` fails on drift).
 
 !!! tip "See also: Unanswered messages"
     A lighter-weight operator sweep, [`unanswered-messages`](../features/unanswered-messages.md),
@@ -45,8 +51,11 @@ a sweep that finds nothing past its watermark no-ops.
 !!! note "Scheduling is documentation, not a daemon"
     The skills' [`README`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/README.md)
     indexes which skills you can run as Cowork scheduled tasks — what each does, the trigger
-    to paste, and a suggested cadence (mail every 10–15 min, board-organize every few hours).
-    It ships no intervals and starts no processes; you set cadence by hand in Cowork.
+    to paste, and a suggested cadence (mail every 10–15 min, board-organize every few hours) —
+    **generated** from each skill's declaration in
+    [`automation.json`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/automation.json),
+    so the index cannot silently drift from the skills it describes. It ships no intervals and
+    starts no processes; you set cadence by hand in Cowork.
 
 ```mermaid
 flowchart LR
@@ -74,8 +83,8 @@ The bundles are a **build artifact** of the skill folders, in the same sense as 
 [labels reference](../reference/labels.md) — generated, committed, never hand-edited:
 
 ```bash
-node scripts/pack-skills.mjs          # rebuild the bundles that changed
-node scripts/pack-skills.mjs --check  # CI gate: fails if any bundle is stale, missing, or orphaned
+node scripts/pack-skills.mjs          # rebuild the bundles that changed + the generated catalog
+node scripts/pack-skills.mjs --check  # CI gate: fails if a bundle is stale/missing/orphaned, or the catalog has drifted
 ```
 
 !!! warning "A stale zip is a silent failure"
