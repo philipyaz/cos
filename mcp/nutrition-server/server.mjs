@@ -558,6 +558,33 @@ const LIST_NUTRITION_TARGETS_TOOL = {
   },
 };
 
+// ── Calendar placement (v15) ──────────────────────────────────────────────────
+// The meal-plan twin of the fitness training-plan push — materializes PLANNED meal-plan
+// entries onto the calendar via the placement engine (board/lib/placement.ts).
+
+const PUSH_MEAL_PLAN_TO_CALENDAR_TOOL = {
+  name: "push_meal_plan_to_calendar",
+  description:
+    "Materialize PLANNED meal-plan entries onto the calendar (db.events) for a day window — " +
+    "POST /api/nutrition/push-plan-to-calendar. " +
+    ADDON_GUARDRAIL +
+    " IDEMPOTENT: each entry's calendar link is a receipt (entry.eventId), so re-running " +
+    "RECONCILES the window (creates new links, refreshes changed ones) rather than " +
+    "duplicating. OVERLAP-SAFE: a meal is placed in a free slot within its slot's candidate " +
+    "window and never on top of an existing timed event; when no slot fits, that entry is " +
+    "reported skipped with a reason instead of double-booking. `cooked`/`skipped` entries in " +
+    "the window are reported skipped/not_planned and left untouched. `from`/`to` are ISO days, " +
+    "half-open [from, to) — default today through the next 7 days. Returns { results: " +
+    "[{date, action, reason?, eventId?}], created, updated, skipped, version }.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      from: { type: "string", description: "Window start (inclusive), 'YYYY-MM-DD'. Defaults to today." },
+      to: { type: "string", description: "Window end (exclusive), 'YYYY-MM-DD'. Defaults to 7 days after 'from'." },
+    },
+  },
+};
+
 const TOOLS = [
   // reads
   GET_NUTRITION_STATUS_TOOL,
@@ -582,6 +609,7 @@ const TOOLS = [
   PLAN_MEAL_TOOL,
   UPDATE_MEAL_PLAN_TOOL,
   REMOVE_MEAL_PLAN_TOOL,
+  PUSH_MEAL_PLAN_TO_CALENDAR_TOOL,
   // v14 dietary profile + agent-authored targets
   SET_DIET_PROFILE_TOOL,
   SAVE_NUTRITION_TARGETS_TOOL,
@@ -1194,6 +1222,19 @@ async function handleRemoveMealPlan(args) {
   return text(`Removed ${id} from the meal plan (no soft-archive; hard-removed).`);
 }
 
+// ── Calendar placement handler (v15) ──────────────────────────────────────────
+
+async function handlePushMealPlanToCalendar(args) {
+  const body = {};
+  const from = str(args.from);
+  const to = str(args.to);
+  if (from) body.from = from;
+  if (to) body.to = to;
+  const { data, errorResult } = await api("POST", "/api/nutrition/push-plan-to-calendar", body);
+  if (errorResult) return errorResult;
+  return text(JSON.stringify(data, null, 2));
+}
+
 // Render one target artifact's macros compactly (P.. F.. C..).
 function targetMacros(p) {
   return ["protein_g", "fat_g", "carbs_g"]
@@ -1351,6 +1392,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleUpdateMealPlan(args);
     case "remove_meal_plan":
       return handleRemoveMealPlan(args);
+    case "push_meal_plan_to_calendar":
+      return handlePushMealPlanToCalendar(args);
     // weight-loss lifecycle
     case "set_diet_profile":
       return handleSetDietProfile(args);
