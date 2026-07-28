@@ -24,9 +24,27 @@ import {
   latestWaistCm,
   lowCalorieWarn,
   bodyBaseline,
+  measuredTdee,
   CALORIE_FLOOR,
+  MEASURED_MIN_DAYS,
+  KCAL_PER_KG,
 } from "../../board/lib/body-baseline.ts";
-import type { BodyObjective, BodyProfile, WeightEntry } from "../../board/lib/types.ts";
+import type { BodyObjective, BodyProfile, FoodLogEntry, WeightEntry } from "../../board/lib/types.ts";
+
+// A 2000 kcal/day food log entry for one day, inside the measuredTdee test fixtures below.
+const foodLog = (date: string): FoodLogEntry => ({
+  id: `FOOD-${date}`,
+  date,
+  slot: "dinner",
+  description: "x",
+  calories: 2000,
+  estimated: false,
+  createdAt: "x",
+  updatedAt: "x",
+});
+
+// "YYYY-MM-DD" for June 2026 day `d` — the measuredTdee fixtures' window is 2026-06-08..2026-06-21.
+const june = (d: number): string => `2026-06-${String(d).padStart(2, "0")}`;
 
 const approx = (a: number, b: number, eps = 0.01) => assert.ok(Math.abs(a - b) <= eps, `${a} ≈ ${b}`);
 
@@ -76,6 +94,39 @@ test("latestWaistCm: newest waist reading, or null", () => {
   ];
   assert.equal(latestWaistCm(weights, "2026-06-21"), 90, "newest day WITH a waist reading");
   assert.equal(latestWaistCm([], "2026-06-21"), null);
+});
+
+test("measuredTdee: 14-day window, ≥MEASURED_MIN_DAYS logged days + weigh-ins ≥MEASURED_MIN_DAYS days apart → the arithmetic result", () => {
+  const asOfDay = june(21); // window: addDays(asOfDay, -13)..asOfDay = 2026-06-08..2026-06-21
+  const foodLogs: FoodLogEntry[] = [];
+  for (let d = 8; d <= 17; d++) foodLogs.push(foodLog(june(d))); // 10 distinct logged days, 2000 kcal each
+  const weights: WeightEntry[] = [
+    { id: "W1", date: june(8), weightKg: 80, createdAt: "x", updatedAt: "x" },
+    { id: "W2", date: june(20), weightKg: 78, createdAt: "x", updatedAt: "x" }, // 12 days after W1
+  ];
+  // meanIntake 2000; deltaKg −2 over spanDays 12 → 2000 − (−2 × 7700) / 12 = 2000 + 1283.33… → 3283
+  const expected = Math.round(2000 - (-2 * KCAL_PER_KG) / 12);
+  assert.equal(measuredTdee(foodLogs, weights, asOfDay), expected);
+  assert.equal(expected, 3283);
+});
+
+test(`measuredTdee: fewer than MEASURED_MIN_DAYS (${MEASURED_MIN_DAYS}) logged days → null`, () => {
+  const asOfDay = june(21);
+  const foodLogs: FoodLogEntry[] = [];
+  for (let d = 8; d <= 8 + (MEASURED_MIN_DAYS - 2); d++) foodLogs.push(foodLog(june(d))); // one short of MEASURED_MIN_DAYS
+  const weights: WeightEntry[] = [
+    { id: "W1", date: june(8), weightKg: 80, createdAt: "x", updatedAt: "x" },
+    { id: "W2", date: june(20), weightKg: 78, createdAt: "x", updatedAt: "x" },
+  ];
+  assert.equal(measuredTdee(foodLogs, weights, asOfDay), null);
+});
+
+test("measuredTdee: fewer than 2 weigh-ins in the window → null", () => {
+  const asOfDay = june(21);
+  const foodLogs: FoodLogEntry[] = [];
+  for (let d = 8; d <= 17; d++) foodLogs.push(foodLog(june(d))); // 10 logged days — satisfies MEASURED_MIN_DAYS
+  const weights: WeightEntry[] = [{ id: "W1", date: june(8), weightKg: 80, createdAt: "x", updatedAt: "x" }]; // only one weigh-in
+  assert.equal(measuredTdee(foodLogs, weights, asOfDay), null);
 });
 
 test("lowCalorieWarn: the one surviving safety guard — a warn below the sex floor, null above", () => {

@@ -387,6 +387,22 @@ const LIST_INITIATIVES_TOOL = {
   },
 };
 
+// The board's own attention read (ADR 0017's compute-on-read family; cos-ops#20 named the
+// vocabulary — see board/lib/staleness.ts). Naming the selector in the description below is what
+// makes this tool the real `mcp/` call site for `needsAttention`, not just a comment referencing it.
+const GET_NEEDS_ATTENTION_TOOL = {
+  name: "get_needs_attention",
+  description:
+    "Read the board's own \"what needs attention\" report — four buckets computed live off the " +
+    "`needsAttention` selector: overdue (past due, not done), agingWaiting (waiting_for_input idle " +
+    "> 3 days), untriaged (todo lane, no tasks, no priority — raw intake), unlinked (no " +
+    "vaultLinks, not done). Buckets OVERLAP (a case can be both overdue and unlinked) — do not sum " +
+    "them into a distinct-case count; use the response's own `counts.total`. Call this FIRST in " +
+    "any \"where is Philip at / what needs a nudge\" sweep — the reconciliation entry point that " +
+    "lets an agent detect drift without waiting on his prompt. `GET /api/cases/needs-attention`.",
+  inputSchema: { type: "object", properties: {} },
+};
+
 const ADD_TASK_TOOL = {
   name: "add_task",
   description:
@@ -1318,6 +1334,7 @@ export const TOOLS = [
   LIST_LABEL_BUNDLES_TOOL,
   GET_TREE_TOOL,
   LIST_INITIATIVES_TOOL,
+  GET_NEEDS_ATTENTION_TOOL,
   // case lifecycle
   CREATE_CASE_TOOL,
   UPDATE_CASE_TOOL,
