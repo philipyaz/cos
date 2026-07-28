@@ -235,6 +235,7 @@ log, pantry, and meal plan already on the store. It returns:
 | `provablyCooked` | `{ count, matches: { mealId, foodLogId }[] }` — the subset of stale meals with a same-date, same-slot food-log entry naming their `MEAL-<n>` id (see the proof convention below). |
 | `daysSinceLastFoodLog` / `daysSinceLastPantryWrite` | calendar-day gaps since the food log / pantry was last touched. |
 | `expiredPantryItems` | `{ count, ids }` — pantry items whose `expiresAt` is before today. |
+| `pantryLifecycle` | `{ fresh, likelyPastHorizon, excluded }` — a fresh/staple/spice scoping of the pantry (from `category`+`location` alone) plus a **computed** freshness horizon for the fresh class; see below. |
 | `hasNutritionTargets` / `daysSinceLastTargets` | whether any daily target has ever been saved, and how long ago the newest one was. |
 
 Like [`/api/body/status`](body.md), it is **ungated** (works with the add-on disabled, and from a
@@ -249,6 +250,27 @@ slot. This is a deliberate trade (a structured `mealId` field would be a schema 
 the agent can already write) — the
 [`nutrition-chef`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/nutrition-chef/SKILL.md)
 skill's food-logging jobs follow the convention so the provable set stays populated.
+
+### Lifecycle scoping & the computed freshness horizon
+
+`pantryLifecycle` sorts every pantry row into one of three classes from its stored `category` +
+`location` alone — no new field, no migration: **fresh** (`produce`/`dairy`, anything
+`location: fridge`, or `frozen`/freezer) is the routine reconciliation scope; **staple** (tinned
+goods, shelf-stable pantry items) and **spice** are counted *out* of it, surfaced only on an
+explicit stock-take (spices) or never asked about unattended. A hand-maintained, deliberately
+conservative shelf-life table (days, keyed `category` × `location`) gives the **fresh** class a
+computed horizon — an item with no printed `expiresAt` and an `updatedAt` older than its class's
+horizon lands in `likelyPastHorizon`.
+
+**A read `expiresAt` always wins.** The horizon is an *inference*, never a fact, and it never
+survives a real date — an item that carries an `expiresAt` is excluded from `likelyPastHorizon`
+even when it's old, because the fact path (`expiredPantryItems`) already owns it. Like every other
+field this route returns, the horizon is **computed on read and never stored** — the same
+computed-never-stored discipline the rest of this status read already follows; `SCHEMA_VERSION` is
+untouched by this feature. The `[2f]` test gate (`tests/nutrition-status-consumers.mjs`)
+makes this durable from the other side: every top-level field this engine returns must be consumed
+by a defined action (or an explicit state-and-move-on) in the skill's JOB 0, so a future field can't
+ship computed and unread again.
 
 ### The bulk pantry reconcile — `/api/nutrition/pantry/reconcile`
 
@@ -340,9 +362,11 @@ The add-on is set up and operated by two skills, one per role:
   intelligence** lives — the MCP just stores what the skill computes.
 
 **The reconciliation sweep.** Every `nutrition-chef` run starts with a JOB 0, before any planning:
-read `get_nutrition_status`, auto-close only the `provablyCooked` set (citing the proof), and batch
-everything else stale into **one** consolidated question — never a prompt per meal. A clean plan (no
-stale entries) no-ops. This is the same two-tier auto-vs-propose policy
+read `get_nutrition_status`, state the standing picture across every field it returns (stale meals,
+food-log/pantry recency, the lifecycle-scoped pantry read, printed expiries, targets), auto-close
+only the `provablyCooked` set (citing the proof), and ask **at most one** priority-ordered question —
+never a prompt per meal. A clean surface (nothing stale) no-ops in one line. This is the same
+two-tier auto-vs-propose policy
 [`reminders-review`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/reminders-review/SKILL.md)
 uses for reminders, applied to the meal plan.
 

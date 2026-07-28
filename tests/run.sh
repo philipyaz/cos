@@ -25,6 +25,11 @@
 #      load: parseable YAML, <= 1024 chars folded, no XML-tag-shaped
 #      <placeholder> spans (HARD gate). Static, read-only, no board needed —
 #      catches a skill that packs fine but is REJECTED at install/load time.
+#   2f. nutrition-status-consumers.mjs — every top-level field the nutrition status
+#      engine returns must be CONSUMED (a defined action, or an explicit
+#      state-and-move-on) by JOB 0 of nutrition-chef/SKILL.md (HARD gate; the ADR
+#      0014 gate for cos-ops#18). Static, read-only, no board needed — catches the
+#      board computing an answer nobody reads.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -131,6 +136,13 @@
 #      expired pantry item is surfaced; a fresh nutrition-targets save flips hasNutritionTargets; the
 #      read stays 200 with the add-on DISABLED (ungated). Snapshots+restores cases.json. Skipped when
 #      no board is up.
+#  10h4. api-nutrition-shelf-life — ONLY against the auto-started sandbox board (needs FILE access,
+#      like 13d): the v18 pantry LIFECYCLE + computed freshness-horizon contract (cos-ops#18).
+#      pantryLifecycle present + typed; the fresh/staple/spice scoping split; a fresh row aged past
+#      its shelf life via STORE-FILE surgery fires in likelyPastHorizon with the right horizonDays,
+#      while a same-aged spice/staple never does; no write path persists a lifecycle/horizon field or
+#      a guessed expiresAt; schemaVersion unchanged. Snapshots+restores cases.json. Skipped when no
+#      board, or under an external COS_TEST_BOARD_URL board (no file access to its store).
 #  10i. api-fitness-push — ONLY if a board is running: a push INGEST → SUMMARIZE round-trip that
 #      kills the split-brain-taxonomy bug — POST /api/fitness/push a realistic HAE payload (sleep +
 #      heart_rate_variability metrics + a workout), then assert GET /api/fitness/summary returns
@@ -476,6 +488,22 @@ else
   echo "skill-frontmatter: FAIL"
   fail=1
   fail_reasons="${fail_reasons} skill-frontmatter"
+fi
+
+# --- 2f. nutrition-status-consumers (hard gate) -------------------------------
+# The ADR 0014 gate (cos-ops#18): every top-level field the nutrition status engine
+# (`NutritionStatus` in board/lib/nutrition-status.ts) returns must be CONSUMED — a
+# defined action, or an explicit state-and-move-on — by JOB 0 of nutrition-chef/SKILL.md,
+# the job that reads the status first on every invocation. Static, read-only, node-only —
+# catches the class of bug where the board computes an answer nobody reads.
+echo
+echo "--- [2f] nutrition-status-consumers (JOB 0 field contract) ---"
+if node "${SCRIPT_DIR}/nutrition-status-consumers.mjs"; then
+  echo "nutrition-status-consumers: PASS"
+else
+  echo "nutrition-status-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} nutrition-status-consumers"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, one HARD sub-check) --
@@ -1042,6 +1070,33 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     fail=1
     fail_reasons="${fail_reasons} api-nutrition-status"
   fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10h4. api-nutrition-shelf-life (sandbox board + store file) -------------
+# The v18 pantry LIFECYCLE + computed freshness-horizon contract (cos-ops#18):
+# pantryLifecycle present + typed (empty-store zeroes observed, not assumed); the
+# fresh/staple/spice scoping split; a fresh row aged past its class's shelf life via
+# STORE-FILE surgery (the API never lets a test set updatedAt) fires in
+# likelyPastHorizon with the right horizonDays, while a same-aged spice/staple never
+# does; no write path ever persists a lifecycle/horizon field or a guessed expiresAt,
+# and schemaVersion is unchanged. Needs FILE access to the running board's store (like
+# [13d]), so the horizon-firing + nothing-persisted checks only run against the
+# auto-started sandbox (skipped, not failed, under COS_TEST_BOARD_URL — no local path
+# is known). Snapshots + restores cases.json (net-zero).
+echo
+echo "--- [10h4] api-nutrition-shelf-life (sandbox board + store file) --"
+if [ "${BOARD_UP}" -eq 1 ] && [ -n "${TEST_BOARD_DATA_DIR}" ]; then
+  if CRM_BASE_URL="${BASE}" COS_BOARD_DATA="${TEST_BOARD_DATA_DIR}/cases.json" node "${SCRIPT_DIR}/api-nutrition-shelf-life.mjs"; then
+    echo "api-nutrition-shelf-life: PASS"
+  else
+    echo "api-nutrition-shelf-life: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-shelf-life"
+  fi
+elif [ "${BOARD_UP}" -eq 1 ]; then
+  echo "SKIP: external test board (COS_TEST_BOARD_URL) — no file access to its store; shelf-life e2e needs the auto-started sandbox."
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi

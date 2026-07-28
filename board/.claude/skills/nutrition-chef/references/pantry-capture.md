@@ -61,11 +61,13 @@ or a silent add (which recreates the exact duplicate this job exists to prevent)
 - **Category and location are your inference, not the receipt's.** Receipts don't print "produce"
   or "fridge" — infer them the same way JOB 2's single-add path does (spinach → produce/fridge,
   tinned goods → pantry/pantry, frozen peas → frozen/freezer).
-- **Expiry dates come from packaging, not receipts.** A receipt almost never prints a use-by date;
-  a fridge-shelf photo sometimes shows one stamped on the package. Only set `expiresAt` when you
-  can actually read a date — don't estimate one from a typical shelf life during capture (that's
-  fine for a single ad-hoc `add_pantry_item`, but a bulk batch should stay conservative: an absent
-  `expiresAt` is honest, a guessed one is a false signal repeated across many rows at once).
+- **Expiry dates come from packaging, not receipts — and never from your own estimate.** A receipt
+  almost never prints a use-by date; a fridge-shelf photo sometimes shows one stamped on the
+  package. Only set `expiresAt` when you can actually read a date, or the user states their own
+  shelf life (*"good for a week"*) — **never estimate one yourself, single item or bulk batch.** An
+  absent `expiresAt` is honest, and it is still monitored: the status read computes a per-class
+  freshness horizon (`category` × `location` × `updatedAt`) at read time, never stored and never
+  presented as a printed date — see JOB 0 and [`lifecycle.md`](lifecycle.md).
 - **Illegible quantity/unit → omit, don't guess.** If a receipt line's weight or count is cut off
   or blurry, submit the item without `quantity`/`unit` rather than inventing a number — the same
   false-precision trap as food-log calories.

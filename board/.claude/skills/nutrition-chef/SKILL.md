@@ -109,57 +109,69 @@ meal plan / target).
 
 ---
 
-## JOB 0 — Reconcile the meal plan (always first, before any planning)
+## JOB 0 — Reconcile, then state where we are (always first)
 
-The meal plan has the same defect reminders had before `/reminders-review` existed:
-nothing marks a planned meal done just because it happened, so stale `planned` entries
-pile up and the whole nutrition loop goes quiet with them. This job is the
-counter-force — it runs **first, on every invocation** (scheduled or conversational),
-before JOB 3 plans anything new.
+The status read answers more than the meal plan — pantry freshness, whether logging has
+stopped, whether targets exist. This job runs **first, on every invocation**, before
+JOB 3 plans anything new, and now acts on everything the read returns.
 
-**1. `get_nutrition_status` first, always.** If `stalePlannedMeals.count` is `0`, say
-the plan is clean and go straight to whatever was asked — **a clean surface no-ops.**
+**1. `get_nutrition_status` first, always.**
 
-**2. Auto-resolve only the PROVEN set.** `provablyCooked.matches` pairs each stale meal
-with the `FOOD-<n>` entry that proves it (same date + slot, and the food log names the
-meal's `MEAL-<n>` id — the proof convention below). For each match:
-`update_meal_plan(mealId, status: "cooked")`, citing the proving `FOOD-id` in the
-report. The food-log entry already exists for these — that's what makes them provable —
-so **never** offer a `log_food` for them; it would double the meal. In approval mode
-(`autoSync: false`), present the proven set in the batch too (mirror
-`/reminders-review` STEP 0) rather than flipping it silently.
+**2. State the opening picture — one short paragraph, numbers not a table.** Cover
+`stalePlannedMeals`, `daysSinceLastFoodLog` (state it plainly, **never back-fill** — the ask on
+re-entry is "start again from today," stated not asked), pantry freshness
+(`daysSinceLastPantryWrite` + `pantryLifecycle`'s fresh/past-horizon/excluded counts —
+collapse the two into one clause when they tell the same silence, per
+`references/lifecycle.md`), printed expiries (`expiredPantryItems` — a fact), and targets
+(`hasNutritionTargets`/`daysSinceLastTargets`). **Clean no-op:** nothing stale, no items
+past horizon, no expired items, recent logging, targets present — one line, no lecture.
 
-**3. Everything else is ONE consolidated batch — never a prompt per meal.** The rest of
-`stalePlannedMeals.ids` (the stale set minus the proven meal ids) is one phone-shaped
-question: *"12 planned meals from 24–41 days ago — mark them all skipped? (name any you
-actually cooked)"*. On a plain yes: `update_meal_plan(id, status: "skipped")` for each.
-If Philip names one as actually cooked: flip that one to `cooked` and **offer** a
-`log_food` for it — **never fabricate one** (a guessed intake figure is worse than a
-blank day for the feedback loop).
+**3. Auto-resolve only the PROVEN set.** `provablyCooked.matches` pairs each stale meal
+with the `FOOD-<n>` entry that proves it (same date + slot, food log names the meal's
+`MEAL-<n>` id — the proof convention below). For each match:
+`update_meal_plan(mealId, status: "cooked")`, citing the proving `FOOD-id`. Never offer a
+`log_food` for these — the proof already exists. In approval mode, present the proven
+set in the batch too (mirror `/reminders-review` STEP 0) rather than flipping it
+silently.
 
-**4. Writes: `update_meal_plan` only.** No removes, no creates, and nothing on the food
-log without an explicit yes.
+**4. ONE question at most, priority-ordered.** (a) the stale-meal skip-or-name-it batch,
+if any remain — *"12 planned meals from 24–41 days ago — mark them all skipped? (name
+any you actually cooked)"*; **else** (b) the pantry ramp, when the fresh scope is cold:
+**exactly one** action — a photo of the fridge/shelf through `reconcile_pantry` (JOB 2's
+bulk path), scoped to **fresh** rows only. On a plain yes to (a):
+`update_meal_plan(id, status: "skipped")` for each; name one as actually cooked → flip
+it to `cooked` and **offer** a `log_food` for it (**never fabricate one** — a guessed
+intake figure is worse than a blank day). Whichever need loses the priority is **stated,
+not asked** this run. Never per-item pantry correction or an unconfirmed delete.
+**Writes here stay `update_meal_plan` only** — a "yes" to the pantry ramp executes
+through JOB 2's `reconcile_pantry`, not from here.
 
-**5. Report the tally**: N auto-closed (with their proofs), N proposed, N days since
-the last food log, and — when `hasNutritionTargets` is `false` — that no nutrition
-targets have ever been set (point at JOB 5). Idempotent: a flipped meal leaves the
-stale set, so re-runs converge to nothing new.
+**5. Report the tally**: N auto-closed (with proofs), N proposed, the lifecycle numbers
+(fresh / past-horizon / excluded), and — targets missing or stale (~14+ days) — one line
+pointing at JOB 5. Idempotent: re-runs converge to nothing new.
 
-**The proof convention.** `FoodLogEntry` has no structured link to a meal-plan entry —
-the link is a prose convention: when a logged meal fulfils a planned one, its
-`description` **names the plan's `MEAL-<n>` id** (e.g. `"MEAL-12 — sheet-pan fish with
-greens"`). JOB 1 and JOB 3 both follow this convention (see below) — it's what keeps
-`provablyCooked` alive going forward. Without it, a meal is only ever reconciled by an
-explicit yes in the batch.
+**The proof convention.** `FoodLogEntry` has no structured link to a meal-plan entry — a
+logged meal fulfilling a planned one names the plan's `MEAL-<n>` id in its `description`
+(e.g. `"MEAL-12 — sheet-pan fish with greens"`). JOB 1 and JOB 3 follow this convention —
+it's what keeps `provablyCooked` alive. Without it, a meal is only reconciled by a yes.
 
-> **Example.** `get_nutrition_status` → `stalePlannedMeals.count: 14`,
-> `provablyCooked.matches: [{mealId: "MEAL-41", foodLogId: "FOOD-88"}, {mealId:
-> "MEAL-44", foodLogId: "FOOD-91"}]`, `daysSinceLastFoodLog: 33`, `hasNutritionTargets:
-> false`. Auto: `update_meal_plan("MEAL-41", status: "cooked")` and
-> `update_meal_plan("MEAL-44", status: "cooked")`, citing FOOD-88/FOOD-91. Batch the
-> remaining 12: *"12 planned meals from 24–41 days ago — mark them all skipped? (name
-> any you actually cooked)"*. Report: 2 auto-closed, 12 proposed, 33 days since the last
-> food log, and that no nutrition targets have ever been set.
+**Lifecycle scoping and fact vs. inference.** The routine sweep asks only about the
+**fresh** scope — spices never raised unattended, staples only on an explicit
+stock-take; your judgment always **extends** the scope (a fresh-baked loaf or fresh
+fish logged with no location still counts). State a printed `expiredPantryItems` date
+as fact; state `likelyPastHorizon` as an inference ("unverified N days, typically past
+its useful life") — never blur the two. Full table + wording guide:
+[`references/lifecycle.md`](references/lifecycle.md).
+
+> **Example.** 14 stale meals (2 provably cooked), food log quiet 33 days, pantry
+> unverified 15 days with 4 of 6 fresh items past their inferred horizon (27 spices + 24
+> staples excluded), 1 item past its printed expiry, no targets ever set. Opening line:
+> *"14 planned meals are stale (2 provably cooked), the food log's been quiet 33 days,
+> the pantry's unverified for 15 — 4 of 6 fresh items look past their usual shelf life
+> (27 spices + 24 staples untouched, as expected), 1 item past its printed expiry, and no
+> nutrition targets have ever been set."* Auto-close the 2 proven meals citing their
+> FOOD-ids; batch the remaining 12 as one skip-or-name-it question. Report: 2
+> auto-closed, 12 proposed, the lifecycle tally, no targets.
 
 ---
 
@@ -265,8 +277,10 @@ adding a duplicate.
 - **`quantity` + `unit`** when the user gives them (*"2 cans"* → `quantity: 2, unit:
   "cans"`; *"500 g"* → `quantity: 500, unit: "g"`); leave both off for a vague *"some
   pasta"*.
-- **`expiresAt`** (`YYYY-MM-DD`) when stated or printed on the pack; if the user gives a
-  shelf life (*"good for a week"*), compute it from today.
+- **`expiresAt`** (`YYYY-MM-DD`) when stated or printed on the pack, or the user gives a
+  shelf life (*"good for a week"*) — that's **their** data, compute it. **Never write
+  your own guess** — an absent `expiresAt` is still monitored via JOB 0's computed
+  freshness horizon (never stored).
 - **`lowStock`** — set `true` when the user says they're **running low / nearly out**
   (*"we're low on milk"*). Clear it (`lowStock: false`) when they restock.
 
@@ -311,7 +325,8 @@ this job.
 2. **`read_pantry`**, then resolve the **semantic aliases** the route cannot — the same food in
    two languages, or at two pack sizes, is ONE item; merge before submitting (worked examples in
    the reference doc). Never submit an alias you haven't resolved — `reconcile_pantry` will
-   happily add it as new.
+   happily add it as new. (`read_pantry` carries no lifecycle/horizon fields — a stock-take leads
+   with the fresh + `lowStock` rows JOB 0's status read already surfaced.)
 3. **Propose ONE collapsed diff and get ONE yes — even in auto mode** (a photo extraction is
    fallible, so this bulk write always confirms, per STEP 0's bulk rule): counts first, only the
    genuinely ambiguous items named — *"+9 new, 4 updated, 2 look like duplicates of
@@ -473,10 +488,12 @@ read now — there's no per-day chip).
   `plan_meal`, batch logs) **in chat** before firing, and confirm **destructive**
   removes. A single write is low-stakes either way. **There is no pending/propose
   queue** — confirmation is conversational.
-- **Reconcile first (JOB 0), every invocation.** `get_nutrition_status` → auto-flip
-  only the `provablyCooked` set to `cooked` (citing the proof) → batch everything else
-  stale into ONE consolidated skip-or-name-it question. Never invent a `log_food` entry
-  to close a meal. A clean plan no-ops.
+- **Reconcile first (JOB 0), every invocation — all fields, not just the meal plan.**
+  `get_nutrition_status` → state the opening picture → auto-flip only `provablyCooked` to
+  `cooked` (citing the proof) → ONE priority-ordered question at most (the meal batch,
+  else the pantry ramp, **lifecycle-scoped** to fresh rows — see `references/lifecycle.md`).
+  Never invent a `log_food` entry or back-fill a missed day. A clean surface no-ops in
+  one line.
 - **Food log:** estimate calories with the portion heuristics + anchor table; keep
   `estimated: true` (set false only for a measured value); macros are optional —
   **omit when you can't honestly estimate them**; health flag is an optional whole-meal
