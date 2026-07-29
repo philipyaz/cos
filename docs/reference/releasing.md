@@ -68,19 +68,29 @@ This is wired up once and then runs itself. The moving parts:
 - **Repo setting** — *Settings → Actions → General → Workflow permissions* must have
   **"Allow GitHub Actions to create and approve pull requests"** enabled, or release-please
   cannot open the Release PR.
+- **`RELEASE_PLEASE_TOKEN` secret** — a fine-grained PAT (see below) so the Release PR's CI
+  actually runs. Not set by default; the workflow falls back to `GITHUB_TOKEN` without it.
 
-!!! warning "CI does not run on the bot's Release PR"
-    Pull requests opened with the default `GITHUB_TOKEN` don't trigger other workflows
-    (GitHub's recursion guard), so the `lint-test` / `python` checks won't run on the Release
-    PR. Two ways to handle the merge:
+!!! warning "The bot's Release PR CI run parks — it needs a nudge"
+    The Release PR *does* get a `lint-test` / `python` CI run created on every push — but
+    when it's opened with the default `GITHUB_TOKEN`, the run parks at `action_required`
+    awaiting manual approval. The repo's fork-PR contributor-approval policy catches the
+    bot's own PRs too, so the checks never report and the strict `main` ruleset blocks the
+    merge. **No owner bypass exists** — the `main` ruleset has zero bypass actors,
+    deliberately — so this has to be unstuck, not skipped.
 
-    - **Owner bypass (default).** The `main` ruleset lets the repository owner bypass required
-      checks, so you can merge the Release PR directly. Simplest for a solo repo — the PR only
-      ever touches `package.json`, `CHANGELOG.md`, and the manifest.
-    - **Use a PAT.** Add a `RELEASE_PLEASE_TOKEN` repository secret — a fine-grained PAT with
-      *Contents: write* + *Pull requests: write*. The workflow already prefers it
-      (`secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN`), and PRs it opens **do** trigger
-      CI, so the checks gate the merge normally.
+    - **Primary path (the default): a `RELEASE_PLEASE_TOKEN` secret.** A fine-grained PAT
+      (repository `philipyaz/cos` only; *Contents: Read and write* + *Pull requests: Read
+      and write*), stored as a repository Actions secret. The workflow already prefers it
+      (`secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN`) — pushes/PRs made with it
+      trigger CI as the token's owner, so the checks gate the merge normally, every time.
+      **Failure mode:** an expired PAT falls back to `GITHUB_TOKEN` silently — the symptom
+      is a Release PR with no reported checks again; fix by re-minting and
+      `gh secret set RELEASE_PLEASE_TOKEN --repo philipyaz/cos`.
+    - **One-off unblock (no secret set yet).** Approve the parked run from the Actions tab
+      ("Approve and run"), or push an empty commit to the Release PR's branch yourself — a
+      `pull_request` event from a maintainer runs CI unparked. Merge promptly: the next push
+      to `main` regenerates the branch and re-parks it.
 
 ## Manual fallback
 
