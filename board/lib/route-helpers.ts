@@ -10,6 +10,12 @@ import type { Actor } from "@/lib/types";
 export const isISODate = (v: unknown): v is string =>
   typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
+// 24h time ("HH:MM") shape guard — the same pure, db-free predicate as isISODate above,
+// shared by every route that takes a time field (events, the calendar-push busyWindows).
+// Calendar/timezone correctness is out of scope; this is a shape check only.
+export const isHHMM = (v: unknown): v is string =>
+  typeof v === "string" && /^\d{2}:\d{2}$/.test(v);
+
 // "human" by default; an MCP/agent write flags itself via { actor:"agent" } or
 // the `x-actor: agent` header so its writes are attributed correctly. Every write
 // route calls this, so it is also the chokepoint where we record the calling

@@ -6,7 +6,7 @@ description: >
   reconciles the meal plan, then LOGS what you ate (calories, macros, a health flag),
   maintains the PANTRY (add / read / update / remove, low stock + expiring soon, or a
   whole shop or receipt photo in one confirmed write), PLANS meals from what's on
-  hand (honoring ALLERGIES + diet, optionally onto the calendar), owns the DIETARY
+  hand (honoring ALLERGIES + diet, onto the calendar by default), owns the DIETARY
   PROFILE, and AUTHORS the daily nutrition targets — always not-medical-advice framed.
   Use when the user says "log what I ate", "I had X for lunch", "what's in my fridge",
   "add Y to the pantry", "here's my shopping receipt", "plan meals",
@@ -351,18 +351,39 @@ plan, assemble:
 `status: "planned"`.
 
 > **Approval-mode gate (STEP 0).** Planning **a whole week** is a BULK write — many
-> `plan_meal` calls. In approval mode, lay the proposed plan out **in chat** (day ▸
-> slot ▸ title) and get a yes **before** firing the calls. In auto mode, plan it and
-> report. **One** planned meal is low-stakes either way.
+> `plan_meal` calls, plus the default calendar push (item 4 below). In approval mode,
+> lay the proposed plan out **in chat** (day ▸ slot ▸ title) and get **one** yes
+> covering both the plan AND putting it on the calendar, before firing either. In
+> auto mode, plan it, push it, and report. **One** planned meal is low-stakes either way.
 
-**4. Opt-in calendar link.** Only when the user wants the meal **on their calendar**
-(*"put dinner on my calendar at 7"*): the `eventId` must reference an **existing**
-CalendarEvent or `plan_meal` rejects the write. So **create the event first** via the
-**`calendar`** MCP — `create_event(title, date, [startTime], …)` returns the minted
-`EVT-id` — then pass that id as `eventId` to `plan_meal` (or `update_meal_plan(id,
-eventId: "EVT-n")` to link an existing planned meal). Pass `eventId: null` to
-`update_meal_plan` to **unlink**. Don't link to the calendar unless asked — most
-planning stays board-only.
+**4. Push the week to the calendar — by default.** Before pushing, **read the user's
+REAL calendar** (your own Google Calendar connector) for the window and collect its
+busy times — **only** `{date, start, end}`, never a title, attendee, or any other
+content; skip this if you can't reach a real calendar, it's optional. Then call the
+`nutrition` MCP's **`push_meal_plan_to_calendar({ from, to, busy_windows: [...] })`**
+for that window (omit `from`/`to` for today through the next 7 days; omit
+`busy_windows` if you have none). **Never ask Cos to store this calendar data** — the
+tool uses it for this one call only and discards it. It is **idempotent and
+overlap-safe**: a meal lands in a free slot within its slot's candidate window and is
+never placed on top of an existing timed event or inside the user's **working hours**
+(Mon–Fri 09:00–18:00 by default, or whatever the board has stored — automatic, you
+don't set it here; this is why a weekday lunch/breakfast/snack can come back
+`skipped`/`outside_working_hours` while the same day's dinner still places — tell the
+user that's a policy skip, not a fully-booked day). `cooked`/`skipped` entries in the
+window are reported skipped/`not_planned` and left alone. Re-running it reconciles
+rather than duplicates, so it's safe every time this job runs. This is the **same**
+approval-mode confirmation as the plan itself (see the gate above) — one combined yes
+for "plan the week AND put it on the calendar", never a second prompt.
+
+**Explicit-time requests still go the manual route.** When the user names a specific
+time (*"put dinner on my calendar at 7"*), the `eventId` must reference an
+**existing** CalendarEvent or `plan_meal` rejects the write — **create the event
+first** via the **`calendar`** MCP (`create_event(title, date, [startTime], …)`
+returns the minted `EVT-id`), then pass that id as `eventId` to `plan_meal` (or
+`update_meal_plan(id, eventId: "EVT-n")` to link an existing planned meal). Pass
+`eventId: null` to `update_meal_plan` to **unlink**. A meal placed this way already
+carries a receipt, so the default push above treats it as a live link and only
+refreshes its content — it won't move the time you set.
 
 **5. Cooking & status.** Mark progress with `update_meal_plan(id, status: …)`:
 `cooked` (made it), `skipped` (didn't). When the user says they **cooked** a planned
@@ -490,7 +511,12 @@ read now — there's no per-day chip).
   → one `reconcile_pantry` call. Expired items are proposed for removal in the same
   confirmation; removal is never automatic — `reconcile_pantry` itself never deletes.
 - **Meal plan:** `read_pantry` **first**; prefer on-hand + expiring ingredients; record
-  `pantryItemIds` (soft refs). Calendar is **opt-in** — `create_event` (calendar MCP)
+  `pantryItemIds` (soft refs). Calendar push is the **default** —
+  `push_meal_plan_to_calendar` after planning/reconciling, idempotent + overlap-safe,
+  folded into the same approval-mode confirmation as the plan. Read the user's real
+  calendar first and pass its busy times as `busy_windows` (date/start/end only —
+  never store the content); working hours are protected automatically either way. An
+  explicit named time still goes the manual route: `create_event` (calendar MCP)
   first, then store the `EVT-id` as `eventId`; `null` unlinks. `status: "cooked"` →
   **offer** a `log_food` entry **and** a pantry decrement.
 - **Dietary profile (JOB 4):** `get_diet_profile` / `set_diet_profile` (MERGE — a sent

@@ -51,6 +51,7 @@ import {
   removeReminder,
   removePriority,
   messagesForReminder,
+  upsertCoachingArtifact,
 } from "../../board/lib/store.ts";
 import { _resetRetentionCache } from "../../board/lib/retention.ts";
 import { SCHEMA_VERSION } from "../../board/lib/types.ts";
@@ -1049,6 +1050,102 @@ test("applyReminderUpdate: status→done preserves an EXISTING completedAt", () 
   const r = makeReminder({ id: "REM-1", status: "done", completedAt: prior });
   applyReminderUpdate(r, { status: "done" });
   assert.equal(r.completedAt, prior, "already-done reminder keeps its original completedAt");
+});
+
+// ── upsertCoachingArtifact: training_plan receipt carry-forward (cos-ops#17) ────
+// Regenerating a training plan REPLACES payload.days wholesale; without carry-forward the
+// calendar push would duplicate every session on the next push after a regenerate. A day
+// surviving into the new plan at the SAME date inherits the outgoing eventId; a moved/new
+// date has nothing to inherit.
+test("upsertCoachingArtifact: same-date days keep eventId; a moved date does not", () => {
+  const db = makeDB({
+    coachingArtifacts: [
+      {
+        id: "COACH-1",
+        kind: "training_plan",
+        periodKey: "2026-W30",
+        source: "agent",
+        payload: {
+          week: "2026-W30",
+          days: [
+            { date: "2026-07-20", type: "endurance", eventId: "EVT-1" },
+            { date: "2026-07-21", type: "rest" },
+          ],
+        },
+        generatedAt: ISO,
+        createdAt: ISO,
+        updatedAt: ISO,
+      },
+    ],
+  });
+
+  const { artifact, created } = upsertCoachingArtifact(db, {
+    kind: "training_plan",
+    periodKey: "2026-W30",
+    source: "agent",
+    payload: {
+      week: "2026-W30",
+      days: [
+        { date: "2026-07-20", type: "endurance" }, // same date as before -> inherits EVT-1
+        { date: "2026-07-22", type: "strength" }, // a moved/new date -> nothing to inherit
+      ],
+    },
+    generatedAt: ISO,
+  });
+
+  assert.equal(created, false, "an existing (kind, periodKey) upserts in place");
+  const days = artifact.payload.days as { date: string; eventId?: string }[];
+  assert.equal(days.find((d) => d.date === "2026-07-20")?.eventId, "EVT-1", "same date carries the receipt forward");
+  assert.equal(days.find((d) => d.date === "2026-07-22")?.eventId, undefined, "no receipt exists for a new/moved date");
+});
+
+test("upsertCoachingArtifact: carry-forward never clobbers an eventId already present on the incoming day", () => {
+  const db = makeDB({
+    coachingArtifacts: [
+      {
+        id: "COACH-1", kind: "training_plan", periodKey: "2026-W30", source: "agent",
+        payload: { week: "2026-W30", days: [{ date: "2026-07-20", eventId: "EVT-OLD" }] },
+        generatedAt: ISO, createdAt: ISO, updatedAt: ISO,
+      },
+    ],
+  });
+  const { artifact } = upsertCoachingArtifact(db, {
+    kind: "training_plan", periodKey: "2026-W30", source: "agent",
+    payload: { week: "2026-W30", days: [{ date: "2026-07-20", eventId: "EVT-ALREADY-SET" }] },
+    generatedAt: ISO,
+  });
+  const days = artifact.payload.days as { date: string; eventId?: string }[];
+  assert.equal(days[0].eventId, "EVT-ALREADY-SET", "an incoming day's own eventId is never overwritten by carry-forward");
+});
+
+test("upsertCoachingArtifact: carry-forward is training_plan ONLY — other kinds replace payload untouched", () => {
+  const db = makeDB({
+    coachingArtifacts: [
+      {
+        id: "COACH-1", kind: "weekly_review", periodKey: "2026-W30", source: "agent",
+        payload: { week: "2026-W30", overall_score: 80, days: [{ date: "2026-07-20", eventId: "EVT-1" }] },
+        generatedAt: ISO, createdAt: ISO, updatedAt: ISO,
+      },
+    ],
+  });
+  const { artifact } = upsertCoachingArtifact(db, {
+    kind: "weekly_review", periodKey: "2026-W30", source: "agent",
+    payload: { week: "2026-W30", overall_score: 90, days: [{ date: "2026-07-20" }] },
+    generatedAt: ISO,
+  });
+  const days = artifact.payload.days as { date: string; eventId?: string }[];
+  assert.equal(days[0].eventId, undefined, "non-training_plan kinds get no carry-forward");
+});
+
+test("upsertCoachingArtifact: a brand-new (kind, periodKey) mints fresh — nothing to carry forward", () => {
+  const db = makeDB({});
+  const { artifact, created } = upsertCoachingArtifact(db, {
+    kind: "training_plan", periodKey: "2026-W31", source: "agent",
+    payload: { week: "2026-W31", days: [{ date: "2026-07-27" }] },
+    generatedAt: ISO,
+  });
+  assert.equal(created, true);
+  assert.equal(artifact.id, "COACH-1");
 });
 
 // ── mutate / readDB / writeDB (DISK path; isolated tmp COS_DATA_DIR) ───────────

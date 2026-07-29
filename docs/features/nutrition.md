@@ -12,8 +12,8 @@ It does **three jobs**, each a small, deliberately basic slice:
 - **Pantry** — *what I have on hand.* A named item with optional quantity, a food category, a storage
   location, and an expiry / low-stock flag.
 - **Meal plan** — *what I'll cook.* A planned meal on a day + slot, with an optional recipe, an
-  optional pantry reference, and an **opt-in link to a calendar event** so a planned dinner can show
-  on the board's calendar.
+  optional pantry reference, and a link to a calendar event — **pushed onto the board's calendar by
+  default** (a reconciling, overlap-safe placement; see below).
 
 The division of labour mirrors the rest of Cos: the **human reads** the three views at a glance; the
 **agent writes** through the nutrition MCP. There is one piece of genuine intelligence in the
@@ -177,11 +177,29 @@ objective** (`set_body_objective`). The operator skill is
 [`nutrition-chef`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/nutrition-chef/SKILL.md);
 the goal/identity/weight live in [`body-profile`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/body-profile/SKILL.md).
 
-## The opt-in calendar link
+## Calendar placement — the default push, plus a manual explicit-time path
 
-The meal plan's one cross-link to the rest of the board is the optional **`eventId`**: a planned meal
-can **show up on the board's calendar** by pointing at a `CalendarEvent`. The order matters and is the
-contract:
+The meal plan's cross-link to the rest of the board is the optional **`eventId`** on
+`MealPlanEntry`: a planned meal shows up on the board's calendar by pointing at a `CalendarEvent`.
+There are two ways it gets set, and one is now the default.
+
+**The default — `POST /api/nutrition/push-plan-to-calendar`** (body `{ from?, to?, busyWindows? }`,
+ISO days, half-open `[from, to)`, defaulting to today through the next 7 days) or the
+**`push_meal_plan_to_calendar`** tool on the `nutrition` MCP. It is built on the same shared
+placement engine as the [Fitness](fitness.md) training-plan push — see
+**[Calendar placement](placement.md)** for the full engine contract, the optional `busyWindows`
+input, and the `workingHours` preference. In short: **reconciling** (idempotent by `entry.eventId`
+— a re-run creates/updates/skips rather than duplicating) and **overlap-safe** (a meal lands in a
+free slot within its slot's candidate window — breakfast 07:00–09:00, lunch 12:00–14:00, snack
+16:00–17:30, dinner 18:30–21:00 — and is never placed on top of an existing timed event or inside
+working hours, so a weekday breakfast/lunch/snack can come back `skipped`/`outside_working_hours`
+while dinner still places). `cooked`/`skipped` entries in the window are reported
+`skipped`/`not_planned` and left untouched. A meal time edited by hand is never moved back by a
+re-push; only its title/description refresh. The response mirrors the fitness push: `{ results:
+[{date, action, reason?, eventId?}], created, updated, skipped, version }`.
+
+**The manual path, for an explicit time** (*"put dinner on my calendar at 7"*) — the order is still
+a contract:
 
 1. **Create the calendar event first** — via the **calendar** MCP (`create_event`), which mints an
    `EVT-<n>`.
@@ -189,9 +207,10 @@ contract:
    `update_meal_plan(id, eventId: "EVT-7")`).
 
 Because the meal-plan POST/PATCH validate the `eventId` against `db.events` inside the store lock, you
-cannot store a link to an event that does not exist. This is deliberately the *only* way to put a meal
-on the calendar — the nutrition MCP never creates calendar events itself; it just holds the reference.
-See [Calendar](calendar.md) for the event side of the link.
+cannot store a link to an event that does not exist. The nutrition MCP itself still never creates a
+calendar event out of thin air on this manual path; the calendar push above is the one place events
+are minted, inside the nutrition route's own `mutate()`. See [Calendar](calendar.md) for the event
+side of the link.
 
 ## The API — `/api/nutrition/*` + the catalog
 
@@ -289,18 +308,18 @@ is the agent's twin of the three nutrition views — a **thin `fetch` wrapper** 
 `/api/nutrition/*` routes on `CRM_BASE_URL` (default `http://localhost:3000`), exactly the calendar
 server's archetype. It never shells out to `curl`, makes **no LLM calls**, and attributes every write
 `actor: "agent"` (the `x-actor: agent` header **and** `{ actor: "agent" }` in the body). It exposes
-**15 diary tools** for the three verticals below (the read tools ungated and the write tools gated
+**16 diary tools** for the three verticals below (the read tools ungated and the write tools gated
 behind the add-on flag), the
 [5 v14 tools](#the-new-endpoints-mcp-tools) (the dietary profile + the agent-authored targets)
 documented above, and **`get_nutrition_status`** (the reconciliation status read, ungated — see
-above) — **21 in all**:
+above) — **22 in all**:
 
 | Vertical | Reads | Writes (gated) |
 |---|---|---|
 | **Status** | `get_nutrition_status` | — (read-only; no writes) |
 | **Food log** | `list_food_log`, `get_food_log` | `log_food`, `update_food_log`, `delete_food_log` |
 | **Pantry** | `read_pantry` | `add_pantry_item`, `update_pantry_item`, `remove_pantry_item`, `reconcile_pantry` |
-| **Meal plan** | `list_meal_plan`, `get_meal_plan` | `plan_meal`, `update_meal_plan`, `remove_meal_plan` |
+| **Meal plan** | `list_meal_plan`, `get_meal_plan` | `plan_meal`, `update_meal_plan`, `remove_meal_plan`, `push_meal_plan_to_calendar` |
 
 A write on a **disabled** add-on returns the board's `404`, surfaced as a `Not found.` tool error —
 the tool descriptions tell the agent to enable the add-on from the `/addons` catalog and retry. The

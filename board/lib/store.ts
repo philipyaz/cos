@@ -1137,8 +1137,9 @@ export function setAthleteProfile(
 // ── Coaching artifacts (v13; "fitness" add-on) ─────────────────────────────────
 // Upsert a coaching artifact BY (kind, periodKey) — the UNIQUE key: there is one artifact
 // per period+kind (re-generating the same week's plan REPLACES it rather than appending a
-// duplicate). On an existing match: replace payload/source/generatedAt, bump updatedAt, keep
-// id + createdAt STICKY (the first-persist identity). Else: mint id via nextCoachingArtifactId,
+// duplicate). On an existing match: carry forward any training_plan per-day calendar
+// receipts (see below), replace payload/source/generatedAt, bump updatedAt, keep id +
+// createdAt STICKY (the first-persist identity). Else: mint id via nextCoachingArtifactId,
 // createdAt=updatedAt=now, push. Returns the artifact and whether it was newly created (the
 // route maps created → 201). The caller passes an already-validated input (lib/fitness-artifacts.ts).
 export function upsertCoachingArtifact(
@@ -1155,6 +1156,31 @@ export function upsertCoachingArtifact(
   const now = nowISO();
   const existing = findCoachingArtifactByPeriod(db, input.kind, input.periodKey);
   if (existing) {
+    // Receipt carry-forward (training_plan only). The calendar push route
+    // (push-plan-to-calendar) writes a per-day eventId INTO payload.days[i], but a
+    // regenerated plan replaces payload wholesale — without this, regenerate-then-push
+    // would duplicate the whole week (the exact failure cos-ops#17 exists to end). A
+    // day with no incoming eventId inherits the outgoing one for the SAME date; a date
+    // that no longer exists in the new plan simply drops its receipt (the old event is
+    // never deleted here — a human may have adopted/edited it; a documented known limit).
+    if (
+      input.kind === "training_plan" &&
+      Array.isArray(existing.payload.days) &&
+      Array.isArray(input.payload.days)
+    ) {
+      const outgoingEventIdByDate = new Map<string, string>();
+      for (const day of existing.payload.days as Record<string, unknown>[]) {
+        if (day && typeof day.date === "string" && typeof day.eventId === "string" && day.eventId) {
+          outgoingEventIdByDate.set(day.date, day.eventId);
+        }
+      }
+      for (const day of input.payload.days as Record<string, unknown>[]) {
+        if (day && typeof day.date === "string" && !day.eventId) {
+          const carried = outgoingEventIdByDate.get(day.date);
+          if (carried) day.eventId = carried;
+        }
+      }
+    }
     existing.payload = input.payload;
     existing.source = input.source;
     existing.generatedAt = input.generatedAt;
@@ -1179,6 +1205,10 @@ export function upsertCoachingArtifact(
 // replaces the body, a valid `source` enum updates the author, a `generatedAt` string updates
 // the generation time. Identity (id, createdAt, kind, periodKey) is NEVER changed here — this
 // is the un-validating coercive chokepoint (mirrors applyFoodLogUpdate). Bumps updatedAt.
+// KNOWN LIMIT: unlike upsertCoachingArtifact, a `payload` patch here replaces training_plan
+// days wholesale with NO eventId carry-forward — left unguarded on purpose (no MCP tool
+// reaches this PATCH path; a manual payload edit is a deliberate replacement, not a
+// regenerate). See docs/features/fitness.md.
 export function applyCoachingArtifactUpdate(rec: CoachingArtifact, patch: Record<string, unknown>): CoachingArtifact {
   if ("payload" in patch && patch.payload && typeof patch.payload === "object" && !Array.isArray(patch.payload)) {
     rec.payload = patch.payload as Record<string, unknown>;
@@ -1680,7 +1710,8 @@ export function findNutritionTargetByPeriod(
 
 // Upsert a nutrition-targets artifact BY (kind, periodKey): re-authoring the same day REPLACES it
 // (keeping id + createdAt sticky) rather than appending. Returns the artifact + whether newly created
-// (route maps created → 201). Mirrors upsertCoachingArtifact.
+// (route maps created → 201). Mirrors upsertCoachingArtifact — EXCEPT the training_plan receipt
+// carry-forward: daily_targets has no per-day calendar link, so there is nothing to carry.
 export function upsertNutritionTarget(
   db: DBShape,
   input: {

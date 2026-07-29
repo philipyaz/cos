@@ -525,6 +525,54 @@ const DELETE_COACHING_ARTIFACT_TOOL = {
   },
 };
 
+// ── Calendar placement (v15) ──────────────────────────────────────────────────
+// Materialize a SAVED training plan onto the calendar via the placement engine
+// (board/lib/placement.ts) — the reconciling twin of the nutrition push below.
+
+const PUSH_PLAN_TO_CALENDAR_TOOL = {
+  name: "push_plan_to_calendar",
+  description:
+    "Materialize a SAVED training plan onto the calendar (db.events) — POST " +
+    "/api/fitness/push-plan-to-calendar. IDEMPOTENT: each session's calendar link is a " +
+    "per-day receipt on the plan artifact, so re-running this after the plan changes " +
+    "RECONCILES the week (creates new sessions, refreshes changed ones, never duplicates) " +
+    "rather than re-creating it. OVERLAP-SAFE: a session is placed in a free slot within " +
+    "the day's candidate windows and never on top of an existing timed event; when no slot " +
+    "fits, that day is reported skipped with a reason instead of double-booking. Rest / " +
+    "active-recovery days are never placed (reported skipped/rest_day). A manually-edited " +
+    "event TIME is never moved back by a re-push — only its title/description refresh. " +
+    "Provide EXACTLY ONE of artifact_id or period_key (the plan's ISO week, e.g. '2026-W26'). " +
+    "Sessions are also kept out of the user's WORKING HOURS (Mon-Fri 09:00-18:00 by default, " +
+    "or the board's stored preference) automatically — you don't need to pass anything for " +
+    "that. Optionally pass 'busy_windows': read the user's REAL calendar (your own connector, " +
+    "e.g. Google Calendar) for this week and pass ONLY {date,start,end} busy times — never " +
+    "titles or attendees. Cos uses these for this one call and NEVER stores them. " +
+    "Returns { results: [{date, action, reason?, eventId?}], created, updated, skipped, version }.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      artifact_id: { type: "string", description: "The training_plan artifact id (e.g. 'COACH-3')." },
+      period_key: { type: "string", description: "The plan's ISO week (e.g. '2026-W26'), the artifact's upsert periodKey." },
+      busy_windows: {
+        type: "array",
+        description:
+          "Optional busy times from the user's REAL calendar, read by you before calling this tool. " +
+          "Each entry is {date, start, end} ONLY — no titles, no attendees, no other content. Used for " +
+          "this call and discarded; Cos never stores or syncs the external calendar.",
+        items: {
+          type: "object",
+          properties: {
+            date: { type: "string", description: "YYYY-MM-DD." },
+            start: { type: "string", description: "HH:MM (24h) busy-window start." },
+            end: { type: "string", description: "HH:MM (24h) busy-window end." },
+          },
+          required: ["date", "start", "end"],
+        },
+      },
+    },
+  },
+};
+
 const TOOLS = [
   PUSH_HEALTH_DATA_TOOL,
   LIST_HEALTH_DATA_TOOL,
@@ -544,6 +592,7 @@ const TOOLS = [
   LIST_COACHING_ARTIFACTS_TOOL,
   GET_COACHING_ARTIFACT_TOOL,
   DELETE_COACHING_ARTIFACT_TOOL,
+  PUSH_PLAN_TO_CALENDAR_TOOL,
 ];
 
 // ── Tool handlers ───────────────────────────────────────────────────────────
@@ -760,6 +809,21 @@ async function handleDeleteCoachingArtifact(args) {
   return text(JSON.stringify(data, null, 2));
 }
 
+// ── Calendar placement handler (v15) ──────────────────────────────────────────
+
+async function handlePushPlanToCalendar(args) {
+  const artifactId = str(args.artifact_id);
+  const periodKey = str(args.period_key);
+  if ((artifactId ? 1 : 0) + (periodKey ? 1 : 0) !== 1) {
+    return err("Provide exactly one of 'artifact_id' or 'period_key'.");
+  }
+  const body = artifactId ? { artifactId } : { periodKey };
+  if (Array.isArray(args.busy_windows)) body.busyWindows = args.busy_windows;
+  const { data, errorResult } = await healthApi("POST", "/api/fitness/push-plan-to-calendar", body);
+  if (errorResult) return errorResult;
+  return text(JSON.stringify(data, null, 2));
+}
+
 // ── Server wiring ───────────────────────────────────────────────────────────
 
 const server = new Server(
@@ -808,6 +872,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleGetCoachingArtifact(args);
     case "delete_coaching_artifact":
       return handleDeleteCoachingArtifact(args);
+    case "push_plan_to_calendar":
+      return handlePushPlanToCalendar(args);
     default:
       return err(`Unknown tool: ${request.params.name}`);
   }

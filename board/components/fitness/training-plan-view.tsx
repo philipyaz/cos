@@ -93,21 +93,22 @@ export function TrainingPlanView() {
 // push (the one mutation a viewed plan still drives).
 function PlanBody({ plan }: { plan: TrainingPlan }) {
   const [pushing, setPushing] = useState(false);
-  const [pushResult, setPushResult] = useState<{ created: number; failed: number } | null>(null);
+  const [pushResult, setPushResult] = useState<{ created: number; updated: number; skipped: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const days = Array.isArray(plan.days) ? plan.days : [];
 
   // Push the plan's sessions to the calendar via the shared fitness-client (which throws
   // Error(<api error text>) on a non-2xx). On a throw we surface the message in the rose error
-  // banner; the double-submit guard is the `pushing` disabled state on the button.
+  // banner; the double-submit guard is the `pushing` disabled state on the button. Keyed by the
+  // plan's own week (periodKey) — idempotent, so repeat pushes reconcile rather than duplicate.
   const pushToCalendar = async () => {
     setPushing(true);
     setPushResult(null);
     setError(null);
     try {
-      const data = await pushPlanToCalendar({ days: days as unknown as Record<string, unknown>[] });
-      setPushResult({ created: data.created, failed: data.failed });
+      const data = await pushPlanToCalendar({ periodKey: plan.week });
+      setPushResult({ created: data.created, updated: data.updated, skipped: data.skipped });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Calendar error");
     } finally {
@@ -116,7 +117,9 @@ function PlanBody({ plan }: { plan: TrainingPlan }) {
   };
 
   const totalMin = days.reduce((s, d) => s + (d.duration_min || 0), 0);
-  const trainingDays = days.filter((d) => d.type === "training").length;
+  // Deny-list, not an allow-list: the day-type vocabulary is OPEN (endurance/intervals/tempo/…),
+  // so counting only d.type === "training" would undercount every session of a real plan.
+  const trainingDays = days.filter((d) => d.type !== "rest" && d.type !== "active_recovery").length;
 
   return (
     <div className="space-y-6">
@@ -133,10 +136,10 @@ function PlanBody({ plan }: { plan: TrainingPlan }) {
 
       {/* Push result */}
       {pushResult && (
-        <div className={`rounded-lg border px-4 py-3 ${pushResult.failed === 0 ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
-          <p className={`text-[13px] ${pushResult.failed === 0 ? "text-emerald-700" : "text-amber-700"}`}>
-            {pushResult.created} event{pushResult.created === 1 ? "" : "s"} added to the calendar
-            {pushResult.failed > 0 && ` (${pushResult.failed} failed)`}
+        <div className={`rounded-lg border px-4 py-3 ${pushResult.skipped === 0 ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+          <p className={`text-[13px] ${pushResult.skipped === 0 ? "text-emerald-700" : "text-amber-700"}`}>
+            {pushResult.created} created, {pushResult.updated} updated
+            {pushResult.skipped > 0 && `, ${pushResult.skipped} skipped`}
           </p>
         </div>
       )}

@@ -200,6 +200,12 @@ export interface Settings {
   // `installedAt` is the first-enable timestamp. Lives here (in cases.json) so toggling
   // bumps db.version → SSE → the nav flips live. The framework reads it via isAddonEnabled.
   addons?: Record<string, { enabled: boolean; installedAt?: string }>;
+  // Working-hours / protected-window preference for the calendar PLACEMENT engine
+  // (lib/placement.ts). `days` are ISO weekday numbers (Mon=1 … Sun=7). Unset ⇒
+  // lib/placement.ts's DEFAULT_WORKING_HOURS (Mon-Fri 09:00-18:00) — a shipped default,
+  // so this needs no setup step. Read by the fitness/nutrition calendar-push routes,
+  // which treat it as a protected margin (never a lookup the engine performs itself).
+  workingHours?: { days: number[]; start: string; end: string };
 }
 
 // Persisted board UI preferences: the last-used filter/sort/group slice and the
