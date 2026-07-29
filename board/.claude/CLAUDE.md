@@ -61,8 +61,8 @@ the same four guarantees. Preserve them in anything you write or edit here:
 
 ## Authoring a skill
 
-Follow the [skill-creator standards](https://docs.claude.com/en/docs/claude-code/skills); the three
-that bite hardest here:
+Follow the [skill-creator standards](https://docs.claude.com/en/docs/claude-code/skills); a few
+bite hardest here:
 
 - **Progressive disclosure.** `SKILL.md` holds the *workflow* — the steps a run always follows.
   Push depth (exhaustive tool catalogs, worked examples, per-variant detail) into `references/`,
@@ -74,6 +74,13 @@ that bite hardest here:
 - **Explain the why; don't just shout.** Reasoned prose ("do X because Y") lands better than a wall
   of `ALWAYS`/`NEVER`. Spend the emphasis budget on the few genuinely load-bearing guardrails so
   they still stand out.
+- **Declare its automation class.** Every skill adds an entry to
+  [`skills/automation.json`](./skills/automation.json) — `scheduled` (with a trigger + suggested
+  cadence), `called` (by whom), or `on-demand` (why a timer adds nothing). `pack-skills.mjs` fails
+  the build without one, and regenerates the skills README catalog from it. The class is
+  deliberately **not** frontmatter (the loader contract, ADR 0020 — a rejected frontmatter is how
+  nine skills silently failed to load) and **not** inside the skill folder (it would ride into the
+  bundle and churn every zip for a metadata edit).
 
 The folder name, the frontmatter `name`, and the bundle filename must all match — the packer builds
 `skill-bundles/<dir>.zip` from the directory name, so a rename that misses the frontmatter produces
@@ -85,8 +92,8 @@ Cowork installs skills by **upload** (Settings → Capabilities → Skills → *
 takes a `.zip`. So the archives are a real distribution artifact, not a convenience:
 
 ```bash
-node scripts/pack-skills.mjs            # rebuild every bundle (only changed ones are rewritten)
-node scripts/pack-skills.mjs --check    # exit 1 if any bundle is stale/missing/orphaned — the CI gate
+node scripts/pack-skills.mjs            # rebuild every bundle + the README catalog (only changed ones are rewritten)
+node scripts/pack-skills.mjs --check    # exit 1 if a bundle is stale/missing/orphaned, or the catalog has drifted — the CI gate
 node scripts/pack-skills.mjs --list     # show each skill and the files its bundle carries
 ```
 

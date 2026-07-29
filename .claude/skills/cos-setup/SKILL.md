@@ -1,6 +1,6 @@
 ---
 name: cos-setup
-description: The single first-run entry point that stands up the WHOLE Cos system, sequencing the four component setup skills in dependency order — setup-vault → guard-setup → mcp-bridge-setup → backup-recovery. Use when setting up the chief of staff system, doing a first-run setup, onboarding a new machine, or asking for the full setup; also when you're unsure which component skill to run first and want the guided end-to-end runbook. Covers the three multi-device paths at Step 0.0 — a fresh hub, joining as a spoke (routes to spoke-setup), or promoting this machine to hub in a hub swap (routes to hub-handover).
+description: The single first-run entry point that stands up the WHOLE Cos system, sequencing the four component setup skills in dependency order — setup-vault → guard-setup → mcp-bridge-setup → backup-recovery — then finishes with the automation step, installing the operator skill bundles into Cowork and creating the scheduled tasks the generated catalog lists. Use when setting up the chief of staff system, doing a first-run setup, onboarding a new machine, or asking for the full setup; also when you're unsure which component skill to run first and want the guided end-to-end runbook. Covers the three multi-device paths at Step 0.0 — a fresh hub, joining as a spoke (routes to spoke-setup), or promoting this machine to hub in a hub swap (routes to hub-handover).
 allowed-tools: Bash, Read
 ---
 
@@ -12,7 +12,8 @@ each step produces what the next one needs: the **vault** must exist before the 
 it and before backup has something to protect; the **guard model** must be configured before the
 guard bridge can report a real classifier; **all the bridges + sidecars** must be wired before
 backup can snapshot live, populated stores. Run the four sub-skills **in order**, stop at each
-**CHECKPOINT**, and only advance when it passes. End with the **§ End-to-end verification**.
+**CHECKPOINT**, and only advance when it passes. End with the **§ End-to-end verification**, then
+finish with **Step 5 — operator automation**, which is what makes the system *run itself*.
 
 Every shell step below begins with the loader line
 `source "$(git rev-parse --show-toplevel)/config/load-config.sh"`, which exports `$REPO_ROOT`
@@ -467,6 +468,31 @@ calls behind a permission prompt. Walk the user through the one-time activation:
 
 (Claude Code uses the HTTP bridges via `.mcp.json` and skips this — the connector-approval step is
 Cowork-only.)
+
+### Step 5 — operator automation (install the skill bundles, then schedule the sweeps)
+- **What it does** — installs every operator skill bundle in `$REPO_ROOT/board/.claude/skill-bundles/`
+  into Cowork, then creates a Cowork **Scheduled Task** for each **scheduled** row of the generated
+  catalog in `board/.claude/skills/README.md` (built from `board/.claude/skills/automation.json`) —
+  pasting that row's trigger line at its suggested cadence.
+- **Why every bundle, not just the scheduled ones** — a **called** skill (`vault-operations`) is
+  invoked by other skills mid-run, and in Cowork a delegation to a skill that is not installed is a
+  **silent no-op, not an error** — the class of bug that left the vault unfed for weeks with nothing
+  in any log to say so (ADR 0015). Installing every bundle costs one extra upload per skill and closes
+  that failure mode structurally.
+- **Why LAST** — it needs Cowork **open** with its connectors **allowed** (the previous section), and
+  it is the step that turns "the board can do this" into "the board actually does this on its own" —
+  the automation Philip asked for is exactly this catalog, instantiated.
+- **Run**:
+  1. **Cowork Desktop → Settings → Capabilities → Skills → Upload skill**, once per `.zip` in
+     `$REPO_ROOT/board/.claude/skill-bundles/`.
+  2. **Cowork Desktop → Scheduled Tasks → new task**, one per row of the **scheduled** table in
+     `board/.claude/skills/README.md` — paste that row's trigger, and pick a cadence (the table's
+     column is a **suggestion**; the schedule is yours to set and adjust — see `docs/architecture/
+     triage-skills.md`).
+- **CHECKPOINT** — manual, and honest about it: nothing on this machine can read Cowork's installed
+  state back (ADR 0020's standing consequence), so this is a look, not a `curl`. In **Cowork Desktop
+  → Settings → Capabilities → Skills**, every bundle you uploaded is listed; in **Scheduled Tasks**,
+  every task you chose to create is listed, at the cadence you picked.
 
 ## Day-to-day: running Cos in later sessions
 After setup, most of it runs itself — make sure the user knows how to live with it and how to check health:
