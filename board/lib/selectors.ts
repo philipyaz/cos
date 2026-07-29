@@ -6,6 +6,7 @@
 
 import type { CaseRecord, CaseStatus, CaseDomain, CaseKind, CalendarEvent, Reminder, ReminderStatus, PriorityNote, MessageRecord, CaseActivity, Actor, DBShape } from "./types";
 import { VALID_CASE_STATUS, VALID_DOMAIN, VALID_PRIORITY, VALID_CASE_KIND, VALID_REMINDER_STATUS, caseKind } from "./types";
+import { STALE_AFTER_DAYS } from "./staleness";
 
 export type BoardSort =
   | "updated"
@@ -341,7 +342,7 @@ export function todayCases(cases: CaseRecord[], now: Date = new Date()): CaseRec
 // Bucketed "needs attention" report used by Today / the inbox. All four arrays
 // exclude archived cases.
 //  - overdue:      dueAt in the past, not done
-//  - agingWaiting: waiting_for_input idle (no update) > 3 days
+//  - agingWaiting: waiting_for_input idle (no update) > STALE_AFTER_DAYS days (3 d) — see ./staleness
 //  - untriaged:    in the todo lane with no tasks and no priority (raw intake)
 //  - unlinked:     no vaultLinks (no knowledge attached yet), not done
 export function needsAttention(
@@ -350,12 +351,12 @@ export function needsAttention(
 ): { overdue: CaseRecord[]; agingWaiting: CaseRecord[]; untriaged: CaseRecord[]; unlinked: CaseRecord[] } {
   const t = now.getTime();
   const live = cases.filter((c) => !c.archivedAt);
-  const THREE_DAYS = 3 * 24 * 60 * 60 * 1000;
+  const idleMs = STALE_AFTER_DAYS * 24 * 60 * 60 * 1000;
 
   return {
     overdue: live.filter((c) => c.status !== "done" && !Number.isNaN(ms(c.dueAt)) && ms(c.dueAt) < t),
     agingWaiting: live.filter(
-      (c) => c.status === "waiting_for_input" && t - ms(c.updatedAt) > THREE_DAYS,
+      (c) => c.status === "waiting_for_input" && t - ms(c.updatedAt) > idleMs,
     ),
     untriaged: live.filter((c) => c.status === "todo" && c.tasks.length === 0 && !c.priority),
     unlinked: live.filter((c) => c.status !== "done" && !(c.vaultLinks?.length)),
@@ -422,8 +423,9 @@ export function selectVaultCoverage(
 }
 
 // A case is "stale" if it hasn't been touched in `days` days and isn't already
-// finished/archived — a nudge that something's been sitting.
-export function isStale(c: CaseRecord, now: Date = new Date(), days = 5): boolean {
+// finished/archived — a nudge that something's been sitting. `days` defaults to the
+// shared STALE_AFTER_DAYS constant (./staleness); a caller may still pass its own.
+export function isStale(c: CaseRecord, now: Date = new Date(), days = STALE_AFTER_DAYS): boolean {
   if (c.archivedAt || c.status === "done") return false;
   const cutoff = days * 24 * 60 * 60 * 1000;
   return now.getTime() - ms(c.updatedAt) > cutoff;
@@ -443,6 +445,10 @@ export function dueStatus(dueAt?: string, now: Date = new Date()): DueStatus {
   // of "today" for users west of UTC. Anchor both to the UTC calendar day.
   if (sameDay(due, now)) return "today"; // earlier-today still counts as today, not overdue
   if (due.getTime() < startOfUTCDay(now)) return "overdue";
+  // A future-due PROXIMITY window, not an idleness threshold — a different idea from
+  // STALE_AFTER_DAYS (./staleness) that happens to share the number 3 today. Left
+  // inline and uncoupled on purpose: unifying them would make a future change to
+  // either policy silently move the other.
   const THREE_DAYS = 3 * 24 * 60 * 60 * 1000;
   if (due.getTime() - now.getTime() <= THREE_DAYS) return "soon";
   return "later";
@@ -461,11 +467,14 @@ function sameDay(a: Date, b: Date): boolean {
 }
 
 // SLA signal for a waiting_for_input case: how many days it's been idle, and
-// whether that breaches the 5-day threshold. null for any other status.
+// whether that breaches the shared STALE_AFTER_DAYS threshold (./staleness). null
+// for any other status. This is the same idle-too-long predicate as needsAttention's
+// agingWaiting bucket — a waiting case now breaches its SLA chip exactly when it
+// enters that bucket (cos-ops#20 folded the two thresholds into one).
 export function slaStatus(c: CaseRecord, now: Date = new Date()): { days: number; breached: boolean } | null {
   if (c.status !== "waiting_for_input") return null;
   const days = Math.floor((now.getTime() - ms(c.updatedAt)) / (24 * 60 * 60 * 1000));
-  return { days, breached: days > 5 };
+  return { days, breached: days > STALE_AFTER_DAYS };
 }
 
 // ── Hierarchy (Initiative > Workstream > Case) ─────────────────────────────────

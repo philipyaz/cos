@@ -58,6 +58,7 @@ export const EWMA_ALPHA = 0.25;
 // Plain calendar arithmetic on a "YYYY-MM-DD" string (UTC-noon anchored so a day shift is never a
 // DST/timezone off-by-one). Returns a "YYYY-MM-DD" string `n` days after `day`. The single
 // noon-anchored implementation the views + the body-baseline share.
+// (Whole-day DIFFERENCES over "YYYY-MM-DD" strings live in `./staleness` — do not mint one here.)
 export function addDays(day: string, n: number): string {
   const [y, m, d] = day.split("-").map((s) => parseInt(s, 10));
   const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
@@ -66,19 +67,6 @@ export function addDays(day: string, n: number): string {
   const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(dt.getUTCDate()).padStart(2, "0");
   return `${yy}-${mm}-${dd}`;
-}
-
-// Whole-day difference (toDay − fromDay) between two "YYYY-MM-DD" strings, UTC-MIDNIGHT anchored
-// (floor, not rounded) — the age-in-days arithmetic every nutrition-status staleness figure uses.
-// This is a DIFFERENT anchor/rounding than body-baseline.ts's private dayDiff (UTC-noon, rounded);
-// that one is a live surface and stays as-is — this is nutrition-status's one home for the idiom,
-// so a THIRD copy never gets minted alongside it.
-export function wholeDaysBetween(fromDay: string, toDay: string): number {
-  const [fy, fm, fd] = fromDay.split("-").map((s) => parseInt(s, 10));
-  const [ty, tm, td] = toDay.split("-").map((s) => parseInt(s, 10));
-  const from = Date.UTC(fy, fm - 1, fd);
-  const to = Date.UTC(ty, tm - 1, td);
-  return Math.floor((to - from) / 86_400_000);
 }
 
 // ── Adherence + guardrail value types (re-homed from the retired engine, v14) ─────────────────

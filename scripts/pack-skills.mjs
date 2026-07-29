@@ -1,12 +1,15 @@
 // scripts/pack-skills.mjs — package every operator skill in board/.claude/skills/ as a .zip that
-// Claude Cowork can install directly (Cowork Settings → Capabilities → Skills → Upload skill).
+// Claude Cowork can install directly (Cowork Settings → Capabilities → Skills → Upload skill), AND
+// generate the automation catalog spliced into board/.claude/skills/README.md from
+// board/.claude/skills/automation.json (the single source for each skill's automation class —
+// scheduled / called / on-demand — and suggested cadence).
 // Cowork installs a skill from an archive, not from a folder on disk, so the .zip IS the
-// distribution format — and a stale .zip silently ships an old procedure. This script makes the
-// bundles a build ARTIFACT of the source skill folders, with a CI sync-check, exactly like
-// scripts/gen-mcp-json.mjs and scripts/gen-labels-doc.mjs.
+// distribution format — and a stale .zip silently ships an old procedure. This script makes both
+// the bundles AND the README catalog build ARTIFACTs of the source, with a CI sync-check, exactly
+// like scripts/gen-mcp-json.mjs and scripts/gen-labels-doc.mjs.
 //
-//   node scripts/pack-skills.mjs            # (re)write board/.claude/skill-bundles/*.zip
-//   node scripts/pack-skills.mjs --check    # exit 1 if any bundle is missing/stale (CI guard)
+//   node scripts/pack-skills.mjs            # (re)write board/.claude/skill-bundles/*.zip + the catalog
+//   node scripts/pack-skills.mjs --check    # exit 1 if bundles OR the catalog are missing/stale (CI guard)
 //   node scripts/pack-skills.mjs --list     # print the skills + the files each bundle carries
 //
 // The zips are DETERMINISTIC — entries sorted by path, a fixed 1980-01-01 DOS timestamp, fixed
@@ -172,9 +175,182 @@ function buildBundle(skill) {
   return { files, zip: makeZip(files.map((f) => ({ path: `${skill}/${f.path}`, data: f.data }))) }
 }
 
+/* ------------------------------------------------------------------ automation catalog */
+
+// board/.claude/skills/automation.json is the single source for each skill's automation class —
+// see board/.claude/CLAUDE.md's "Authoring a skill" section. This script owns turning it into the
+// generated catalog block spliced into README.md between a marker pair — the same "declarative
+// source → generator → --check" discipline as scripts/gen-labels-doc.mjs, except only the block
+// BETWEEN the markers is generated; the rest of README.md stays hand-prose.
+const AUTOMATION_PATH = join(SKILLS_DIR, 'automation.json')
+const README_PATH = join(SKILLS_DIR, 'README.md')
+const CATALOG_BEGIN =
+  '<!-- BEGIN GENERATED: automation-catalog — the classes/cadences live in automation.json; edit THAT and run node scripts/pack-skills.mjs. Hand-edits inside this block are overwritten. -->'
+const CATALOG_END = '<!-- END GENERATED: automation-catalog -->'
+
+const VALID_CLASSES = new Set(['scheduled', 'called', 'on-demand'])
+const isBlank = (s) => typeof s !== 'string' || !s.trim()
+const hasNewline = (s) => typeof s === 'string' && s.includes('\n')
+
+/**
+ * Parse + validate automation.json against the discovered skill set. Every discovered skill must
+ * have exactly one entry, and every entry must name a discovered skill (the criterion-1 count
+ * equality) — a skill without a declared class is a build failure in EVERY mode, not just --check.
+ */
+function loadAutomation(skills) {
+  let raw
+  try {
+    raw = readFileSync(AUTOMATION_PATH, 'utf8')
+  } catch {
+    throw new Error(
+      `[pack-skills] ${relative(REPO_ROOT, AUTOMATION_PATH)} is missing. Every skill under ` +
+        'board/.claude/skills/ must declare an automation class — see board/.claude/CLAUDE.md.',
+    )
+  }
+  let automation
+  try {
+    automation = JSON.parse(raw)
+  } catch (e) {
+    throw new Error(`[pack-skills] ${relative(REPO_ROOT, AUTOMATION_PATH)} is not valid JSON: ${e.message}`)
+  }
+  if (!automation || typeof automation !== 'object' || Array.isArray(automation)) {
+    throw new Error(`[pack-skills] ${relative(REPO_ROOT, AUTOMATION_PATH)} must be a flat JSON object.`)
+  }
+
+  const skillSet = new Set(skills)
+  const entryNames = Object.keys(automation)
+  const unclassified = skills.filter((s) => !entryNames.includes(s))
+  const orphans = entryNames.filter((n) => !skillSet.has(n))
+  if (unclassified.length || orphans.length) {
+    throw new Error(
+      '[pack-skills] automation.json is out of sync with board/.claude/skills/.\n' +
+        unclassified.map((s) => `  unclassified skill (no entry in automation.json): ${s}\n`).join('') +
+        orphans.map((n) => `  orphan entry (no such skill directory):          ${n}\n`).join('') +
+        'Every skill must declare exactly one automation class — see board/.claude/CLAUDE.md.',
+    )
+  }
+
+  for (const [name, entry] of Object.entries(automation)) {
+    const errs = []
+    if (!VALID_CLASSES.has(entry?.class)) {
+      errs.push(`class must be one of "scheduled" | "called" | "on-demand", got ${JSON.stringify(entry?.class)}`)
+    }
+    if (isBlank(entry?.summary)) errs.push('summary is required and must be a non-empty string')
+    else if (hasNewline(entry.summary)) errs.push('summary must not contain a raw newline')
+
+    const hasSchedules = Object.prototype.hasOwnProperty.call(entry ?? {}, 'schedules')
+    const hasCalledBy = Object.prototype.hasOwnProperty.call(entry ?? {}, 'calledBy')
+
+    if (entry?.class === 'scheduled') {
+      if (hasCalledBy) errs.push('class "scheduled" must not carry "calledBy"')
+      if (!Array.isArray(entry.schedules) || entry.schedules.length === 0) {
+        errs.push('class "scheduled" requires a non-empty "schedules" array')
+      } else {
+        entry.schedules.forEach((s, i) => {
+          if (isBlank(s?.trigger) || hasNewline(s.trigger)) errs.push(`schedules[${i}].trigger must be a non-empty single-line string`)
+          if (isBlank(s?.cadence) || hasNewline(s.cadence)) errs.push(`schedules[${i}].cadence must be a non-empty single-line string`)
+          if (s?.does !== undefined && (isBlank(s.does) || hasNewline(s.does))) {
+            errs.push(`schedules[${i}].does, if present, must be a non-empty single-line string`)
+          }
+        })
+      }
+    } else if (entry?.class === 'called') {
+      if (hasSchedules) errs.push('class "called" must not carry "schedules"')
+      if (!Array.isArray(entry.calledBy) || entry.calledBy.length === 0) {
+        errs.push('class "called" requires a non-empty "calledBy" array')
+      } else {
+        for (const caller of entry.calledBy) {
+          if (typeof caller !== 'string' || !skillSet.has(caller)) {
+            errs.push(`calledBy names "${caller}", which is not a discovered skill`)
+          }
+        }
+      }
+    } else if (entry?.class === 'on-demand') {
+      if (hasSchedules) errs.push('class "on-demand" must not carry "schedules"')
+      if (hasCalledBy) errs.push('class "on-demand" must not carry "calledBy"')
+    }
+
+    if (errs.length) {
+      throw new Error(`[pack-skills] automation.json entry "${name}" is invalid:\n` + errs.map((e) => `  - ${e}\n`).join(''))
+    }
+  }
+
+  return automation
+}
+
+const esc = (s) => String(s).replace(/\|/g, '\\|')
+const skillLink = (name) => `**[\`/${name}\`](./${name}/SKILL.md)**`
+
+/** Render the generated catalog block (three sections), in automation.json's own key order. */
+function renderCatalog(automation) {
+  const entries = Object.entries(automation)
+  const scheduled = entries.filter(([, e]) => e.class === 'scheduled')
+  const called = entries.filter(([, e]) => e.class === 'called')
+  const onDemand = entries.filter(([, e]) => e.class === 'on-demand')
+
+  let out = '## The skills worth scheduling\n\n'
+  out +=
+    'Paste the trigger into a new Cowork Scheduled Task at the suggested cadence — the cadence is a ' +
+    "suggestion, yours to adjust in Cowork; the trigger is what makes the task run the skill's actual procedure.\n\n"
+  out += '| Skill | What a scheduled run does | Trigger to paste | Suggested cadence |\n'
+  out += '|---|---|---|---|\n'
+  for (const [name, entry] of scheduled) {
+    for (const s of entry.schedules) {
+      out += `| ${skillLink(name)} | ${esc(s.does ?? entry.summary)} | \`${esc(s.trigger)}\` | ${esc(s.cadence)} |\n`
+    }
+  }
+
+  out += '\n## Called skills — installed, invoked by other skills\n\n'
+  out +=
+    'Not every skill here is meant to be scheduled on its own — but install its bundle all the same: ' +
+    'a delegation to a skill that is not installed is a **silent no-op**, not an error.\n\n'
+  for (const [name, entry] of called) {
+    const callers = entry.calledBy.map((c) => `\`/${c}\``).join(', ')
+    out += `- ${skillLink(name)} — called by ${callers} — ${esc(entry.summary)}\n`
+  }
+
+  out += '\n## On demand only — deliberately not on a timer\n\n'
+  out +=
+    'These respond to a moment — a question asked, a circumstance changed, data handed over — so ' +
+    'absence from the table above is a decision, not an omission:\n\n'
+  for (const [name, entry] of onDemand) {
+    out += `- ${skillLink(name)} — ${esc(entry.summary)}\n`
+  }
+
+  return out.trim()
+}
+
+/** Splice `block` between the automation-catalog marker pair in `readme` (errors if either marker is absent or duplicated). */
+function spliceReadme(readme, block) {
+  const beginCount = readme.split(CATALOG_BEGIN).length - 1
+  const endCount = readme.split(CATALOG_END).length - 1
+  if (beginCount !== 1 || endCount !== 1) {
+    throw new Error(
+      `[pack-skills] ${relative(REPO_ROOT, README_PATH)} must contain the automation-catalog marker pair ` +
+        `exactly once each (found ${beginCount} BEGIN, ${endCount} END).`,
+    )
+  }
+  const beginIdx = readme.indexOf(CATALOG_BEGIN)
+  const endIdx = readme.indexOf(CATALOG_END)
+  if (endIdx < beginIdx) {
+    throw new Error(`[pack-skills] ${relative(REPO_ROOT, README_PATH)} — the END marker appears before BEGIN.`)
+  }
+  const before = readme.slice(0, beginIdx + CATALOG_BEGIN.length)
+  const after = readme.slice(endIdx)
+  return `${before}\n\n${block}\n\n${after}`
+}
+
 const skills = discoverSkills()
 if (skills.length === 0) {
   process.stderr.write(`[pack-skills] no skills found under ${relative(REPO_ROOT, SKILLS_DIR)}\n`)
+  process.exit(1)
+}
+
+let automation
+try {
+  automation = loadAutomation(skills)
+} catch (err) {
+  process.stderr.write(`${err.message}\n`)
   process.exit(1)
 }
 
@@ -210,16 +386,27 @@ const orphans = present.filter((n) => !expected.has(n)).sort()
 
 if (process.argv.includes('--check')) {
   const stale = built.filter(({ skill, zip }) => !zip.equals(readIfPresent(bundlePath(skill)) ?? Buffer.alloc(0)))
-  if (stale.length || orphans.length) {
+
+  let catalogStale = false
+  let catalogError = null
+  try {
+    const readmeCurrent = readFileSync(README_PATH, 'utf8')
+    catalogStale = readmeCurrent !== spliceReadme(readmeCurrent, renderCatalog(automation))
+  } catch (err) {
+    catalogError = err.message
+  }
+
+  if (stale.length || orphans.length || catalogStale || catalogError) {
     process.stderr.write(
-      '[pack-skills] skill bundles are OUT OF SYNC with board/.claude/skills/.\n' +
+      '[pack-skills] skill bundles / catalog are OUT OF SYNC with board/.claude/skills/.\n' +
         stale.map(({ skill }) => `  stale/missing: ${skill}.zip\n`).join('') +
         orphans.map((n) => `  orphaned:      ${n}\n`).join('') +
+        (catalogError ? `  ${catalogError}\n` : catalogStale ? '  catalog stale — run node scripts/pack-skills.mjs and commit\n' : '') +
         'Run `node scripts/pack-skills.mjs` and commit the result.\n',
     )
     process.exit(1)
   }
-  console.log(`[pack-skills] ${built.length} bundles up to date.`)
+  console.log(`[pack-skills] ${built.length} bundles + the skills catalog up to date.`)
   process.exit(0)
 }
 
@@ -236,6 +423,20 @@ for (const name of orphans) {
   rmSync(join(BUNDLES_DIR, name))
   console.log(`  removed board/.claude/skill-bundles/${name}  (no matching skill)`)
 }
+
+let readmeCurrent, readmeNext
+try {
+  readmeCurrent = readFileSync(README_PATH, 'utf8')
+  readmeNext = spliceReadme(readmeCurrent, renderCatalog(automation))
+} catch (err) {
+  process.stderr.write(`${err.message}\n`)
+  process.exit(1)
+}
+if (readmeNext !== readmeCurrent) {
+  writeFileSync(README_PATH, readmeNext)
+  console.log('  wrote  board/.claude/skills/README.md  (automation catalog)')
+}
+
 console.log(
   `[pack-skills] ${built.length} skills — ${written} bundle${written === 1 ? '' : 's'} written, ` +
     `${built.length - written} unchanged${orphans.length ? `, ${orphans.length} orphan removed` : ''}.`,

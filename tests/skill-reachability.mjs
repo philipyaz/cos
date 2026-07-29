@@ -10,7 +10,7 @@
 //
 // Read-only, no deps — scans the checked-in tree directly (board-lint.mjs is the precedent for a
 // static invariant checker living in tests/; this is a fourth, disjoint gate: pack-skills --check
-// owns bundle FRESHNESS, this owns delegation-target EXISTENCE).
+// owns bundle FRESHNESS + catalog SYNC, this owns delegation-target EXISTENCE).
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'

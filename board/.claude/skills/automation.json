@@ -1,0 +1,75 @@
+{
+  "unanswered-messages": {
+    "class": "scheduled",
+    "summary": "Surfaces the WhatsApp + Gmail messages still **awaiting your reply** on the board's **Unanswered** panel, and clears them once you've replied. Read-only on both channels.",
+    "schedules": [{ "trigger": "Run /unanswered-messages", "cadence": "~15 min" }]
+  },
+  "mail-to-board": {
+    "class": "scheduled",
+    "summary": "Reconciles your Gmail (received **and** sent) onto the board — links messages to cases, advances tasks, moves lanes, dedups — and **never** undoes your manual edits.",
+    "schedules": [{ "trigger": "Run /mail-to-board", "cadence": "~10–15 min" }]
+  },
+  "whatsapp-triage": {
+    "class": "scheduled",
+    "summary": "The same reconciliation for **WhatsApp** (DMs **and** groups), turning chats into tracked cases on the board.",
+    "schedules": [{ "trigger": "Run /whatsapp-triage", "cadence": "~15 min" }]
+  },
+  "board-organize": {
+    "class": "scheduled",
+    "summary": "Tidies the case tree into a clean **Initiative ▸ Workstream ▸ Case** hierarchy, grounded in your starred / priority items — never re-homing what you placed by hand.",
+    "schedules": [{ "trigger": "Run /board-organize", "cadence": "every 2–6 h / daily" }]
+  },
+  "reminders-review": {
+    "class": "scheduled",
+    "summary": "Reviews every **open reminder** and **closes** the ones already done or past their moment — auto-closing only what's *proven* done (finished checklist, linked case closed, delivery date passed) and **proposing** the rest (cold job-alerts, lapsed RSVPs) — so the reminders list stays a live to-do surface, not a graveyard.",
+    "schedules": [{ "trigger": "Run /reminders-review", "cadence": "daily / every few hours" }]
+  },
+  "nutrition-chef": {
+    "class": "scheduled",
+    "summary": "Reconciles the meal plan first — auto-closing past-dated planned meals a food log proves were cooked, batching the rest into one question — then plans the week's meals from what's on hand (preferring what's expiring), or checks how you're tracking to your calorie target.",
+    "schedules": [
+      { "trigger": "Run /nutrition-chef take stock of the pantry and draft the shopping list", "cadence": "Friday (before the weekend shop)", "does": "Takes stock of the pantry — what's fresh, what's low, what's expiring — and drafts the weekend **shopping list**, after the standing meal-plan reconcile." },
+      { "trigger": "Run /nutrition-chef plan this week's meals, preferring what's expiring", "cadence": "Sunday", "does": "Plans the week's meals from what's on hand (preferring what's expiring), honoring allergies + diet, optionally onto the calendar — after the standing meal-plan reconcile." }
+    ]
+  },
+  "fitness-pre-workout-brief": {
+    "class": "scheduled",
+    "summary": "Reads the board's deterministic **form score** (HRV / sleep / resting-HR / load breakdown), last night's sleep, recent training load, the athlete profile and today's planned session, then authors + persists **today's go / caution / rest brief** — upserted by date, one per day.",
+    "schedules": [{ "trigger": "Run /fitness-pre-workout-brief", "cadence": "daily (morning)" }]
+  },
+  "fitness-training-plan": {
+    "class": "scheduled",
+    "summary": "Authors + persists the **new week's training plan** — grounded in the athlete profile, the body goal, the recovery state and the last ~4 weeks of workouts, varied against the last few plans with progressive overload toward the goal date — upserted by ISO week.",
+    "schedules": [{ "trigger": "Run /fitness-training-plan", "cadence": "weekly (Sunday evening / Monday morning)" }]
+  },
+  "fitness-weekly-review": {
+    "class": "scheduled",
+    "summary": "The look-back over the training week — planned vs done, sleep / HRV / resting-HR trends, the daily form scores — authored into a scored review with 3–5 recommendations and a next-week focus, persisted per ISO week.",
+    "schedules": [{ "trigger": "Run /fitness-weekly-review", "cadence": "weekly (end of week, before the new plan)" }]
+  },
+  "vault-operations": {
+    "class": "called",
+    "summary": "The submit-then-poll procedure for the vault MCP's async `ingest` and synchronous `query`. It has a bundle and installs like every other skill — it's just never scheduled standalone: the sweeps invoke it for the vault half of their runs, and you can call it directly (\"ingest this into my vault\").",
+    "calledBy": ["mail-to-board", "whatsapp-triage", "fitness-health-data"]
+  },
+  "body-profile": {
+    "class": "on-demand",
+    "summary": "The body add-on's state editor — set your goal / identity, log a weigh-in, read BMR / maintenance / trend. It runs when something changed or you step on the scale — a conversation, not a timer."
+  },
+  "fitness-athlete-profile": {
+    "class": "on-demand",
+    "summary": "The training-focus editor — goal + goal date, weekly availability, sports, equipment. You change it when your circumstances change; nothing rots if it never runs on a timer."
+  },
+  "fitness-coach": {
+    "class": "on-demand",
+    "summary": "The fitness router — fires on a generic \"help me with my fitness\" and points at the right focused skill. A router has nothing for a timer to trigger."
+  },
+  "fitness-correlations": {
+    "class": "on-demand",
+    "summary": "Interprets the board's sleep ↔ performance correlations when you ask the question (the board computes + persists the stats deterministically at that moment). Nothing accumulates unread between runs."
+  },
+  "fitness-health-data": {
+    "class": "on-demand",
+    "summary": "The fitness data plane — ingests the Apple-Watch data you hand it, answers reads, fixes bad rows, pushes the health report to the vault. Ingestion is user-initiated by construction (the agent has no path into Apple Health), so a timer would only ever find nothing new."
+  }
+}

@@ -10,8 +10,8 @@
 //   node tests/skill-frontmatter.mjs
 //
 // Read-only, no deps — scans the checked-in tree directly, in the same spirit as board-lint.mjs and
-// skill-reachability.mjs. This is a fifth, disjoint gate: pack-skills --check owns bundle FRESHNESS,
-// skill-reachability owns delegation-target EXISTENCE, this owns frontmatter VALIDITY.
+// skill-reachability.mjs. This is a fifth, disjoint gate: pack-skills --check owns bundle FRESHNESS
+// + catalog SYNC, skill-reachability owns delegation-target EXISTENCE, this owns frontmatter VALIDITY.
 //
 // It checks three things per skill:
 //   1. `description` parses at all — a PLAIN (unquoted) scalar containing a colon-space is a nested
