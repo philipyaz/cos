@@ -124,6 +124,9 @@ const NUTRITION_ADDON: AddonManifest = {
       "get_meal_plan",
       "update_meal_plan",
       "remove_meal_plan",
+      // v15 calendar placement (idempotent, overlap-safe; the meal-plan twin of fitness's
+      // push_plan_to_calendar).
+      "push_meal_plan_to_calendar",
       // v14 dietary profile (the ONE dietary endpoint: allergies/dietType/notes/philosophy).
       "get_diet_profile",
       "set_diet_profile",
@@ -201,6 +204,9 @@ const FITNESS_ADDON: AddonManifest = {
       "list_coaching_artifacts",
       "get_coaching_artifact",
       "delete_coaching_artifact",
+      // v15 calendar placement (idempotent, overlap-safe; the training-plan twin of
+      // nutrition's push_meal_plan_to_calendar).
+      "push_plan_to_calendar",
     ],
   },
 };

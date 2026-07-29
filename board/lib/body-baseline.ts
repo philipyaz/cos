@@ -6,8 +6,8 @@
 //
 // Everything here is the "Pearson-stats carve-out": pure, deterministic, I/O-free, clock-free
 // (the caller passes `today` as a "YYYY-MM-DD" string). It imports ONLY ./types + the re-homed shared
-// helpers in ./nutrition-format. The one surviving SAFETY guard is lowCalorieWarn (the sex calorie
-// floor) — a warn, never a computed target.
+// helpers in ./nutrition-format + ./staleness. The one surviving SAFETY guard is lowCalorieWarn (the
+// sex calorie floor) — a warn, never a computed target.
 
 import type {
   ActivityLevel,
@@ -19,6 +19,7 @@ import type {
 } from "./types";
 import { ACTIVITY_FACTOR } from "./types";
 import { addDays, EWMA_ALPHA, type GuardrailFlag } from "./nutrition-format";
+import { wholeDaysBetween } from "./staleness";
 
 // ── Physiological + safety constants (uncontested facts only) ───────────────────
 export const KCAL_PER_KG = 7700; // kcal per kg of body weight (the "3500 kcal/lb" seed) — used by the measured-TDEE loop
@@ -28,15 +29,6 @@ export const MEASURED_MIN_DAYS = 10; // …needs at least this many logged days 
 
 const round = (n: number): number => Math.round(n);
 const r1 = (n: number): number => Math.round(n * 10) / 10;
-
-// Whole-day difference between two "YYYY-MM-DD" strings (b − a), UTC-noon anchored (no DST drift).
-function dayDiff(a: string, b: string): number {
-  const pa = a.split("-").map((s) => parseInt(s, 10));
-  const pb = b.split("-").map((s) => parseInt(s, 10));
-  const ta = Date.UTC(pa[0], pa[1] - 1, pa[2], 12, 0, 0);
-  const tb = Date.UTC(pb[0], pb[1] - 1, pb[2], 12, 0, 0);
-  return Math.round((tb - ta) / 86_400_000);
-}
 
 const byDateAsc = (a: WeightEntry, b: WeightEntry): number => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
 
@@ -135,7 +127,7 @@ export function measuredTdee(
   if (weightsInWindow.length < 2) return null;
   const first = weightsInWindow[0];
   const last = weightsInWindow[weightsInWindow.length - 1];
-  const spanDays = dayDiff(first.date, last.date);
+  const spanDays = wholeDaysBetween(first.date, last.date);
   if (spanDays < MEASURED_MIN_DAYS) return null;
 
   let intakeSum = 0;

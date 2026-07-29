@@ -12,7 +12,7 @@
 // one seam where the clock is read, exactly like bodyBaseline.
 
 import type { FoodLogEntry, MealPlanEntry, NutritionTargetArtifact, PantryCategory, PantryItem, PantryLocation } from "./types";
-import { wholeDaysBetween } from "./nutrition-format";
+import { wholeDaysBetween } from "./staleness";
 
 // True when `text` (typically a FoodLogEntry.description) names `mealId` (e.g. "MEAL-12") with a
 // DIGIT BOUNDARY immediately after it — so "MEAL-1" never matches inside "MEAL-10". Exported so the

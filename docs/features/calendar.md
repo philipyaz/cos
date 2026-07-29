@@ -139,6 +139,11 @@ alongside `case` / `messages` / `manualActions`, computed by filtering `db.event
 `e.caseId === id` (the link's single source of truth — there is no `eventIds[]` on the case to
 read). A leaf or a container alike sees the appointments tied to it.
 
+**Not every event is created by hand.** [Fitness](fitness.md) and [Nutrition & Chef](nutrition.md)
+both materialize their own plans onto `db.events` through a shared, reconciling
+**[placement engine](placement.md)** — the same events, the same overlap-safety, created via those
+add-ons' own push routes rather than the `POST` above.
+
 ## The calendar MCP — the agent verbs
 
 A new **stdio MCP server** (registry name **`calendar`**, bridge port **`8003`**) is the agent's

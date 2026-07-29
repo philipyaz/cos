@@ -230,6 +230,15 @@
 #      (never fails the batch) while an empty `ids` array 400s; an archived gap is hidden
 #      by default and shown under ?includeArchived=1. Snapshots+restores cases.json. Skipped
 #      when no board is up.
+#  13d5. api-needs-attention — ONLY if a board is running: the cos-ops#20 board-attention
+#      read contract (GET /api/cases/needs-attention): four bucket arrays (overdue/
+#      agingWaiting/untriaged/unlinked) + per-bucket counts + counts.total (the sum) +
+#      version; an overdue fixture (todo, past dueAt) carries the documented projection
+#      and a future-due one is excluded; a bare todo fixture is untriaged until it carries
+#      a priority; a fixture with no vaultLinks is unlinked until it carries one;
+#      agingWaiting is asserted present/array-shaped only (its membership math is owned by
+#      tests/unit/selectors.test.ts — updatedAt is server-stamped, so no HTTP sequence here
+#      can seed idle membership). Snapshots+restores cases.json. Skipped when no board is up.
 #  13e. backup-hardening — hermetic multi-producer backup pipeline test (NO board,
 #      NO Keychain, NO network, NO live data: synthetic repo-root skeleton + a local
 #      BARE git "remote" + per-device clones in a mktemp sandbox, HOME sandboxed).
@@ -968,6 +977,31 @@ else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
+# --- 10f2. api-nutrition-push-plan (only when a board is healthy) -----------
+# The meal-plan twin of api-fitness-push-plan.mjs — the RECONCILING calendar push
+# (POST /api/nutrition/push-plan-to-calendar + board/lib/placement.ts) with the "nutrition"
+# add-on ENABLED: a planned dinner (+ a same-day weekend lunch) is placed inside its slot's
+# window with an eventId receipt written back onto the meal-plan entry; a re-push is idempotent
+# (created:0, updated on the window's already-placed entries; the event count is unchanged); a
+# `cooked` entry in the window is reported skipped/not_planned and never reaches the engine; the
+# event's description carries the recipe/ingredients/servings/note; the GATE (a DISABLED add-on
+# 404s the push). Dinner + weekend fixtures ONLY (a weekday lunch/breakfast/snack's placement
+# changes once ops#25 lands). Snapshots + restores board/data/cases.json (mealPlanEntries +
+# events + settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10f2] api-nutrition-push-plan (live board) -------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-push-plan.mjs"; then
+    echo "api-nutrition-push-plan: PASS"
+  else
+    echo "api-nutrition-push-plan: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-push-plan"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
 # --- 10g. api-body-weight (only when a board is healthy) --------------------
 # The v14 weigh-in lifecycle (board/app/api/body/weight[/:id]) with the "body" add-on ENABLED:
 # create bumps version + mints a WEIGHT-<n> id (weightKg + note persist); a POST carrying
@@ -1142,6 +1176,35 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-fitness-coaching: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-fitness-coaching"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10j2. api-fitness-push-plan (only when a board is healthy) -------------
+# The RECONCILING calendar push (POST /api/fitness/push-plan-to-calendar + board/lib/placement.ts)
+# with the "fitness" add-on ENABLED, over an open-enum plan (endurance/strength/tempo/long/
+# technique — deliberately never the literal "training", so an allow-list predicate on that one
+# string would be caught): idempotent (a re-push creates nothing new; the week's event count is
+# unchanged); per-day eventId receipts land on the artifact's payload.days[i]; rest AND
+# active_recovery days create nothing; a pre-seeded evening conflict pushes a session into the
+# morning window instead of double-booking, and a day fully booked in BOTH windows is
+# skipped/no_free_slot with nothing created; the event description carries the day's own prose +
+# duration; a manually-edited event time is NEVER moved back by a re-push; re-saving the SAME
+# week (upsert) then pushing still yields one event per placed day (carry-forward proven over
+# HTTP); flipping an already-placed day to rest in a regenerated plan reports skipped/rest_day
+# WITH the stale eventId and leaves the event untouched; the GATE (a DISABLED add-on 404s the
+# push). Snapshots + restores board/data/cases.json (coachingArtifacts + events + settings.addons
+# live there → net-zero). Skipped when no board.
+echo
+echo "--- [10j2] api-fitness-push-plan (live board) ---------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-push-plan.mjs"; then
+    echo "api-fitness-push-plan: PASS"
+  else
+    echo "api-fitness-push-plan: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-push-plan"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
@@ -1380,6 +1443,26 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-vault-coverage: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-vault-coverage"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 13d5. api-needs-attention (only when a board is healthy) ---------------
+# The cos-ops#20 board-attention read contract (GET /api/cases/needs-attention):
+# four bucket arrays + counts + version; overdue/untriaged/unlinked membership +
+# transitions; agingWaiting asserted present/array-shaped only (its membership
+# math is owned by tests/unit/selectors.test.ts). Snapshots+restores cases.json —
+# net-zero.
+echo
+echo "--- [13d5] api-needs-attention (sandbox board) ---------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-needs-attention.mjs"; then
+    echo "api-needs-attention: PASS"
+  else
+    echo "api-needs-attention: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-needs-attention"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
