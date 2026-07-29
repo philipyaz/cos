@@ -114,7 +114,7 @@ bash tests/run.sh                    # full test suite — sandboxed; the one li
 (cd board && npm run dev)            # run the board — see Store schema discipline below; predev ENSURES the MCP bridges are up (launchd bootstrap + kickstart + probe; it starts services, never stops any)
 (cd board && npx --no-install tsc --noEmit && npm run lint)   # board typecheck + ESLint
 node tests/board-lint.mjs [path]     # store invariants — READ-ONLY; path defaults to the LIVE board/data/cases.json
-node scripts/pack-skills.mjs         # rebuild operator-skill bundles; `--check` is the CI gate
+node scripts/pack-skills.mjs         # rebuild operator-skill bundles + the generated skills-README catalog; `--check` is the CI gate
 ```
 
 - **Required CI checks:** `lint-test` (manifest + `.mcp.json` sync-check, board tsc + ESLint, then

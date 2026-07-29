@@ -28,14 +28,18 @@ the archive root).
 The bundles are **generated**, never hand-edited. After changing any skill, rebuild and commit:
 
 ```bash
-node scripts/pack-skills.mjs          # rewrite the bundles that changed
-node scripts/pack-skills.mjs --check  # what CI runs — fails if a bundle is stale
+node scripts/pack-skills.mjs          # rewrite the bundles that changed + regenerate the catalog below
+node scripts/pack-skills.mjs --check  # what CI runs — fails if a bundle OR the catalog is stale
 ```
 
 CI enforces this on every PR, because a stale zip silently keeps running last month's version of a
 procedure. See **[`../CLAUDE.md`](../CLAUDE.md)** for the full authoring + packaging philosophy.
 
+<!-- BEGIN GENERATED: automation-catalog — the classes/cadences live in automation.json; edit THAT and run node scripts/pack-skills.mjs. Hand-edits inside this block are overwritten. -->
+
 ## The skills worth scheduling
+
+Paste the trigger into a new Cowork Scheduled Task at the suggested cadence — the cadence is a suggestion, yours to adjust in Cowork; the trigger is what makes the task run the skill's actual procedure.
 
 | Skill | What a scheduled run does | Trigger to paste | Suggested cadence |
 |---|---|---|---|
@@ -44,16 +48,29 @@ procedure. See **[`../CLAUDE.md`](../CLAUDE.md)** for the full authoring + packa
 | **[`/whatsapp-triage`](./whatsapp-triage/SKILL.md)** | The same reconciliation for **WhatsApp** (DMs **and** groups), turning chats into tracked cases on the board. | `Run /whatsapp-triage` | ~15 min |
 | **[`/board-organize`](./board-organize/SKILL.md)** | Tidies the case tree into a clean **Initiative ▸ Workstream ▸ Case** hierarchy, grounded in your starred / priority items — never re-homing what you placed by hand. | `Run /board-organize` | every 2–6 h / daily |
 | **[`/reminders-review`](./reminders-review/SKILL.md)** | Reviews every **open reminder** and **closes** the ones already done or past their moment — auto-closing only what's *proven* done (finished checklist, linked case closed, delivery date passed) and **proposing** the rest (cold job-alerts, lapsed RSVPs) — so the reminders list stays a live to-do surface, not a graveyard. | `Run /reminders-review` | daily / every few hours |
-| **[`/nutrition-chef`](./nutrition-chef/SKILL.md)** | Reconciles the meal plan first — auto-closing past-dated planned meals a food log proves were cooked, batching the rest into one question — then plans the week's meals from what's on hand (preferring what's expiring), or checks how you're tracking to your calorie target. | `Run /nutrition-chef plan this week's meals` | weekly / daily |
+| **[`/nutrition-chef`](./nutrition-chef/SKILL.md)** | Takes stock of the pantry — what's fresh, what's low, what's expiring — and drafts the weekend **shopping list**, after the standing meal-plan reconcile. | `Run /nutrition-chef take stock of the pantry and draft the shopping list` | Friday (before the weekend shop) |
+| **[`/nutrition-chef`](./nutrition-chef/SKILL.md)** | Plans the week's meals from what's on hand (preferring what's expiring), honoring allergies + diet, optionally onto the calendar — after the standing meal-plan reconcile. | `Run /nutrition-chef plan this week's meals, preferring what's expiring` | Sunday |
+| **[`/fitness-pre-workout-brief`](./fitness-pre-workout-brief/SKILL.md)** | Reads the board's deterministic **form score** (HRV / sleep / resting-HR / load breakdown), last night's sleep, recent training load, the athlete profile and today's planned session, then authors + persists **today's go / caution / rest brief** — upserted by date, one per day. | `Run /fitness-pre-workout-brief` | daily (morning) |
+| **[`/fitness-training-plan`](./fitness-training-plan/SKILL.md)** | Authors + persists the **new week's training plan** — grounded in the athlete profile, the body goal, the recovery state and the last ~4 weeks of workouts, varied against the last few plans with progressive overload toward the goal date — upserted by ISO week. | `Run /fitness-training-plan` | weekly (Sunday evening / Monday morning) |
+| **[`/fitness-weekly-review`](./fitness-weekly-review/SKILL.md)** | The look-back over the training week — planned vs done, sleep / HRV / resting-HR trends, the daily form scores — authored into a scored review with 3–5 recommendations and a next-week focus, persisted per ISO week. | `Run /fitness-weekly-review` | weekly (end of week, before the new plan) |
 
-## Called skills
+## Called skills — installed, invoked by other skills
 
-Not every skill here is meant to be scheduled on its own. **[`/vault-operations`](./vault-operations/SKILL.md)**
-is a *called* skill — the submit-then-poll procedure for the `vault` MCP's async `ingest` and
-synchronous `query`. `/mail-to-board`, `/whatsapp-triage`, and `/fitness-health-data` each invoke it
-for the vault half of their runs; you can also invoke it directly on demand ("ingest this into my
-vault", "ask my vault about X"). It has a bundle and installs like every other skill here — it's just
-not a row in the table above, because nothing schedules it standalone.
+Not every skill here is meant to be scheduled on its own — but install its bundle all the same: a delegation to a skill that is not installed is a **silent no-op**, not an error.
+
+- **[`/vault-operations`](./vault-operations/SKILL.md)** — called by `/mail-to-board`, `/whatsapp-triage`, `/fitness-health-data` — The submit-then-poll procedure for the vault MCP's async `ingest` and synchronous `query`. It has a bundle and installs like every other skill — it's just never scheduled standalone: the sweeps invoke it for the vault half of their runs, and you can call it directly ("ingest this into my vault").
+
+## On demand only — deliberately not on a timer
+
+These respond to a moment — a question asked, a circumstance changed, data handed over — so absence from the table above is a decision, not an omission:
+
+- **[`/body-profile`](./body-profile/SKILL.md)** — The body add-on's state editor — set your goal / identity, log a weigh-in, read BMR / maintenance / trend. It runs when something changed or you step on the scale — a conversation, not a timer.
+- **[`/fitness-athlete-profile`](./fitness-athlete-profile/SKILL.md)** — The training-focus editor — goal + goal date, weekly availability, sports, equipment. You change it when your circumstances change; nothing rots if it never runs on a timer.
+- **[`/fitness-coach`](./fitness-coach/SKILL.md)** — The fitness router — fires on a generic "help me with my fitness" and points at the right focused skill. A router has nothing for a timer to trigger.
+- **[`/fitness-correlations`](./fitness-correlations/SKILL.md)** — Interprets the board's sleep ↔ performance correlations when you ask the question (the board computes + persists the stats deterministically at that moment). Nothing accumulates unread between runs.
+- **[`/fitness-health-data`](./fitness-health-data/SKILL.md)** — The fitness data plane — ingests the Apple-Watch data you hand it, answers reads, fixes bad rows, pushes the health report to the vault. Ingestion is user-initiated by construction (the agent has no path into Apple Health), so a timer would only ever find nothing new.
+
+<!-- END GENERATED: automation-catalog -->
 
 ## Use-case ideas (steal these)
 
@@ -68,6 +85,12 @@ not a row in the table above, because nothing schedules it standalone.
   so the open list stays things you actually still need to do.
 - **Sunday meal prep** — `/nutrition-chef plan this week's meals, preferring what's expiring` once a week
   turns your pantry into a plan (optionally onto the calendar).
+- **A Friday shopping run** — `Run /nutrition-chef take stock of the pantry and draft the shopping list`
+  before the weekend shop turns what's fresh/low/expiring into a list before you're standing in the aisle.
+- **A Sunday reset chain** — one scheduled task, *"Run /fitness-weekly-review, then /fitness-training-plan"*,
+  closes the old training week and authors the new one, in the right order.
+- **A morning readiness check** — `/fitness-pre-workout-brief` each morning gives you the go / caution /
+  rest call before you've decided what today's session looks like.
 - **A morning digest** — chain skills in one task: *"Run /mail-to-board and /whatsapp-triage, then give
   me a 5-bullet digest of what changed and what needs me today."*
 - **A Friday wrap-up** — *"Summarize the cases I closed this week and what's still open per initiative."*
@@ -109,6 +132,11 @@ the one the [skill-creator](https://docs.claude.com/en/docs/claude-code/skills) 
 - **Explain the why, don't just shout.** Reasoned prose ("do X because Y") lands better than a wall
   of `ALWAYS` / `NEVER`. Reserve emphasis for the few genuinely load-bearing guardrails so they
   actually stand out.
+- **Declare its automation class.** A new skill must add an entry to
+  **[`automation.json`](./automation.json)** — `scheduled` (with a trigger + suggested cadence),
+  `called` (by whom), or `on-demand` (why a timer adds nothing). `pack-skills` refuses to build
+  without it, and the catalog table above regenerates from it — never hand-edit between the
+  `<!-- BEGIN/END GENERATED -->` markers.
 
 **[`mail-to-board`](./mail-to-board/SKILL.md)** is the reference example of this shape — a lean
 workflow that points into
