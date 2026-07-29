@@ -12,7 +12,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { computeNutritionStatus, mealIdNamedIn } from "../../board/lib/nutrition-status.ts";
+import {
+  computeNutritionStatus,
+  mealIdNamedIn,
+  pantryLifecycleClass,
+  freshnessHorizonDays,
+  DEFAULT_FRESH_HORIZON_DAYS,
+} from "../../board/lib/nutrition-status.ts";
 import type { FoodLogEntry, MealPlanEntry, NutritionTargetArtifact, PantryItem } from "../../board/lib/types.ts";
 
 test("mealIdNamedIn: digit-boundary — MEAL-1 never matches inside MEAL-10", () => {
@@ -156,4 +162,124 @@ test("computeNutritionStatus: hasNutritionTargets + daysSinceLastTargets from ma
   });
   assert.equal(s.hasNutritionTargets, true);
   assert.ok(s.daysSinceLastTargets! > 1000, "gap from the NEWEST periodKey (2020-01-10)");
+});
+
+// ── pantryLifecycleClass: precedence ──────────────────────────────────────────────────────────
+test("pantryLifecycleClass: spice beats everything, even a fridge location", () => {
+  assert.equal(pantryLifecycleClass({ category: "spice", location: "fridge" }), "spice");
+});
+
+test("pantryLifecycleClass: frozen category beats a fridge location", () => {
+  assert.equal(pantryLifecycleClass({ category: "frozen", location: "fridge" }), "staple");
+});
+
+test("pantryLifecycleClass: freezer location beats a produce category", () => {
+  assert.equal(pantryLifecycleClass({ category: "produce", location: "freezer" }), "staple");
+});
+
+test("pantryLifecycleClass: a fridge location beats a staple-ish category (the 'jar' case)", () => {
+  assert.equal(pantryLifecycleClass({ category: "pantry", location: "fridge" }), "fresh");
+});
+
+test("pantryLifecycleClass: produce/dairy with no location still classify fresh", () => {
+  assert.equal(pantryLifecycleClass({ category: "produce" }), "fresh");
+  assert.equal(pantryLifecycleClass({ category: "dairy" }), "fresh");
+});
+
+test("pantryLifecycleClass: neither field set defaults to staple, conservatively", () => {
+  assert.equal(pantryLifecycleClass({}), "staple");
+});
+
+// ── freshnessHorizonDays: shape, not an exhaustive restating of the table ────────────────────────
+test("freshnessHorizonDays: a couple of representative fresh-class rows", () => {
+  assert.equal(freshnessHorizonDays({ category: "produce", location: "fridge" }), 7);
+  assert.equal(freshnessHorizonDays({ category: "dairy", location: "fridge" }), 10);
+});
+
+test("freshnessHorizonDays: a fresh row with no matching table entry falls back to the default", () => {
+  assert.equal(freshnessHorizonDays({ category: "produce" }), DEFAULT_FRESH_HORIZON_DAYS);
+});
+
+test("freshnessHorizonDays: staple/spice rows carry no horizon at all", () => {
+  assert.equal(freshnessHorizonDays({ category: "spice", location: "pantry" }), null);
+  assert.equal(freshnessHorizonDays({ category: "pantry", location: "pantry" }), null);
+});
+
+// ── likelyPastHorizon: the strict boundary, and expiresAt always wins ───────────────────────────
+test("computeNutritionStatus: likelyPastHorizon boundary is STRICT — ageDays === horizonDays is not past", () => {
+  const s = computeNutritionStatus({
+    mealPlanEntries: [], foodLogs: [],
+    pantryItems: [
+      // produce×fridge, horizon 7 days. Exactly 7 days old → not yet past.
+      pantryItem({ id: "PANTRY-1", category: "produce", location: "fridge", updatedAt: "2026-07-19T09:00:00.000Z" }),
+    ],
+    nutritionTargets: [], today: "2026-07-26",
+  });
+  assert.deepEqual(s.pantryLifecycle.likelyPastHorizon, { count: 0, items: [] }, "ageDays === horizonDays (7) is not past");
+});
+
+test("computeNutritionStatus: likelyPastHorizon fires the day after the boundary", () => {
+  const s = computeNutritionStatus({
+    mealPlanEntries: [], foodLogs: [],
+    pantryItems: [
+      // Same row, one day older — 8 days old, one past the 7-day horizon.
+      pantryItem({ id: "PANTRY-1", category: "produce", location: "fridge", updatedAt: "2026-07-18T09:00:00.000Z" }),
+    ],
+    nutritionTargets: [], today: "2026-07-26",
+  });
+  assert.deepEqual(
+    s.pantryLifecycle.likelyPastHorizon,
+    { count: 1, items: [{ id: "PANTRY-1", ageDays: 8, horizonDays: 7 }] },
+    "ageDays (8) > horizonDays (7) → past",
+  );
+});
+
+test("computeNutritionStatus: a real expiresAt always wins — excluded from the inference even when old", () => {
+  const s = computeNutritionStatus({
+    mealPlanEntries: [], foodLogs: [],
+    pantryItems: [
+      pantryItem({
+        id: "PANTRY-1",
+        category: "produce",
+        location: "fridge",
+        expiresAt: "2099-01-01", // a real, far-future date — the fact path, not the inference
+        updatedAt: "2026-06-01T09:00:00.000Z", // 55 days old — well past the 7-day horizon
+      }),
+    ],
+    nutritionTargets: [], today: "2026-07-26",
+  });
+  assert.deepEqual(
+    s.pantryLifecycle.likelyPastHorizon,
+    { count: 0, items: [] },
+    "an item WITH an expiresAt never appears in likelyPastHorizon, however old",
+  );
+  assert.deepEqual(
+    s.pantryLifecycle.fresh,
+    { count: 1, ids: ["PANTRY-1"] },
+    "still counted in the fresh scope itself — classification doesn't look at expiresAt at all",
+  );
+});
+
+// ── excluded-counts arithmetic ───────────────────────────────────────────────────────────────────
+test("computeNutritionStatus: fresh + excluded.spices + excluded.staples accounts for every row", () => {
+  const s = computeNutritionStatus({
+    mealPlanEntries: [], foodLogs: [],
+    pantryItems: [
+      pantryItem({ id: "PANTRY-1", category: "spice", location: "pantry" }),
+      pantryItem({ id: "PANTRY-2", category: "spice", location: "pantry" }),
+      pantryItem({ id: "PANTRY-3", category: "pantry", location: "pantry" }),
+      pantryItem({ id: "PANTRY-4", category: "protein", location: "pantry" }),
+      pantryItem({ id: "PANTRY-5", category: "other" }), // neither field says fresh → staple default
+      pantryItem({ id: "PANTRY-6", category: "produce", location: "fridge" }),
+    ],
+    nutritionTargets: [], today: "2026-07-26",
+  });
+  assert.equal(s.pantryLifecycle.excluded.spices, 2);
+  assert.equal(s.pantryLifecycle.excluded.staples, 3);
+  assert.equal(s.pantryLifecycle.fresh.count, 1);
+  assert.equal(
+    s.pantryLifecycle.fresh.count + s.pantryLifecycle.excluded.spices + s.pantryLifecycle.excluded.staples,
+    6,
+    "every seeded row is accounted for exactly once",
+  );
 });

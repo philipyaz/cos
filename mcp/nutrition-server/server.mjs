@@ -468,9 +468,11 @@ const GET_NUTRITION_STATUS_TOOL = {
     "every invocation, before any planning: `stalePlannedMeals` (past-dated 'planned' meal-plan " +
     "entries — count/oldest/ids), `provablyCooked` (the subset with a same-date+slot food-log " +
     "entry naming their MEAL-<n> id — the auto-closeable set), `daysSinceLastFoodLog`, " +
-    "`daysSinceLastPantryWrite`, `expiredPantryItems`, and `hasNutritionTargets` + " +
-    "`daysSinceLastTargets`. Everything is computed fresh from existing records on every call — " +
-    "nothing is stored here.",
+    "`daysSinceLastPantryWrite`, `expiredPantryItems`, `pantryLifecycle` (fresh/staple/spice " +
+    "scoping for routine reconciliation — spices and shelf-stable staples are OUT of the routine " +
+    "sweep by default — plus fresh items likely past a computed, never-stored freshness horizon), " +
+    "and `hasNutritionTargets` + `daysSinceLastTargets`. Everything is computed fresh from " +
+    "existing records on every call — nothing is stored here.",
   inputSchema: { type: "object", properties: {} },
 };
 
@@ -802,6 +804,29 @@ async function handleGetNutritionStatus() {
 
   const expired = s.expiredPantryItems ?? { count: 0, ids: [] };
   lines.push(`Expired pantry items: ${expired.count}${expired.count ? ` — ${expired.ids.join(", ")}` : ""}`);
+
+  const lifecycle = s.pantryLifecycle ?? {
+    fresh: { count: 0, ids: [] },
+    likelyPastHorizon: { count: 0, items: [] },
+    excluded: { spices: 0, staples: 0 },
+  };
+  lines.push(
+    `Pantry lifecycle: ${lifecycle.fresh.count} fresh row${lifecycle.fresh.count === 1 ? "" : "s"} in the ` +
+      `routine reconciliation scope (${lifecycle.excluded.spices} spices + ${lifecycle.excluded.staples} ` +
+      `staples excluded).`,
+  );
+  if (lifecycle.likelyPastHorizon.count > 0) {
+    lines.push(`Likely past their freshness horizon (inferred — not printed dates):`);
+    const sorted = [...lifecycle.likelyPastHorizon.items].sort((a, b) => b.ageDays - a.ageDays);
+    const shown = sorted.slice(0, 5);
+    for (const it of shown) {
+      lines.push(
+        `  - ${it.id} — unverified ${it.ageDays} days, typical shelf life ${it.horizonDays} (inferred — no printed date)`,
+      );
+    }
+    const remaining = lifecycle.likelyPastHorizon.count - shown.length;
+    if (remaining > 0) lines.push(`  … and ${remaining} more`);
+  }
 
   if (!s.hasNutritionTargets) {
     lines.push("No nutrition targets have EVER been set — author them via save_nutrition_targets.");
