@@ -279,7 +279,7 @@ _Out of scope (critic): a generic public/3rd-party API. A single local webhook i
 
 ### Vault ↔ board bidirectional bridge
 
-The two-surface payoff made visible from the board. The router already maintains `case.vaultLinks` ↔ page `cases:` frontmatter. The bridge also carries a **receipt** (`CaseRecord.vaultIngestedAt`) and a **coverage read** (`GET /api/cases/vault-coverage` / `get_vault_coverage`) — the inverse of the already-shipped `needsAttention().unlinked` lens (cases with **no** `vaultLinks`): coverage surfaces cases **with** `vaultLinks` the vault hasn't actually heard about (receipt absent or older than the case's own update). See [vault-async](../reference/vault-async.md).
+The two-surface payoff made visible from the board. The router already maintains `case.vaultLinks` ↔ page `cases:` frontmatter. The bridge also carries a **receipt** (`CaseRecord.vaultIngestedAt`) and a **coverage read** (`GET /api/cases/vault-coverage` / `get_vault_coverage`) — the inverse of the already-shipped `needsAttention().unlinked` lens (cases with **no** `vaultLinks`): coverage surfaces cases **with** `vaultLinks` the vault hasn't actually heard about (receipt absent or older than the case's own update). `needsAttention` itself now gets the same two-surface treatment this paragraph celebrates for coverage: it is served at `GET /api/cases/needs-attention` and the `get_needs_attention` MCP tool, so an agent can read all four buckets — not just the `unlinked` one — directly. See [vault-async](../reference/vault-async.md).
 
 | Feature | What | Why it matters | Data/Arch impact | Pri | Size |
 |---|---|---|---|---|---|

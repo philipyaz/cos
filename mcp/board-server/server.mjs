@@ -30,6 +30,7 @@
 //   labels  : install_label_bundle, uninstall_label_bundle (configure the taxonomy)
 //   approval: propose, approve, reject
 //   vault   : get_vault_coverage, mark_vault_ingested (the vault-ingest receipt)
+//   attention: get_needs_attention (the four needs-attention buckets)
 //
 // v3.2: reminders are ENRICHED — create_reminder/update_reminder carry catalog
 // `labels` + a short `tasks` checklist, link_reminder_message attaches an email to
@@ -49,6 +50,11 @@
 // the alarm for a capture pipeline that fails silently; mark_vault_ingested stamps the
 // receipt, called ONLY after the vault MCP confirms a `completed` ingest. Core (no
 // add-on gate); rides `/api/cases/vault-coverage` + `/api/cases/vault-receipt`.
+//
+// v3.5: NEEDS ATTENTION — the board's own "what needs attention" read, now agent-reachable
+// (cos-ops#20). get_needs_attention reads the four buckets the needsAttention selector computes
+// (overdue, agingWaiting, untriaged, unlinked — previously UI-only, board/components/board/
+// needs-attention.tsx); rides `/api/cases/needs-attention`.
 //
 // HIERARCHY (v3): the board is a strict 3-tier tree of MAX DEPTH 3, where ALL THREE
 // tiers are the SAME CaseRecord (id CASE-<n>) distinguished by a `kind` field:
@@ -859,6 +865,75 @@ async function handleMarkVaultIngested(args) {
   return text(lines.join("\n"));
 }
 
+// ── Attention tools ──────────────────────────────────────────────────────────
+// The board's own "what needs attention" read (ADR 0017's compute-on-read family;
+// cos-ops#20 named the shared vocabulary — see board/lib/staleness.ts). The four
+// buckets OVERLAP (a case can be both overdue and unlinked), so the reply's total
+// comes from the route's own `counts.total` (a sum of bucket sizes), never a
+// re-derived distinct-case count.
+
+const NEEDS_ATTENTION_ENTRY_LIMIT = 8;
+
+// Render up to NEEDS_ATTENTION_ENTRY_LIMIT entries of one bucket, tagged with its
+// name (mirrors handleGetVaultCoverage's `[reason]` idiom above), plus an overflow
+// line when the bucket is bigger than the cap.
+function needsAttentionBucketLines(tag, cases, render) {
+  const shown = cases.slice(0, NEEDS_ATTENTION_ENTRY_LIMIT);
+  const lines = shown.map((c) => `  - ${c.id} [${tag}] ${c.title} — ${render(c)}`);
+  if (cases.length > NEEDS_ATTENTION_ENTRY_LIMIT) {
+    lines.push(`  … and ${cases.length - NEEDS_ATTENTION_ENTRY_LIMIT} more.`);
+  }
+  return lines;
+}
+
+// Read the four needsAttention buckets. No args — the selector excludes archived
+// cases by definition in every bucket, so an includeArchived knob would change
+// what the buckets mean, not just their scope.
+async function handleGetNeedsAttention() {
+  const { data, errorResult } = await api("GET", "/api/cases/needs-attention");
+  if (errorResult) return errorResult;
+
+  const counts = data.counts ?? { overdue: 0, agingWaiting: 0, untriaged: 0, unlinked: 0, total: 0 };
+  if (counts.total === 0) {
+    return text("Nothing needs attention — overdue, aging, untriaged and unlinked are all clear.");
+  }
+
+  const lines = [
+    `Needs attention — ${counts.total} (overdue ${counts.overdue}, aging ${counts.agingWaiting}, ` +
+      `untriaged ${counts.untriaged}, unlinked ${counts.unlinked}). Buckets overlap, so this is a ` +
+      `sum of bucket sizes, not a count of distinct cases.`,
+  ];
+  lines.push(
+    ...needsAttentionBucketLines(
+      "overdue",
+      data.overdue ?? [],
+      (c) => `due ${(c.dueAt ?? "").slice(0, 10)} · updated ${(c.updatedAt ?? "").slice(0, 10)}`
+    )
+  );
+  lines.push(
+    ...needsAttentionBucketLines(
+      "agingWaiting",
+      data.agingWaiting ?? [],
+      (c) => `idle since ${(c.updatedAt ?? "").slice(0, 10)}`
+    )
+  );
+  lines.push(
+    ...needsAttentionBucketLines(
+      "untriaged",
+      data.untriaged ?? [],
+      (c) => `updated ${(c.updatedAt ?? "").slice(0, 10)}`
+    )
+  );
+  lines.push(
+    ...needsAttentionBucketLines(
+      "unlinked",
+      data.unlinked ?? [],
+      (c) => `updated ${(c.updatedAt ?? "").slice(0, 10)}`
+    )
+  );
+  return text(lines.join("\n"));
+}
+
 // ── Reminder tools ───────────────────────────────────────────────────────────
 // Reminders are lightweight nudges (CHECK/DO) that ride the board API at
 // /api/reminders. reminder.caseId optionally links to ANY tier (initiative/
@@ -1519,6 +1594,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleGetVaultCoverage(args);
     case "mark_vault_ingested":
       return handleMarkVaultIngested(args);
+    // attention
+    case "get_needs_attention":
+      return handleGetNeedsAttention();
     // reminders
     case "create_reminder":
       return handleCreateReminder(args);
@@ -1566,5 +1644,5 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 await start(
   server,
   new StdioServerTransport(),
-  `board MCP server v3.3 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
+  `board MCP server v3.5 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
 );

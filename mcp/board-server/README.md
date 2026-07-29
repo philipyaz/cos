@@ -1,4 +1,4 @@
-# board MCP server (v3.3)
+# board MCP server (v3.5)
 
 A stdio MCP server (registry name **`board`**) that opens and maintains cases on the
 Cos board — the single to-do surface for both **work** and **life**. Every
@@ -41,10 +41,11 @@ The server exposes the full v3 case / task / message lifecycle plus board ops, t
 **v3.2** reminder enrichment (catalog `labels`, a short `tasks` checklist, and linked emails via
 `link_reminder_message`; reminders are searched and each hit flags its nature), the **v3.3**
 **priorities** family (`get_priorities` reads the user's starred nodes + free-text priority notes;
-`add`/`update`/`remove_priority` manage the notes; `set_starred` pins any node), and the **v3.4**
+`add`/`update`/`remove_priority` manage the notes; `set_starred` pins any node), the **v3.4**
 **vault coverage** pair (`get_vault_coverage` reads which `vaultLinks` cases the vault has no/stale
-receipt for; `mark_vault_ingested` stamps the receipt after a confirmed ingest). `[x]` marks optional
-args.
+receipt for; `mark_vault_ingested` stamps the receipt after a confirmed ingest), and the **v3.5**
+**attention** read (`get_needs_attention` reads the board's four needs-attention buckets, now
+agent-reachable). `[x]` marks optional args.
 
 ### Reads
 
@@ -304,6 +305,22 @@ default (archived + future-snoozed excluded) to the full set.
 cases. Call this **only** after the vault MCP's `ingest_status` reports `completed` for an ingest that
 named them — the receipt means the knowledge **landed**, never that it was attempted. Unknown ids
 (e.g. merged/deleted between submit and completion) are skipped and reported back, not a batch failure.
+
+### Attention
+
+The board's own "what needs attention" read, now agent-reachable (cos-ops#20 named the shared
+staleness vocabulary — see `board/lib/staleness.ts`). Four buckets, computed live and never
+persisted (ADR 0017): `overdue`, `agingWaiting`, `untriaged`, `unlinked` — the same read
+`board/components/board/needs-attention.tsx` renders, and `get_vault_coverage` above is the
+documented complement of its `unlinked` bucket.
+
+#### `get_needs_attention()`
+`GET /api/cases/needs-attention`. No args — every bucket excludes archived cases by definition.
+Returns the four bucket arrays (trimmed case projections), a `counts` object per bucket plus
+`counts.total`, and `version`. Read-only. **Buckets overlap** (a case can be both `overdue` and
+`unlinked`), so `counts.total` is a sum of bucket sizes, not a count of distinct cases. Call this
+first in any "where is Philip at / what needs a nudge" sweep — the reconciliation entry point for
+detecting drift without waiting on his prompt.
 
 ### Reminders
 

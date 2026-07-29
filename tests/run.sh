@@ -218,6 +218,15 @@
 #      (never fails the batch) while an empty `ids` array 400s; an archived gap is hidden
 #      by default and shown under ?includeArchived=1. Snapshots+restores cases.json. Skipped
 #      when no board is up.
+#  13d5. api-needs-attention — ONLY if a board is running: the cos-ops#20 board-attention
+#      read contract (GET /api/cases/needs-attention): four bucket arrays (overdue/
+#      agingWaiting/untriaged/unlinked) + per-bucket counts + counts.total (the sum) +
+#      version; an overdue fixture (todo, past dueAt) carries the documented projection
+#      and a future-due one is excluded; a bare todo fixture is untriaged until it carries
+#      a priority; a fixture with no vaultLinks is unlinked until it carries one;
+#      agingWaiting is asserted present/array-shaped only (its membership math is owned by
+#      tests/unit/selectors.test.ts — updatedAt is server-stamped, so no HTTP sequence here
+#      can seed idle membership). Snapshots+restores cases.json. Skipped when no board is up.
 #  13e. backup-hardening — hermetic multi-producer backup pipeline test (NO board,
 #      NO Keychain, NO network, NO live data: synthetic repo-root skeleton + a local
 #      BARE git "remote" + per-device clones in a mktemp sandbox, HOME sandboxed).
@@ -1325,6 +1334,26 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-vault-coverage: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-vault-coverage"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 13d5. api-needs-attention (only when a board is healthy) ---------------
+# The cos-ops#20 board-attention read contract (GET /api/cases/needs-attention):
+# four bucket arrays + counts + version; overdue/untriaged/unlinked membership +
+# transitions; agingWaiting asserted present/array-shaped only (its membership
+# math is owned by tests/unit/selectors.test.ts). Snapshots+restores cases.json —
+# net-zero.
+echo
+echo "--- [13d5] api-needs-attention (sandbox board) ---------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-needs-attention.mjs"; then
+    echo "api-needs-attention: PASS"
+  else
+    echo "api-needs-attention: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-needs-attention"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
