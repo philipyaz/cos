@@ -18,7 +18,7 @@ dependencies = [
 # Install only on a host that will actually run the model: `uv sync --extra model`.
 model = [
   "torch>=2.13.0",
-  "transformers>=5.13.1",
+  "transformers>=5.14.1",
 ]
 # httpx powers FastAPI's TestClient (the test exercises the HTTP endpoints, not just
 # the engine), so it is a dev dep alongside pytest.
