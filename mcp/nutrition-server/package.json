@@ -6,6 +6,6 @@
   "description": "MCP server for the Cos 'Nutrition & Chef' add-on — the food-log vertical: log, list, fetch, update and delete food-log entries on the Cos board.",
   "bin": { "nutrition-mcp": "server.mjs" },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.30.0"
   }
 }
