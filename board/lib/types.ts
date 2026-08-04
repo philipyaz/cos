@@ -589,15 +589,20 @@ export const VALID_ARTIFACT_SOURCE: ArtifactSource[] = ["agent", "human", "board
 // (kind, periodKey): the periodKey is the ISO week ("2026-W25") for plan/review, a
 // "YYYY-MM-DD" day for a brief, and "<from>_<to>" for a correlation report — re-persisting
 // the same (kind, periodKey) UPSERTS (replaces payload/source/generatedAt, keeps id +
-// createdAt sticky). `payload` is the kind-specific canonical body stored verbatim (the
-// existing generate route's output). `generatedAt` is the model-generation time (payload's
-// own generated_at when present, else createdAt); createdAt is the sticky first-persist time.
+// createdAt sticky). `payload` is the kind-specific canonical body (the existing generate
+// route's output) — stored verbatim EXCEPT three BOARD-OWNED per-day keys on a training_plan's
+// `days[i]`: `eventId` (#81, the calendar-push receipt), and `status` / `movedTo` (cos-ops#19,
+// the recorded outcome). The board validates, carries them forward across an upsert (see
+// upsertCoachingArtifact), conditionally clears them (applyPlanDayOutcome), and computes over
+// them (computePlanReconciliation) — never send them when saving a plan; the board owns them.
+// `generatedAt` is the model-generation time (payload's own generated_at when present, else
+// createdAt); createdAt is the sticky first-persist time.
 export interface CoachingArtifact {
   id: string;            // minted "COACH-<n>"
   kind: CoachingArtifactKind;
   periodKey: string;     // UNIQUE per (kind, periodKey): ISO week / "YYYY-MM-DD" / "<from>_<to>"
   source: ArtifactSource;
-  payload: Record<string, unknown>; // the kind-specific canonical body (verbatim)
+  payload: Record<string, unknown>; // the kind-specific canonical body (verbatim except the board-owned per-day keys — see above)
   generatedAt: string;   // ISO; payload.generated_at if present else createdAt
   createdAt: string;     // ISO; sticky first-persist time (preserved across upsert)
   updatedAt: string;     // ISO; bumped on every upsert

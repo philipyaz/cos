@@ -207,6 +207,8 @@ const FITNESS_ADDON: AddonManifest = {
       // v15 calendar placement (idempotent, overlap-safe; the training-plan twin of
       // nutrition's push_meal_plan_to_calendar).
       "push_plan_to_calendar",
+      // cos-ops#19: the per-day close-out write (targeted; no whole-artifact re-save).
+      "set_plan_day_outcome",
     ],
   },
 };

@@ -161,3 +161,26 @@ export function getCoachingArtifact(id: string): Promise<CoachingItemResponse> {
 export function deleteCoachingArtifact(id: string): Promise<{ ok: boolean; version?: number }> {
   return request(`/api/fitness/coaching/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+
+// ── Per-day plan outcomes (cos-ops#19) ──────────────────────────────────────────
+// A TARGETED write on ONE day of a training_plan artifact — never re-saves the rest of the
+// plan. The agent's twin is the fitness MCP's `set_plan_day_outcome` — SAME route, by design
+// (the route-vs-tool check pins it). GATED server-side (disabled add-on → 404).
+
+export interface PlanDayOutcomeResponse {
+  artifact: CoachingArtifact;
+  day: Record<string, unknown>; // the mutated day entry (verbatim per-day shape)
+  version?: number;
+}
+
+// PATCH /api/fitness/coaching/<id>/day — record what actually happened to one planned day.
+// `status: "moved"` requires `movedTo`; every other status clears it board-side.
+export function setPlanDayOutcome(
+  artifactId: string,
+  input: { date: string; status: string; movedTo?: string },
+): Promise<PlanDayOutcomeResponse> {
+  return request(`/api/fitness/coaching/${encodeURIComponent(artifactId)}/day`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
