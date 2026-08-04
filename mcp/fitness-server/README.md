@@ -38,8 +38,9 @@ names onto these and stores unmapped names verbatim.
 
 ## MCP tools
 
-18 tools — 7 health-data tools, 4 athlete-profile / readiness / correlation tools, plus 7
-stateful **coaching-artifact** tools (v13). The
+20 tools — 7 health-data tools, 4 athlete-profile / readiness / correlation tools, 7
+stateful **coaching-artifact** tools (v13), plus 2 calendar-placement / per-day-outcome tools
+(v15 / cos-ops#19). The
 coaching surfaces (training plan, weekly review, pre-workout brief, sleep/performance
 correlations) are persisted on the board's core store (`db.coachingArtifacts`) and upserted
 by `(kind, periodKey)`. The `save_*` tools are **add-on-gated** writes (a disabled add-on 404s
@@ -67,8 +68,10 @@ to the agent via `x-actor` and open otherwise); every read is ungated.
 | `save_pre_workout_brief` | Persist a daily pre-workout readiness brief (upsert by date; add-on gated) |
 | `save_correlation_report` | Persist a sleep/performance correlation report (upsert by `<from>_<to>`; add-on gated) |
 | `list_coaching_artifacts` | List persisted coaching artifacts, newest-first (ungated; filter by kind/date) |
-| `get_coaching_artifact` | Fetch one coaching artifact by id (ungated) |
+| `get_coaching_artifact` | Fetch one coaching artifact by id — for a training_plan, also a computed `reconciliation` (ungated) |
 | `delete_coaching_artifact` | Delete one coaching artifact by id (add-on gated) |
+| `push_plan_to_calendar` | Materialize a saved training plan onto the calendar, idempotent + overlap-safe (add-on gated) |
+| `set_plan_day_outcome` | Record what happened to ONE planned day (done/skipped/moved) without re-saving the plan (add-on gated) |
 
 ## Setup
 

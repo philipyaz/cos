@@ -322,6 +322,9 @@ const INGEST_HEALTH_TO_VAULT_TOOL = {
 
 const COACHING_KINDS = ["training_plan", "weekly_review", "pre_workout_brief", "correlations"];
 
+// In lockstep with VALID_PLAN_DAY_OUTCOME (board/lib/fitness-plan-status.ts).
+const PLAN_DAY_OUTCOME = ["planned", "done", "skipped", "moved"];
+
 const SAVE_TRAINING_PLAN_TOOL = {
   name: "save_training_plan",
   description:
@@ -503,7 +506,11 @@ const LIST_COACHING_ARTIFACTS_TOOL = {
 
 const GET_COACHING_ARTIFACT_TOOL = {
   name: "get_coaching_artifact",
-  description: "Fetch one coaching artifact by its id (e.g. 'COACH-3'). Ungated read.",
+  description:
+    "Fetch one coaching artifact by its id (e.g. 'COACH-3'). Ungated read. For a training_plan, " +
+    "the response also carries a computed 'reconciliation' (cos-ops#19: sessionDays, outcomes, " +
+    "and unresolvedDays — past session days still 'planned', each flagged provenDone when a " +
+    "same-date workout entry already proves it happened) — compute-on-read, never stored.",
   inputSchema: {
     type: "object",
     properties: {
@@ -539,7 +546,10 @@ const PUSH_PLAN_TO_CALENDAR_TOOL = {
     "rather than re-creating it. OVERLAP-SAFE: a session is placed in a free slot within " +
     "the day's candidate windows and never on top of an existing timed event; when no slot " +
     "fits, that day is reported skipped with a reason instead of double-booking. Rest / " +
-    "active-recovery days are never placed (reported skipped/rest_day). A manually-edited " +
+    "active-recovery days are never placed (reported skipped/rest_day). A day already marked " +
+    "done/skipped/moved (see set_plan_day_outcome) is RESOLVED and is also never placed " +
+    "(reported skipped/resolved) — a moved session's new date is an ordinary day entry in the " +
+    "re-saved plan, placed normally. A manually-edited " +
     "event TIME is never moved back by a re-push — only its title/description refresh. " +
     "Provide EXACTLY ONE of artifact_id or period_key (the plan's ISO week, e.g. '2026-W26'). " +
     "Sessions are also kept out of the user's WORKING HOURS (Mon-Fri 09:00-18:00 by default, " +
@@ -573,6 +583,39 @@ const PUSH_PLAN_TO_CALENDAR_TOOL = {
   },
 };
 
+// ── Per-day plan outcomes (cos-ops#19) ─────────────────────────────────────────
+// The daily/weekly close-out loop: record what actually happened to ONE planned day WITHOUT
+// re-saving the plan (the write twin of the reconciliation get_coaching_artifact now returns).
+
+const SET_PLAN_DAY_OUTCOME_TOOL = {
+  name: "set_plan_day_outcome",
+  description:
+    "Record what actually happened to ONE planned day on a training plan — a TARGETED write " +
+    "that never re-saves the rest of the plan. 'done' / 'skipped' record the outcome directly. " +
+    "'moved' requires 'moved_to' (the destination date) and records ONLY where the session " +
+    "went — it does NOT relocate the session itself: re-plan it onto the new date via " +
+    "save_training_plan (never send status/moved_to/eventId in that save — the board carries " +
+    "them forward from the old day) and materialize it via push_plan_to_calendar. 'planned' " +
+    "REVERTS a prior answer back to unanswered. Rest / active-recovery days carry no outcome " +
+    "(400). The board NEVER infers an outcome — write only what the user confirmed, or what a " +
+    "same-date workout entry already proves (see get_coaching_artifact's computed " +
+    "'reconciliation.unresolvedDays[].provenDone' / 'healthEntryId'). Add-on-gated write. " +
+    "PATCH /api/fitness/coaching/<id>/day.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      artifact_id: { type: "string", description: "The training_plan artifact id (e.g. 'COACH-3')." },
+      date: { type: "string", description: "The plan day's own date, YYYY-MM-DD." },
+      status: { type: "string", enum: PLAN_DAY_OUTCOME, description: "planned | done | skipped | moved." },
+      moved_to: {
+        type: "string",
+        description: "Destination date, YYYY-MM-DD. REQUIRED when status is 'moved'; omit otherwise.",
+      },
+    },
+    required: ["artifact_id", "date", "status"],
+  },
+};
+
 const TOOLS = [
   PUSH_HEALTH_DATA_TOOL,
   LIST_HEALTH_DATA_TOOL,
@@ -593,6 +636,7 @@ const TOOLS = [
   GET_COACHING_ARTIFACT_TOOL,
   DELETE_COACHING_ARTIFACT_TOOL,
   PUSH_PLAN_TO_CALENDAR_TOOL,
+  SET_PLAN_DAY_OUTCOME_TOOL,
 ];
 
 // ── Tool handlers ───────────────────────────────────────────────────────────
@@ -824,6 +868,32 @@ async function handlePushPlanToCalendar(args) {
   return text(JSON.stringify(data, null, 2));
 }
 
+// ── Per-day plan outcome handler (cos-ops#19) ──────────────────────────────────
+
+async function handleSetPlanDayOutcome(args) {
+  const artifactId = str(args.artifact_id);
+  const date = str(args.date);
+  const status = str(args.status);
+  if (!artifactId) return err("'artifact_id' is required (e.g. 'COACH-3').");
+  if (!date) return err("'date' is required (YYYY-MM-DD).");
+  if (!PLAN_DAY_OUTCOME.includes(status)) {
+    return err(`'status' must be one of: ${PLAN_DAY_OUTCOME.join(", ")}.`);
+  }
+  const body = { date, status };
+  if (status === "moved") {
+    const movedTo = str(args.moved_to);
+    if (!movedTo) return err("'moved_to' is required when status is 'moved'.");
+    body.movedTo = movedTo;
+  }
+  const { data, errorResult } = await healthApi(
+    "PATCH",
+    `/api/fitness/coaching/${encodeURIComponent(artifactId)}/day`,
+    body,
+  );
+  if (errorResult) return errorResult;
+  return text(JSON.stringify(data, null, 2));
+}
+
 // ── Server wiring ───────────────────────────────────────────────────────────
 
 const server = new Server(
@@ -874,6 +944,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleDeleteCoachingArtifact(args);
     case "push_plan_to_calendar":
       return handlePushPlanToCalendar(args);
+    case "set_plan_day_outcome":
+      return handleSetPlanDayOutcome(args);
     default:
       return err(`Unknown tool: ${request.params.name}`);
   }

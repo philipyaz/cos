@@ -21,12 +21,18 @@ import {
   upsertCoachingArtifact,
   findCoachingArtifact,
   applyCoachingArtifactUpdate,
+  applyPlanDayOutcome,
   removeCoachingArtifact,
   NotFoundError,
+  BadRequestError,
+  VersionConflictError,
 } from "./store";
 import { assertAddonEnabled } from "./addons";
+import { todayISO } from "./selectors";
+import { computePlanReconciliation, isSessionDay } from "./fitness-plan-status";
 import type { HealthEntry, AthleteProfile, CoachingArtifact } from "./types";
 import type { CoachingArtifactInput } from "./fitness-artifacts";
+import type { PlanDayOutcome, PlanReconciliation } from "./fitness-plan-status";
 
 const HEALTH_ADDON_ID = "fitness";
 const RETENTION_DAYS = 90;
@@ -323,12 +329,65 @@ export async function listCoachingArtifacts(opts: {
   return { items, total, version: db.version };
 }
 
-/** Read one coaching artifact by id, or null when missing. Ungated read. */
+/**
+ * Read one coaching artifact by id, or null when missing. Ungated read. For a training_plan,
+ * also computes + returns its `reconciliation` (sessionDays / outcomes / unresolvedDays) —
+ * compute-on-read from payload.days + db.healthEntries, NEVER stored (ADR 0017). Computed only
+ * when the artifact exists and is a training_plan, so the route's 404-on-null path (and every
+ * other kind) is undisturbed.
+ */
 export async function getCoachingArtifact(
   id: string,
-): Promise<{ artifact: CoachingArtifact | null; version: number }> {
+): Promise<{ artifact: CoachingArtifact | null; reconciliation?: PlanReconciliation; version: number }> {
   const db = await readDB();
-  return { artifact: findCoachingArtifact(db, id) ?? null, version: db.version };
+  const artifact = findCoachingArtifact(db, id) ?? null;
+  if (!artifact || artifact.kind !== "training_plan") {
+    return { artifact, version: db.version };
+  }
+  const reconciliation = computePlanReconciliation({
+    payload: artifact.payload,
+    healthEntries: db.healthEntries ?? [],
+    today: todayISO(new Date()),
+  });
+  return { artifact, reconciliation, version: db.version };
+}
+
+/**
+ * Record what actually happened to ONE planned day on a training_plan artifact — a TARGETED
+ * write (no whole-artifact re-save; see applyPlanDayOutcome). GATED (disabled add-on → 404).
+ * Throws NotFoundError when no artifact matches the id; BadRequestError when the artifact
+ * isn't a training_plan, no day is dated `outcome.date`, or that day is a rest/active-recovery
+ * day (session days only carry an outcome); VersionConflictError when `expectedVersion` is
+ * stale (the nutrition/plan/[id] PATCH precedent).
+ */
+export async function setPlanDayOutcome(
+  id: string,
+  outcome: { date: string; status: PlanDayOutcome; movedTo?: string; expectedVersion?: number },
+): Promise<{ artifact: CoachingArtifact; day: Record<string, unknown>; version: number }> {
+  return mutate((db) => {
+    assertAddonEnabled(db, HEALTH_ADDON_ID);
+    // mutate() bumps db.version up-front, so the client's last-seen version is the pre-bump
+    // baseline (db.version - 1).
+    const currentVersion = db.version - 1;
+    if (outcome.expectedVersion !== undefined && outcome.expectedVersion !== currentVersion) {
+      throw new VersionConflictError(
+        `Version conflict: expected ${outcome.expectedVersion}, current ${currentVersion}.`,
+      );
+    }
+    const rec = findCoachingArtifact(db, id);
+    if (!rec) throw new NotFoundError(`Coaching artifact ${id} not found`);
+    if (rec.kind !== "training_plan") {
+      throw new BadRequestError(`Coaching artifact ${id} is not a training_plan.`);
+    }
+    const days = Array.isArray(rec.payload.days) ? (rec.payload.days as Record<string, unknown>[]) : [];
+    const day = days.find((d) => d && d.date === outcome.date);
+    if (!day) throw new BadRequestError(`No day dated ${outcome.date} in this plan.`);
+    if (!isSessionDay(day)) {
+      throw new BadRequestError(`${outcome.date} is a rest/active-recovery day and carries no outcome.`);
+    }
+    const updatedDay = applyPlanDayOutcome(rec, outcome);
+    return { artifact: rec, day: updatedDay, version: db.version };
+  });
 }
 
 /**
