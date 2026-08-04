@@ -17,7 +17,10 @@
   "board-organize": {
     "class": "scheduled",
     "summary": "Tidies the case tree into a clean **Initiative ▸ Workstream ▸ Case** hierarchy, grounded in your starred / priority items — never re-homing what you placed by hand.",
-    "schedules": [{ "trigger": "Run /board-organize", "cadence": "every 2–6 h / daily" }]
+    "schedules": [
+      { "trigger": "Run /board-organize", "cadence": "every 2–6 h / daily" },
+      { "trigger": "Run /board-organize — include the weekly staleness lens", "cadence": "weekly", "does": "The STALENESS LENS on top of the normal tidy: reads the starving rank (get_needs_attention), researches the top 3 (vault first, web only as fallback), writes the concrete next step into each case's task, and places a linked timed chase block via the board's own placement." }
+    ]
   },
   "reminders-review": {
     "class": "scheduled",
