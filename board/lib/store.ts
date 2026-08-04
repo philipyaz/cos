@@ -57,6 +57,7 @@ import {
 } from "./selectors";
 import { resolveTrashRetentionDays, resolveReminderAutoDeleteDays } from "./retention";
 import { getDeviceRole } from "./cos-env";
+import type { PlanDayOutcome } from "./fitness-plan-status";
 
 // Absolute path to the live JSON store. Exported so the SSE route can
 // fs.watch() it for live-update fan-out.
@@ -1156,28 +1157,50 @@ export function upsertCoachingArtifact(
   const now = nowISO();
   const existing = findCoachingArtifactByPeriod(db, input.kind, input.periodKey);
   if (existing) {
-    // Receipt carry-forward (training_plan only). The calendar push route
-    // (push-plan-to-calendar) writes a per-day eventId INTO payload.days[i], but a
-    // regenerated plan replaces payload wholesale — without this, regenerate-then-push
-    // would duplicate the whole week (the exact failure cos-ops#17 exists to end). A
-    // day with no incoming eventId inherits the outgoing one for the SAME date; a date
-    // that no longer exists in the new plan simply drops its receipt (the old event is
-    // never deleted here — a human may have adopted/edited it; a documented known limit).
+    // Receipt-AND-OUTCOME carry-forward (training_plan only). The calendar push route
+    // (push-plan-to-calendar) writes a per-day eventId INTO payload.days[i], and the day
+    // route (cos-ops#19) writes a per-day status/movedTo — but a regenerated plan replaces
+    // payload wholesale. Without this, regenerate-then-push would duplicate the whole week
+    // (the exact failure cos-ops#17 exists to end), and regenerating a week (or the Phase-B
+    // move flow — both re-save via save_training_plan) would silently WIPE every recorded
+    // outcome, the exact destructive-feeling failure cos-ops#19 exists to remove. A day with
+    // no incoming eventId inherits the outgoing one for the SAME date; a day with no incoming
+    // `status` KEY inherits the outgoing day's status (and its movedTo, when that status is
+    // "moved") the same way. An incoming day that DOES carry its own `status` wins (deliberate
+    // overwrite stays possible — e.g. re-answering a day). A date that no longer exists in the
+    // new plan simply drops its receipt/outcome (the old event is never deleted here — a human
+    // may have adopted/edited it; a documented known limit).
     if (
       input.kind === "training_plan" &&
       Array.isArray(existing.payload.days) &&
       Array.isArray(input.payload.days)
     ) {
       const outgoingEventIdByDate = new Map<string, string>();
+      const outgoingOutcomeByDate = new Map<string, { status: string; movedTo?: string }>();
       for (const day of existing.payload.days as Record<string, unknown>[]) {
-        if (day && typeof day.date === "string" && typeof day.eventId === "string" && day.eventId) {
+        if (!day || typeof day.date !== "string") continue;
+        if (typeof day.eventId === "string" && day.eventId) {
           outgoingEventIdByDate.set(day.date, day.eventId);
+        }
+        if (typeof day.status === "string") {
+          outgoingOutcomeByDate.set(day.date, {
+            status: day.status,
+            ...(day.status === "moved" && typeof day.movedTo === "string" ? { movedTo: day.movedTo } : {}),
+          });
         }
       }
       for (const day of input.payload.days as Record<string, unknown>[]) {
-        if (day && typeof day.date === "string" && !day.eventId) {
-          const carried = outgoingEventIdByDate.get(day.date);
-          if (carried) day.eventId = carried;
+        if (!day || typeof day.date !== "string") continue;
+        if (!day.eventId) {
+          const carriedEventId = outgoingEventIdByDate.get(day.date);
+          if (carriedEventId) day.eventId = carriedEventId;
+        }
+        if (!("status" in day)) {
+          const carriedOutcome = outgoingOutcomeByDate.get(day.date);
+          if (carriedOutcome) {
+            day.status = carriedOutcome.status;
+            if (carriedOutcome.movedTo) day.movedTo = carriedOutcome.movedTo;
+          }
         }
       }
     }
@@ -1201,14 +1224,37 @@ export function upsertCoachingArtifact(
   return { artifact, created: true };
 }
 
+// Apply a per-day outcome onto a training_plan artifact (cos-ops#19) — the write twin of the
+// carry-forward above, but a TARGETED single-day write (no whole-artifact re-save). Sets
+// day.status; movedTo is set ONLY for "moved" and DELETED for every other status (a
+// done/skipped/planned day carrying a stale movedTo would make the push route and the skills
+// disagree about where the session lives). Assumes the day already exists at `date` — the
+// caller (setPlanDayOutcome) validates that first. Bumps rec.updatedAt; returns the mutated day.
+export function applyPlanDayOutcome(
+  rec: CoachingArtifact,
+  outcome: { date: string; status: PlanDayOutcome; movedTo?: string },
+): Record<string, unknown> {
+  const days = (Array.isArray(rec.payload.days) ? rec.payload.days : []) as Record<string, unknown>[];
+  const day = days.find((d) => d && d.date === outcome.date)!;
+  day.status = outcome.status;
+  if (outcome.status === "moved" && outcome.movedTo) {
+    day.movedTo = outcome.movedTo;
+  } else {
+    delete day.movedTo;
+  }
+  rec.updatedAt = nowISO();
+  return day;
+}
+
 // Merge a partial patch onto a coaching artifact. Present-keys-only: a `payload` object
 // replaces the body, a valid `source` enum updates the author, a `generatedAt` string updates
 // the generation time. Identity (id, createdAt, kind, periodKey) is NEVER changed here — this
 // is the un-validating coercive chokepoint (mirrors applyFoodLogUpdate). Bumps updatedAt.
 // KNOWN LIMIT: unlike upsertCoachingArtifact, a `payload` patch here replaces training_plan
-// days wholesale with NO eventId carry-forward — left unguarded on purpose (no MCP tool
-// reaches this PATCH path; a manual payload edit is a deliberate replacement, not a
-// regenerate). See docs/features/fitness.md.
+// days wholesale with NO carry-forward of eventId OR outcome (status/movedTo) — left
+// unguarded on purpose (no MCP tool reaches this PATCH path; a manual payload edit is a
+// deliberate replacement, not a regenerate). Use the day route / setPlanDayOutcome for a
+// targeted per-day outcome write instead. See docs/features/fitness.md.
 export function applyCoachingArtifactUpdate(rec: CoachingArtifact, patch: Record<string, unknown>): CoachingArtifact {
   if ("payload" in patch && patch.payload && typeof patch.payload === "object" && !Array.isArray(patch.payload)) {
     rec.payload = patch.payload as Record<string, unknown>;
