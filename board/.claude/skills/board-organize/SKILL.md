@@ -2,17 +2,17 @@
 name: board-organize
 description: >
   The board's housekeeper — a periodic maintenance sweep that REORGANIZES the case
-  tree into a clean Initiative ▸ Workstream ▸ Case hierarchy. It clusters the flat
-  standalone cases the reconcilers leave behind, groups same-entity matters under
-  Initiatives, splits a grown Initiative into Workstreams, renames sloppy
-  agent-made containers to the canonical entity name and writes their one-line
-  descriptions, merges and retires duplicates, and surfaces what matters — ALWAYS
-  grounded in the user's stated priorities (starred nodes, P0/P1, priority notes)
-  and NEVER renaming, re-homing, or archiving anything a human placed or named by
-  hand. It does not triage messages, send anything, or touch lanes / tasks / labels.
-  Use when the user says "organize my board", "tidy / clean up the board", "group my
-  cases into initiatives", "rename / merge my initiatives", "re-balance the
-  hierarchy", "file my orphan cases", or when the scheduled board-organize sweep runs.
+  tree into a clean Initiative ▸ Workstream ▸ Case hierarchy. It clusters orphans
+  under Initiatives, splits grown ones into Workstreams, and renames and describes
+  its own containers — ALWAYS grounded in the user's stated priorities (starred
+  nodes, P0/P1, priority notes) and NEVER renaming, re-homing, or archiving
+  anything a human placed or named by hand. It does not triage messages, move
+  lanes, set labels, or send anything. Weekly it also runs the STALENESS LENS —
+  chasing the most starved obligations with researched next steps and
+  board-placed time blocks ("chase what's slipping"). Use when the user says
+  "organize my board", "tidy / clean up the board", "group my cases into
+  initiatives", "rename / merge my initiatives", "re-balance the hierarchy",
+  "file my orphan cases", or when the scheduled board-organize sweep runs.
 ---
 
 # Board → Organize (the hierarchy housekeeper)
@@ -34,6 +34,12 @@ tasks, set labels, edit a case's body, or send anything. Reconciliation is the
 reconcilers' job; knowledge is the vault's job (the reconcilers submit it via
 `/vault-operations`); this skill files and labels the *structure* of what already
 exists.
+
+The sweep also runs a **weekly staleness lens** (cos-ops#24) — the one deliberate
+exception to "never touch tasks / events": it ranks the board's most-starved
+obligations, fills a researched next step into a starving case's task
+(`detail`/`dueAt`), and places one linked *timed* chase block. It still never
+triages messages, moves lanes, sets labels, or sends anything — see STEP 7.
 
 > **Guardrail 1 — the human's hand wins.** The board is a *shared* surface. **Never
 > re-home a node a human placed by hand.** Only an `agent`-placed or never-placed
@@ -252,7 +258,107 @@ In **auto mode**, only these are safe to apply directly — everything else is a
 
 In **approval mode**, *everything* consequential is a `propose`.
 
-## STEP 7 — Report (consolidated & idempotent)
+## STEP 7 — The staleness lens (weekly): chase starving obligations
+
+The one deliberate exception to "never touch tasks / events" (see the intro above).
+It ranks the board's most-starved obligations, researches the concrete next step,
+writes it into the obligation's own record, and places one linked *timed* chase
+block — never triaging messages, moving lanes, or setting labels.
+
+1. **Cadence.** Run this on the **weekly** scheduled sweep — the `automation.json`
+   catalogue carries a dedicated weekly row for it, separate from the hierarchy
+   tidy's own cadence. On a more frequent run it is idempotent by construction:
+   everything already chased carries a timed block inside the horizon and is
+   excluded from the rank, so a clean week no-ops.
+
+2. **Read, then sweep your own leftovers.** Call **`get_needs_attention`** (the
+   `board` MCP) and take its `starving` list — the worst-first aging rank across
+   cases, open reminders, and unanswered messages. Work the **top 3** unresolved
+   entries; the *whole* list still goes into the report (STEP 8) regardless.
+
+   **Orphan-block hygiene, before chasing anything new.** The daily
+   `reminders-review` sweep can dismiss a reminder whose chase block *this* lens
+   placed yesterday, and it knows nothing about calendar events. So `list_events`
+   over the next 7 days and look for a FUTURE block this lens placed —
+   recognisable by its `(REM-n)`/`(MSG-n)` title marker (step 5 below) or its
+   `caseId` link — whose obligation is no longer live (the reminder is no longer
+   open, the message is no longer unanswered, the case is done/archived). That is
+   a stale artifact of your **own** prior run: `delete_event` it (auto mode:
+   delete and report; approval mode: into the batch). Clean up only what *this
+   lens* minted — never someone else's event.
+
+3. **Research — vault first, web only as a fallback.** For a **case** entry:
+   `get_case` (its tasks, `vaultLinks`, and the manual-actions block, per STEP 3),
+   then query the **vault** (the `vault` MCP `query` tool, per `/vault-operations`
+   — a vault answer is knowledge-as-recorded; verify any board claim in it against
+   the `board` MCP before acting on it); fall back to a **web search only when the
+   vault does not know**. The deliverable is the concrete next physical action — a
+   phone number, the portal path, "they open 08:00" — not advice.
+
+4. **Write the step back.** `update_task` on the case's first open task —
+   `detail` = the researched step, `dueAt` when a real deadline exists; if the
+   case has no open task, `add_task` with the action as title and the same
+   fields. **Never overwrite a human-written task text** (the manual-actions
+   check from STEP 3) — a human-authored task gets the research as a `propose`d
+   `update_case` note instead, or is flagged in the report.
+
+   For a **reminder** entry, the reminder *is* the step: at most `update_reminder`
+   its `detail` with the researched specifics. Precedence with the daily
+   `reminders-review` sweep is **one-directional** — that sweep owns the
+   open/close/dismiss verdict; this lens **never** closes or dismisses a
+   reminder, and it **skips the chase** on any reminder carrying a pending
+   close/dismiss proposal (`list_pending`) — never allocate time for something
+   awaiting a "still relevant?" human call.
+
+   For a **message** entry, the chase *is* the reply: put it in the report and
+   the proposed block. Never mark it answered — only a real reply does that
+   (that's `unanswered-messages`' watermark, not this lens's).
+
+5. **Allocate — the board places; you choose when and within what.** One block
+   per chased obligation via the **calendar** MCP's **`create_event`** with
+   **`place`** — never explicit `startTime`/`endTime`, never `allDay`:
+   - **You own the judgment inputs**: the `date` (the soonest sensible day within
+     the next 7, honouring what the research found — office hours, urgency) and
+     the candidate `windows` in preference order, reflecting the obligation's
+     real-world constraint. Default for an admin/office chase: a wide business
+     window (e.g. `09:00`–`17:00`, clipped tighter when the research names
+     opening hours) with **`policy: "within"`**. Only for a chase that genuinely
+     cannot happen in business hours (a home errand): evening/morning windows
+     with **`policy: "margins"`**.
+   - **The board owns the arithmetic**: the earliest free gap, overlap against
+     its own events AND your `busyWindows`, same-evening stacking, working-hours
+     enforcement. Don't eyeball free slots from `list_events` — that is
+     placement logic, and this skill adds none of its own.
+   - **Pass `busyWindows`** for the target date from your own read of the user's
+     REAL calendar when the session has a calendar connector (per-call, used and
+     discarded — never stored). Without one, say so in the report — the board
+     still avoids its own events, and the proposal degrades honestly (it
+     proposes; it does not assert the slot is free).
+   - `durationMin` 30–60 by the action's size; `caseId` links the block (for a
+     reminder/message chase, link its case when one exists, else standalone);
+     title = the action, **suffixed `(REM-n)` / `(MSG-n)` for a reminder/message
+     chase** (the marker the hygiene sweep in step 2 scans for — a case chase
+     needs none, its `caseId` link is the marker); **description = the payload**
+     (the researched step verbatim — the lock-screen test: doable in the ninety
+     seconds before a meeting).
+   - On **409 `no_free_slot`** → retry the next preferred date inside the 7-day
+     horizon. On **409 `outside_working_hours`** → try the next working day.
+     Nothing fits in the horizon → the obligation goes in the report as
+     unallocatable this week — never silently dropped.
+
+6. **Auto vs approval** (STEP 0's contract, extended). Auto mode: write the task
+   details and place the blocks directly, and report every write. Approval mode:
+   prepare everything and present **one** batched confirmation (obligation →
+   researched step → proposed day/window), then apply. (The `propose` queue
+   carries no calendar verbs, so batch-confirm is the approval-mode mechanism
+   here, as the fitness push skills do.)
+
+7. **Escalation framing.** An entry carrying "block passed N d ago" was chased
+   before and was not acted on — say so plainly in the report (*"placed Tue
+   10:30, passed untouched — re-ranked higher"*), because that phrasing is the
+   nudge working.
+
+## STEP 8 — Report (consolidated & idempotent)
 
 Close with one report, grouped **by domain**, then by class:
 
@@ -262,6 +368,11 @@ Close with one report, grouped **by domain**, then by class:
   the `propose` ids so the user can `approve`/`reject`. Offer: *"Want me to apply any
   of these?"*
 - **Surfaced** — priorities that need attention (a buried/empty starred node).
+- **Starving (worst first)** — the ranked list STEP 7 read, what was researched and
+  placed for the top 3, what could not be resolved (vault empty AND web empty → say
+  so; a human-frozen task → flagged; unallocatable within the horizon → named), any
+  entry that returned **escalated** (a passed, unactioned block), and any orphaned
+  chase blocks the hygiene sweep removed.
 
 Then stop. The sweep is **idempotent by construction**: an already-well-filed case
 is no longer an orphan and is skipped; your own prior placements are refined, not
@@ -272,9 +383,11 @@ it more often is cheap and safe.
 
 ## Conventions (guardrails recap)
 
-- **Board only, via the `board` MCP.** Never `bash`/`curl`. This skill owns
-  **hierarchy** (`kind`, `parentId`, container lifecycle) and nothing else — no
-  lanes, tasks, labels, messages, reminders, or sending.
+- **Board only, via the `board` MCP** (plus `calendar` for STEP 7's chase blocks and
+  `vault` for its research). Never `bash`/`curl`. This skill owns **hierarchy**
+  (`kind`, `parentId`, container lifecycle) and nothing else — no lanes, labels,
+  messages, or sending — with ONE stated exception: the weekly staleness lens
+  (STEP 7) fills a starving obligation's task fields and places a linked chase block.
 - **`get_priorities` first; never archive a starred node.** Pinned cases (starred /
   `P0`/`P1` / note-matched) are surfaced and anchored, never buried.
 - **Human placements are frozen.** `get_case` → `manualActions` before any move;
@@ -294,6 +407,10 @@ it more often is cheap and safe.
   batch-atomic 400s); **you** enforce human authorship.
 - **Auto-apply only deterministic same-entity grouping; `propose` every judgment
   call.** In approval mode, `propose` everything consequential.
+- **Staleness lens weekly; vault before web; fill only empty fields — never
+  overwrite human text.** Blocks are timed, never all-day, placed by the board's
+  `place` (you pick date + windows + `busyWindows`; it picks the slot). Allocation
+  is derived from the calendar — never store a "chased" flag.
 - **Idempotent.** Re-runs converge; a clean board no-ops.
 
 ## Worked examples
@@ -348,6 +465,8 @@ it more often is cheap and safe.
 The reconcilers feed this sweep: **`/mail-to-board`** and **`/whatsapp-triage`**
 create flat cases (one clean, entity-tagged card per matter) and leave structure to
 this job. Run them on their channel cadence; run **`/board-organize`** on a slower
-cadence (every few hours / daily) to file what they drop. Schedule it as a Cowork task
-(`Run /board-organize`); see the [skills README](../README.md) for the scheduling
+cadence (every few hours / daily) to file what they drop, and its **staleness lens**
+(STEP 7) separately on a **weekly** cadence to chase what's starving. Schedule both
+as Cowork tasks (`Run /board-organize`, and `Run /board-organize — include the
+weekly staleness lens`); see the [skills README](../README.md) for the scheduling
 playbook.

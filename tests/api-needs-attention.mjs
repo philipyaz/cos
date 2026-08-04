@@ -17,6 +17,16 @@
 //       on every write, so no HTTP sequence here can make a case idle past
 //       STALE_AFTER_DAYS; that membership math is owned by tests/unit/selectors.test.ts
 //       (the same unit-owns-logic / api-owns-wiring split api-vault-coverage.mjs uses).
+//   (f) cos-ops#24's `starving` rank: shape + typed fields; the overdue fixture is a
+//       member; a linked TIMED event tomorrow suppresses it from `starving` while it
+//       stays in `overdue` (the rank is not a fifth bucket); deleting that event
+//       restores membership; a linked timed event 30 days out does NOT suppress (the
+//       horizon is bounded, not unbounded); an all-day linked event never allocates.
+//       `passedBlock` escalation and idle-driven (stale-idle / reminder / message)
+//       membership are NOT HTTP-seedable — `updatedAt`/`receivedAt` are server-stamped
+//       on every write — so that math is owned by tests/board-starving-obligations.mjs
+//       (the same unit-owns-logic / api-owns-wiring split this file already uses for
+//       agingWaiting above).
 //
 // This is the test that would fail WITHOUT this change: on the pre-change tree the
 // route 404s (there was no GET /api/cases/needs-attention).
@@ -67,6 +77,7 @@ const api = (method, p, body, headers = {}) =>
 const GET = (p) => api("GET", p);
 const POST = (p, b) => api("POST", p, b);
 const PATCH = (p, b) => api("PATCH", p, b);
+const DELETE = (p) => api("DELETE", p);
 
 const needsAttention = async () => GET("/api/cases/needs-attention");
 const inBucket = (body, bucket, id) => (body[bucket] ?? []).some((c) => c.id === id);
@@ -77,7 +88,7 @@ async function main() {
 
   // Declared outside the try so `finally` can clean up even if an assertion throws
   // partway through (the snapshot restore below is the real safety net either way).
-  let overdueId, futureId, untriagedId, unlinkedId;
+  let overdueId, futureId, untriagedId, unlinkedId, overdueId2;
 
   try {
     const marker = `apineedsattn-${Date.now()}`;
@@ -184,11 +195,119 @@ async function main() {
 
     // ── 5. (e) agingWaiting: key presence + shape only — see header comment above. ──
     check(Array.isArray(na5.body.agingWaiting), "(e) `agingWaiting` is present and an array");
+
+    // ── 6. (f, cos-ops#24) `starving`: shape, the overdue fixture's membership, and
+    // allocation over HTTP — see the header comment for what is (and isn't) covered here. ──
+    check(Array.isArray(na5.body.starving), "(starving) `starving` is present and an array");
+    check(
+      na5.body.counts?.starving === na5.body.starving.length,
+      "(starving) counts.starving === starving.length",
+    );
+
+    const overdueStarving = na5.body.starving.find((s) => s.id === overdueId);
+    check(!!overdueStarving, "(starving) the overdue fixture also appears in `starving`");
+    check(
+      !!overdueStarving &&
+        overdueStarving.kind === "case" &&
+        typeof overdueStarving.id === "string" &&
+        typeof overdueStarving.title === "string" &&
+        typeof overdueStarving.daysIdle === "number" &&
+        typeof overdueStarving.daysOverdue === "number" &&
+        typeof overdueStarving.score === "number",
+      "(starving) the entry carries kind/id/title/daysIdle/daysOverdue/score with the right types",
+    );
+    check(overdueStarving?.score > 0, "(starving) the overdue fixture's score is > 0");
+
+    // Allocation over HTTP: a linked TIMED event tomorrow suppresses the fixture from
+    // `starving` while it stays in `overdue` — proves the rank is a read over the same
+    // cases, not a fifth bucket. Deleting the event restores membership.
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const placedEvt = await POST("/api/events", {
+      title: `needs-attention allocation ${marker}`,
+      date: tomorrow,
+      allDay: false,
+      startTime: "09:00",
+      caseId: overdueId,
+    });
+    check(
+      placedEvt.status === 201,
+      `(starving) seed a linked timed event for tomorrow → 201 (got ${placedEvt.status})`,
+    );
+    const allocationEvtId = placedEvt.body.event?.id;
+
+    const na6 = await needsAttention();
+    check(
+      !inBucket(na6.body, "starving", overdueId),
+      "(starving) a linked timed event tomorrow suppresses the fixture from `starving`",
+    );
+    check(
+      inBucket(na6.body, "overdue", overdueId),
+      "(starving) the fixture stays in `overdue` regardless — the rank overlaps buckets, never replaces them",
+    );
+
+    const delEvt = await DELETE(`/api/events/${encodeURIComponent(allocationEvtId)}`);
+    check(delEvt.status === 200, `(starving) DELETE the allocating event → 200 (got ${delEvt.status})`);
+    const na7 = await needsAttention();
+    check(
+      inBucket(na7.body, "starving", overdueId),
+      "(starving) deleting the allocating event returns the fixture to `starving`",
+    );
+
+    // The horizon: a timed event 30 days out must NOT suppress — bounded, not unbounded.
+    const farFutureDay = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const farEvt = await POST("/api/events", {
+      title: `needs-attention far-horizon ${marker}`,
+      date: farFutureDay,
+      allDay: false,
+      startTime: "09:00",
+      caseId: overdueId,
+    });
+    check(farEvt.status === 201, `(starving) seed a linked timed event 30d out → 201 (got ${farEvt.status})`);
+    const na8 = await needsAttention();
+    check(
+      inBucket(na8.body, "starving", overdueId),
+      "(starving) a timed event 30 days out does NOT suppress — the allocation horizon is bounded",
+    );
+    const delFarEvt = await DELETE(`/api/events/${encodeURIComponent(farEvt.body.event?.id)}`);
+    check(delFarEvt.status === 200, `(starving) DELETE the far-horizon event → 200 (got ${delFarEvt.status})`);
+
+    // The all-day marker: format-only date validation means a past `date` on an
+    // explicit-times create is legal (a backdated deadline marker, e.g. EVT-1/EVT-2 on
+    // the live store) — and an all-day event, past or future, never allocates (criterion
+    // (e) over HTTP). Linked to a SECOND overdue fixture so it can't be confused with the
+    // allocation toggling already proven above on the first one.
+    const co2 = await POST("/api/cases", {
+      title: `needs-attention overdue-2 ${marker}`,
+      domain: "work",
+      status: "todo",
+      dueAt: pastDue,
+      priority: "P1",
+      vaultLinks: ["Somewhere"],
+    });
+    check(co2.status === 201, `create second overdue fixture → 201 (got ${co2.status})`);
+    overdueId2 = co2.body.case?.id;
+
+    const allDayEvt = await POST("/api/events", {
+      title: `needs-attention all-day marker ${marker}`,
+      date: "2020-01-02",
+      allDay: true,
+      caseId: overdueId2,
+    });
+    check(
+      allDayEvt.status === 201,
+      `(starving) seed an all-day past-dated event (format-only validation) → 201 (got ${allDayEvt.status})`,
+    );
+    const na9 = await needsAttention();
+    check(
+      inBucket(na9.body, "starving", overdueId2),
+      "(starving) an all-day linked event never allocates — the fixture stays in `starving`",
+    );
   } finally {
     // Cleanup: fixtures were created non-done (the opposite of api-vault-coverage's
     // all-done fixtures — a done case never enters any bucket) — PATCH each to done,
-    // then one clean call, mirroring api-vault-coverage.mjs.
-    const ids = [overdueId, futureId, untriagedId, unlinkedId].filter(Boolean);
+    // then one clean call, mirroring api-vault-coverage.mjs. Seeded events are backstopped
+    // by the snapshot restore below (db.events lives in cases.json, like api-events.mjs).
+    const ids = [overdueId, futureId, untriagedId, unlinkedId, overdueId2].filter(Boolean);
     for (const id of ids) {
       await PATCH(`/api/cases/${encodeURIComponent(id)}`, { status: "done" });
     }
@@ -203,7 +322,8 @@ async function main() {
     process.exit(1);
   }
   console.log(
-    "\nPASS — needs-attention read holds (shape, overdue/untriaged/unlinked membership + transitions, agingWaiting shape).",
+    "\nPASS — needs-attention read holds (shape, overdue/untriaged/unlinked membership + transitions, " +
+      "agingWaiting shape, starving membership + allocation over HTTP).",
   );
 }
 

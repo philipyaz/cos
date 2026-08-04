@@ -1,4 +1,4 @@
-# board MCP server (v3.5)
+# board MCP server (v3.6)
 
 A stdio MCP server (registry name **`board`**) that opens and maintains cases on the
 Cos board — the single to-do surface for both **work** and **life**. Every
@@ -43,9 +43,11 @@ The server exposes the full v3 case / task / message lifecycle plus board ops, t
 **priorities** family (`get_priorities` reads the user's starred nodes + free-text priority notes;
 `add`/`update`/`remove_priority` manage the notes; `set_starred` pins any node), the **v3.4**
 **vault coverage** pair (`get_vault_coverage` reads which `vaultLinks` cases the vault has no/stale
-receipt for; `mark_vault_ingested` stamps the receipt after a confirmed ingest), and the **v3.5**
+receipt for; `mark_vault_ingested` stamps the receipt after a confirmed ingest), the **v3.5**
 **attention** read (`get_needs_attention` reads the board's four needs-attention buckets, now
-agent-reachable). `[x]` marks optional args.
+agent-reachable), and the **v3.6 starving rank** (the same tool now leads with `starving`, a
+single aging-ordered list across cases, open reminders, and unanswered messages). `[x]` marks
+optional args.
 
 ### Reads
 
@@ -312,15 +314,28 @@ The board's own "what needs attention" read, now agent-reachable (cos-ops#20 nam
 staleness vocabulary — see `board/lib/staleness.ts`). Four buckets, computed live and never
 persisted (ADR 0017): `overdue`, `agingWaiting`, `untriaged`, `unlinked` — the same read
 `board/components/board/needs-attention.tsx` renders, and `get_vault_coverage` above is the
-documented complement of its `unlinked` bucket.
+documented complement of its `unlinked` bucket. Since cos-ops#24 the same read also serves
+`starving` — see below.
 
 #### `get_needs_attention()`
 `GET /api/cases/needs-attention`. No args — every bucket excludes archived cases by definition.
-Returns the four bucket arrays (trimmed case projections), a `counts` object per bucket plus
-`counts.total`, and `version`. Read-only. **Buckets overlap** (a case can be both `overdue` and
-`unlinked`), so `counts.total` is a sum of bucket sizes, not a count of distinct cases. Call this
-first in any "where is Philip at / what needs a nudge" sweep — the reconciliation entry point for
-detecting drift without waiting on his prompt.
+Returns the four bucket arrays (trimmed case projections), `starving` (see below), a `counts`
+object per bucket plus `counts.starving` and `counts.total`, and `version`. Read-only. **Buckets
+overlap** (a case can be both `overdue` and `unlinked`), and the `starving` rank overlaps the
+buckets too — so `counts.total` is a sum of the FOUR BUCKET sizes only, never a count of distinct
+cases and never inclusive of `starving`. Call this first in any "where is Philip at / what needs a
+nudge" sweep — the reconciliation entry point for detecting drift without waiting on his prompt.
+
+**`starving` (cos-ops#24)** — a single list across cases, open reminders, and unanswered messages,
+ranked **worst-first** by an **aging** score that rises with `daysIdle` (×1), `daysOverdue` (×2),
+and a passed-unactioned chase block's `daysSincePassed` (×3) — so a long-idle low-priority
+obligation eventually outranks a fresh high-priority one (static `priority` is a tie-break only,
+never a score input). An obligation with a linked **TIMED** calendar event in the next 7 days is
+excluded as **already-allocated**; an **all-day** linked event never allocates, past or future (a
+deadline marker, not a work block). Each entry carries `kind` (`case` | `reminder` | `message`),
+`id`, `title`, `daysIdle`, `daysOverdue`, `score`, and — for a case whose most recent past linked
+block passed with the case still untouched — `passedBlock: { eventId, date, daysSincePassed }`.
+This is the entry point of the `board-organize` skill's weekly staleness lens.
 
 ### Reminders
 

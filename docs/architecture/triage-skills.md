@@ -51,7 +51,8 @@ a sweep that finds nothing past its watermark no-ops.
 !!! note "Scheduling is documentation, not a daemon"
     The skills' [`README`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/README.md)
     indexes which skills you can run as Cowork scheduled tasks — what each does, the trigger
-    to paste, and a suggested cadence (mail every 10–15 min, board-organize every few hours) —
+    to paste, and a suggested cadence (mail every 10–15 min, board-organize every few hours,
+    its staleness lens weekly) —
     **generated** from each skill's declaration in
     [`automation.json`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/automation.json),
     so the index cannot silently drift from the skills it describes. It ships no intervals and
@@ -260,8 +261,8 @@ clusters those orphans into a clean **Initiative ▸ Workstream ▸ Case** tree,
 resolved `vaultLinks` entity — the same key the reconcilers stamp.
 
 It touches **only the shape of the tree** — `kind`, `parentId`, container lifecycle, and the
-title/summary of the containers *it* created. It never triages messages, moves lanes,
-touches tasks, or sends anything. Two guardrails define it:
+title/summary of the containers *it* created. It never triages messages, moves lanes, sets
+labels, or sends anything. Two guardrails define it:
 
 - **The human's hand wins.** Grounded in the manual-action guard, a `parentId` (or
   `title`/`summary`) a human set by hand is **frozen** — never re-homed, renamed, or
@@ -281,6 +282,18 @@ sweep is **idempotent by construction**: a well-filed case is no longer an orpha
 skill's own prior placements are refined rather than re-thrashed, proposals stay inert until
 approved, and a clean board no-ops. See the
 [Case hierarchy](hierarchy.md) page for the tree model itself.
+
+**The weekly staleness lens (cos-ops#24) is the one stated exception** to "never touches
+tasks": on its own **weekly** cadence, `board-organize` also consumes the `starving` rank
+`get_needs_attention` computes — a single list across cases, open reminders, and unanswered
+messages, aged by idle time (×1), overdue time (×2), and a passed-unactioned chase block
+(×3); an obligation with a linked *timed* event in the next 7 days is skipped as
+already-allocated, and an *all-day* event never counts. For the top 3 it researches the
+concrete next step (the vault first, a web search only as a fallback), writes it into the
+case's task (`detail`/`dueAt`), and places one *timed* block whose description is the
+researched payload via the board's own `place` (see
+[Calendar placement](../features/placement.md)). The end-of-run report leads with this list,
+worst-first.
 
 ## See also
 

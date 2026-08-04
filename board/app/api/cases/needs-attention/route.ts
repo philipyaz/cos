@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readDB } from "@/lib/store";
-import { needsAttention } from "@/lib/selectors";
+import { needsAttention, starvingObligations } from "@/lib/selectors";
 import type { CaseDomain, CaseKind, CaseRecord, CaseStatus, Priority } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -38,26 +38,41 @@ function ref(c: CaseRecord): NeedsAttentionRef {
 // phone-glance number (vault-coverage / unanswered-count precedent); buckets OVERLAP (e.g. a case
 // can be both overdue and unlinked), so `counts.total` is a SUM of bucket sizes, not a count of
 // distinct cases.
+//
+// cos-ops#24: the read also serves `starving` — a single ranked list across cases, open
+// reminders, and unanswered messages, ordered by aging (score rises with idle/overdue time and a
+// passed-unactioned chase block). The four buckets answer "what is wrong"; `starving` answers
+// "what to chase first" — it OVERLAPS the buckets by construction (an overdue case is usually
+// also starving), so it is a rank, not a fifth bucket, and never folds into `counts.total`.
 export async function GET() {
   const db = await readDB();
-  const at = needsAttention(db.cases, new Date());
+  const now = new Date();
+  const at = needsAttention(db.cases, now);
 
   const overdue = at.overdue.map(ref);
   const agingWaiting = at.agingWaiting.map(ref);
   const untriaged = at.untriaged.map(ref);
   const unlinked = at.unlinked.map(ref);
+  // The selector already returns the trimmed StarvingObligation projection, so it serializes
+  // as-is — no ref() mapping needed (unlike the CaseRecord-shaped buckets above).
+  const starving = starvingObligations(
+    { cases: db.cases, messages: db.messages, events: db.events, reminders: db.reminders },
+    now,
+  );
 
   return NextResponse.json({
     overdue,
     agingWaiting,
     untriaged,
     unlinked,
+    starving,
     counts: {
       overdue: overdue.length,
       agingWaiting: agingWaiting.length,
       untriaged: untriaged.length,
       unlinked: unlinked.length,
       total: overdue.length + agingWaiting.length + untriaged.length + unlinked.length,
+      starving: starving.length,
     },
     version: db.version,
   });
