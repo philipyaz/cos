@@ -8,6 +8,8 @@
 #      (selectors/store/format) via the zero-dep TS resolve hook in tests/unit/.
 #      HARD gate. Needs Node >= 22 (TS type-stripping for `node --test`); SKIPped
 #      (not failed) on older Node so the rest of the suite still runs.
+#   1b. board-starving-obligations — cos-ops#24's aging rank over the pure
+#      selector (Node >= 22).
 #   2. board-lint.mjs  — board invariants (HARD gate: any violation => FAIL).
 #   2b. skill-reachability.mjs — a skill under board/.claude/skills/ may only
 #      delegate to a slash-skill that has a Cowork bundle in
@@ -438,6 +440,26 @@ if [ "${NODE_MAJOR}" -ge 22 ]; then
     echo "unit: FAIL"
     fail=1
     fail_reasons="${fail_reasons} unit"
+  fi
+else
+  echo "SKIP: Node ${NODE_MAJOR}.x lacks TS type-stripping for \`node --test\` (need >= 22)."
+fi
+
+# --- 1b. starving-obligations ranking (pure logic — hard gate) ---------------
+# cos-ops#24: the aging rank (starvingObligations) over cases + open reminders +
+# unanswered messages — tests/board-starving-obligations.mjs, the file the issue
+# names. Same node:test + TS-resolve mechanism as [1]; Node >= 22 or SKIP.
+echo
+echo "--- [1b] starving-obligations ranking (aging unit) ----------"
+if [ "${NODE_MAJOR}" -ge 22 ]; then
+  if ( cd "${REPO_ROOT}" && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+        --experimental-strip-types --import ./tests/unit/ts-resolve.mjs \
+        --test tests/board-starving-obligations.mjs ); then
+    echo "starving-obligations: PASS"
+  else
+    echo "starving-obligations: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} starving-obligations"
   fi
 else
   echo "SKIP: Node ${NODE_MAJOR}.x lacks TS type-stripping for \`node --test\` (need >= 22)."

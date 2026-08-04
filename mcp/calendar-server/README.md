@@ -1,4 +1,4 @@
-# calendar MCP server (v1)
+# calendar MCP server (v1.1)
 
 A stdio MCP server (registry name **`calendar`**) that creates and maintains **calendar
 events / appointments** on the Cos board. Every tool wraps the board's
@@ -76,7 +76,7 @@ standalone). Unknown id → tool error.
 
 ### Event lifecycle
 
-#### `create_event(title, date, [allDay], [startTime], [endTime], [description], [location], [caseId], [domain])`
+#### `create_event(title, date, [allDay], [startTime], [endTime], [description], [location], [caseId], [domain], [place])`
 `POST /api/events`. Creates an appointment.
 
 - `title` **(required)**, non-empty.
@@ -85,7 +85,18 @@ standalone). Unknown id → tool error.
 - `domain` — `work | life`, advisory (may mirror the linked case's side).
 - `caseId` — **PREFER setting this** to roll the event up under an existing case (see the guardrail
   above). An unknown `caseId` is **rejected with a 400** surfaced as a tool error.
-- Returns the minted `EVT-id`, the day/time, and whether it linked or is standalone.
+- `place` — **(cos-ops#24)** let the BOARD find the slot **INSTEAD OF** `startTime`/`endTime`, via the
+  shared [placement engine](../../docs/features/placement.md): `{ durationMin, windows, [busyWindows],
+  [policy] }`. `windows` are candidate `{start,end}` ranges in **preference order** — you choose the
+  day and the windows, the board finds the earliest free gap, overlap-safe against its own events
+  **and** your `busyWindows` (YOUR read of the user's real calendar, per-call, never stored — same
+  contract as `push_plan_to_calendar`'s `busy_windows`, spelled camelCase here to match this server's
+  own arg convention). `policy: "within"` clamps into working hours and refuses a non-working day
+  (admin/work chases); `policy: "margins"` protects working hours as busy (life blocks); omit for
+  board-events-only avoidance with no working-hours enforcement. Nothing fits → a tool error carrying
+  the 409 reason (`no_free_slot` | `outside_working_hours` | `past`) — try the next day.
+- Returns the minted `EVT-id`, the day/time (suffixed "(placed by the board)" when `place` was used),
+  and whether it linked or is standalone.
 
 #### `update_event(id, [title], [date], [allDay], [startTime], [endTime], [description], [location], [domain], [caseId])`
 `PATCH /api/events/{id}`. Updates fields — pass only what you want to change. `caseId` (re)links
