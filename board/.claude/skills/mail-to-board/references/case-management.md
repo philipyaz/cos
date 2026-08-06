@@ -80,7 +80,7 @@ sent mail correctly in the first place.
 
 A reminder is one concrete action you own, with a real consequence if you miss it — mint one only
 when the matter passes the five tests in Step 7 of `SKILL.md`. A notification / watch / want fails
-those tests and is *dropped*, not filed.
+those tests and is *dropped*, not filed (the drop leaves a per-sender decision record — Step 7).
 
 - **`create_reminder`** / **`update_reminder`** with `title*`, optional `detail`, `dueAt`, `domain`,
   catalog `labels` (`list_labels` first — unknown ids are rejected, exactly as on a case), and a
@@ -95,7 +95,8 @@ those tests and is *dropped*, not filed.
   case.
 
 Mint a reminder only when the matter clears all five tests in Step 7 of `SKILL.md` — a commitment you
-own, not a mere nudge; a notification / watch / want is dropped, not filed.
+own, not a mere nudge; a notification / watch / want is dropped, not filed (the drop leaves a
+per-sender decision record — Step 7).
 
 ## `dueAt` vs `eta`
 

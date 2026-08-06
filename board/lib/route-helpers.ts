@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { NotFoundError, VersionConflictError, BadRequestError, SchemaAheadError, SpokeRoleError } from "@/lib/store";
+import { NotFoundError, VersionConflictError, BadRequestError, SchemaAheadError, SpokeRoleError, TriageReversedError } from "@/lib/store";
 import { recordDevice } from "@/lib/devices";
 import type { Actor } from "@/lib/types";
 
@@ -34,7 +34,10 @@ export function resolveActor(req: NextRequest, body: unknown): Actor {
 // Maps the store-layer errors to their HTTP responses with the shared
 // `{ error: e.message }` JSON body — NotFoundError → 404, VersionConflictError →
 // 409, BadRequestError → 400, SchemaAheadError → 503 (a machine-readable body:
-// the store on disk is NEWER than this build, writes are refused fail-closed).
+// the store on disk is NEWER than this build, writes are refused fail-closed),
+// TriageReversedError → 403 (a machine-readable body: the sender was reversed,
+// writes are refused fail-closed — deliberately NOT 409, which already means
+// "version conflict" here and whose body the shared mcp-kit helper discards).
 // Returns null for anything else so the caller can rethrow (and surface a 500),
 // preserving the original per-route catch behavior.
 export function storeErrorToResponse(e: unknown): NextResponse | null {
@@ -61,6 +64,21 @@ export function storeErrorToResponse(e: unknown): NextResponse | null {
     return NextResponse.json(
       { error: "spoke-role-refusal", detail: e.message, role: "spoke", fix: "write via the hub board (BOARD_URL)" },
       { status: 503 },
+    );
+  }
+  if (e instanceof TriageReversedError) {
+    // 403 (not 409): the request was fine — this SENDER's policy forbids the drop. `code` is
+    // a stable machine-readable slug; `detail` carries the full guidance. mcp-kit's generic
+    // !res.ok branch renders `data.detail`, but its 409 branch discards the body outright —
+    // which is why this is 403, not 409 (see TriageReversedError in lib/store.ts).
+    return NextResponse.json(
+      {
+        error: "Sender reversed — refusing to drop.",
+        code: "sender-reversed",
+        detail: e.message,
+        decision: e.decision,
+      },
+      { status: 403 },
     );
   }
   return null;

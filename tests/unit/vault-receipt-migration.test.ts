@@ -120,10 +120,12 @@ test("migration: a v14 fixture reads clean as v15 — vaultIngestedAt stays abse
   assert.equal(db.weights?.[0]?.id, "WEIGHT-1");
   assert.equal(db.settings?.addons?.nutrition?.enabled, true, "settings.addons rides through untouched");
 
-  // Next write stamps schemaVersion 15 on disk (not just in the in-memory return).
+  // Next write stamps the CURRENT SCHEMA_VERSION on disk (not just in the in-memory return) —
+  // imported, never a literal: a later schema bump (e.g. cos-ops#41's v16) must not break this
+  // v14→v15 fixture's own assertion about what "the next write" stamps.
   await store.writeDB(db);
   const rawAfter = JSON.parse(await fsp.readFile(DATA_FILE, "utf8"));
-  assert.equal(rawAfter.schemaVersion, 15, "the store stamps schemaVersion 15 on the next write");
+  assert.equal(rawAfter.schemaVersion, SCHEMA_VERSION, "the store stamps the current SCHEMA_VERSION on the next write");
 });
 
 test("migration: a v15 fixture with a receipt round-trips verbatim through readDB → writeDB → readDB", async () => {
