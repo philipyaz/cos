@@ -43,6 +43,22 @@ export const VALID_PANTRY_LOCATION: PantryLocation[] = ["fridge", "freezer", "pa
 export type MealPlanStatus = "planned" | "cooked" | "skipped";
 export const VALID_MEAL_PLAN_STATUS: MealPlanStatus[] = ["planned", "cooked", "skipped"];
 
+// A shopping-list item's aisle grouping — deliberately includes non-food (v16; the
+// brief's "not only about nutrition"): household + personal-care sit beside the food
+// categories so a persistent list can hold batteries next to bananas.
+export type ShoppingCategory = "produce" | "protein" | "dairy" | "bakery" | "frozen" | "pantry" | "household" | "personal-care" | "other";
+export const VALID_SHOPPING_CATEGORY: ShoppingCategory[] = ["produce", "protein", "dairy", "bakery", "frozen", "pantry", "household", "personal-care", "other"];
+
+// A shopping-list item's lifecycle state. "dismissed" keeps history (never deleted)
+// but is inert — it suppresses nothing (see computeShoppingCandidates).
+export type ShoppingStatus = "needed" | "bought" | "dismissed";
+export const VALID_SHOPPING_STATUS: ShoppingStatus[] = ["needed", "bought", "dismissed"];
+
+// Where a shopping-list row came from — "channel" is the WhatsApp-feed seam (cos-ops#39
+// ships the producer; this vertical only reserves the value + the soft M-<n> sourceRef).
+export type ShoppingSource = "manual" | "plan" | "pantry" | "channel";
+export const VALID_SHOPPING_SOURCE: ShoppingSource[] = ["manual", "plan", "pantry", "channel"];
+
 // ── Nutrition weight-loss enums (v10) ──────────────────────────────────────────
 // The weight-loss vertical adds two pure value domains used by NutritionGoal + the
 // targets engine. Each has a VALID_ array (mirroring the v9 enums) so the goal route
@@ -129,7 +145,11 @@ export const VALID_BIOLOGICAL_SEX: BiologicalSex[] = ["male", "female"];
 // after the agent confirms the vault MCP reports a completed ingest that named the case. An
 // absent receipt === the vault has never been told about this case (fail-closed); a receipt
 // older than the case's updatedAt === told, but stale since. No new enums.
-export const SCHEMA_VERSION = 15;
+// v16 adds db.shoppingItems (ShoppingItem[]) — the persistent shopping list, owned by the
+// "nutrition" add-on — purely additive; old v15 files read unchanged (the array defaults
+// absent). migrate() carries it forward when present, no backfill, no synthesis. New enums:
+// ShoppingCategory, ShoppingStatus, ShoppingSource.
+export const SCHEMA_VERSION = 16;
 
 // Who performed a mutation — drives activity attribution + note authorship.
 export type Actor = "human" | "agent" | "system";
@@ -425,6 +445,27 @@ export interface MealPlanEntry {
   pantryItemIds?: string[]; // SOFT refs to PantryItem (PANTRY-<n>) — dangling on delete is tolerated
   eventId?: string; // OPT-IN link to a CalendarEvent (EVT-<n>) — the meal-plan↔calendar link
   note?: string; // optional freeform note
+  createdAt: string;
+  updatedAt: string;
+}
+
+// The persistent shopping list (v16) — the state half of cos-ops#37. Store only what
+// cannot be computed (ADR 0017); computeShoppingCandidates (board/lib/shopping-candidates.ts)
+// derives suggestions on read and persists nothing. `sourceRef` is a SOFT ref, exactly
+// like MealPlanEntry.pantryItemIds — dangling tolerated, never validated: "MEAL-<n>" |
+// "PANTRY-<n>" | "M-<n>" (the WhatsApp-feed seam cos-ops#39 will produce). `boughtAt` is
+// server-stamped only (applyShoppingItemUpdate) — never read from a caller's patch.
+export interface ShoppingItem {
+  id: string; // "SHOP-<n>" minted like CASE-<n>/EVT-<n> ids
+  name: string; // required, non-empty
+  category?: ShoppingCategory;
+  quantity?: number;
+  unit?: string;
+  status: ShoppingStatus; // "needed" (default)
+  source: ShoppingSource; // "manual" (default at the route boundary)
+  sourceRef?: string; // MEAL-<n> | PANTRY-<n> | M-<n>, soft — see above
+  note?: string;
+  boughtAt?: string; // ISO — stamped when status flips to "bought", cleared otherwise
   createdAt: string;
   updatedAt: string;
 }
@@ -1048,6 +1089,7 @@ export interface DBShape {
   bodyObjective?: BodyObjective; // Body objective SINGLETON (v14) — free-text goal + target anchor; owned by the "body" add-on (NOT an array)
   dietProfile?: DietProfile; // Dietary profile SINGLETON (v14) — allergies/dietType/notes/philosophy; owned by the "nutrition" add-on (NOT an array)
   nutritionTargets?: NutritionTargetArtifact[]; // Agent-authored daily nutrition targets (v14); owned by the "nutrition" add-on
+  shoppingItems?: ShoppingItem[]; // The persistent shopping list (v16); owned by the "nutrition" add-on
   healthEntries?: HealthEntry[]; // Apple Watch health time-series (v12); owned by the "fitness" add-on
   athleteProfile?: AthleteProfile; // Athlete training-profile SINGLETON (v12); owned by the "fitness" add-on (NOT an array)
   coachingArtifacts?: CoachingArtifact[]; // Fitness AI coaching artifacts (v13); ONE polymorphic array (all four kinds); owned by the "fitness" add-on
