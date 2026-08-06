@@ -162,6 +162,67 @@ sent. Linking the user's own sent message with `outbound: true` plus its recipie
 also what lets the board **auto-derive sender trust** (below); it is the one step you must
 get right for trust to flow.
 
+## The editorial drop — a per-sender decision record
+
+`mail-to-board`'s five-test gate (Step 7 of its `SKILL.md`) fails most threads it sees — a
+notification, a watch, a no-stakes item, an open loop, a want/courtesy — and used to write
+**nothing** when it did: the same `cos/processed` watermark a real reconciliation gets, applied
+to a thread the board never heard about. Since cos-ops#41, a drop leaves a **receipt**: one row
+in `db.triageDecisions`, upserted by `(sender, source, reason)` so hundreds of drops compress
+into tens of rows — a **fact** ("this sender's mail was judged noise"), deliberately not a log of
+dropped emails.
+
+**One reason vocabulary, shared verbatim by both ends of the pipeline.** The five failing tests
+name the `reason`: `notification` · `watch` · `no_stakes` · `open_loop` · `want_courtesy`. Intake
+(`mail-to-board`) and review (`reminders-review`) speak the identical five words — lifted, not
+re-minted — so a sender's history reads the same wherever you look at it.
+
+**Record, then watermark — never the reverse.** `record_triage_decision` is called *before* the
+`cos/processed` label goes on, mirroring the pipeline's own "write, then advance the watermark"
+discipline (above). If the record call fails, the thread is **not** watermarked — an
+unwatermarked thread simply re-enters the next sweep, while a watermark with no receipt would be
+the silent-loss bug this record exists to close.
+
+**Reversal is sender-scoped, and enforced at the write — not just in prose.** A row's lifecycle
+is `active → reversed` (a deliberate vocabulary fork from the guard's `quarantined | released |
+dismissed` and the reminder's `open | done | dismissed` — an editorial "this is noise" verdict
+reads better as `reversed` than either). Reversing **any** row for a `(sender, source)` makes the
+board **refuse** the next drop for that sender: `POST /api/triage-decisions` returns **403** with
+a machine-readable `code: "sender-reversed"`, so even a stale skill bundle (rebuilt but not
+re-uploaded to Cowork) cannot silently keep dropping a sender the human said keep. The reversal is
+**never** mirrored into the [guard's sender-trust store](../security/guard.md): a keep/confirm is
+an editorial verdict about noise, not a security one — the same trust-vs-content split the
+reconcilers already draw (above).
+
+**The review surface: first-time senders only.** `reminders-review` (see
+[Reminders](../features/reminders.md)) gained a digest STEP that reads
+`list_triage_decisions({ source: "gmail" })` and surfaces only senders being filtered for the
+**first time** (an active row with no `reviewedAt`), so the digest is bounded by *new* senders,
+not by mail volume, and stays a one-line no-op ("nothing new was filtered from your mail") on
+most runs. Answering **confirm** stamps the review time and the sweep keeps filtering; answering
+**keep** reverses the row and the sweep stops. Both the ratio (`dropped:promoted`) and the
+first-time set are **computed on read, never persisted** — the same discipline the rest of the
+board's derived state follows.
+
+**Both surfaces, per the platform's own rule (no capability is UI-only):** an HTTP route pair —
+`/api/triage-decisions`, `/api/triage-decisions/{id}` (see [Platform API](platform-api.md)) — and
+three tools on the existing **`board`** MCP server (`record_triage_decision`,
+`list_triage_decisions`, `resolve_triage_decision`; see
+[`mcp/board-server/README.md`](https://github.com/philipyaz/cos/blob/main/mcp/board-server/README.md)).
+No new server, port, or bridge.
+
+**The reconciler asymmetry, stated plainly.** "The two reconcilers as one shared pipeline"
+(above) has one exception today: `mail-to-board`'s drops leave this receipt; `whatsapp-triage`
+runs the identical five tests but does **not** yet record them — a named follow-on, sequenced
+deliberately (prove the rule on one channel before doubling the exposure). Until it lands, the
+digest's scope is Gmail only, stated as such in its own no-op line.
+
+**The editorial twin of the quarantine record.** [Guard quarantine](../security/guard.md) is the
+*security* drop's audit trail (a flagged scan, reviewed and released/dismissed by a human);
+`triageDecisions` is the *editorial* drop's — the same shape (a dedup'd row, a human review
+lifecycle, no auto-delete), a different axis. The two never cross: a reversal here is never a
+trust op, and a quarantine release is never an editorial confirm.
+
 ## The cross-cutting guardrails (a system, not a checklist)
 
 The interesting engineering is not any single step — it is that six independent guarantees
