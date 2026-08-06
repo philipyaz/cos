@@ -178,6 +178,16 @@ curl -s -X PATCH "$BOARD_URL/api/addons/nutrition" \
 Enabling flips `Settings.addons.nutrition.enabled` to `true` in `cases.json`, bumps `db.version` →
 SSE, so the sidebar's **Add-ons** nav group + the three `/nutrition/*` pages light up live (no
 reload), and writes start landing.
+
+Enabling nutrition also **hard auto-enables the foundational `body` add-on in the same settings
+write** (nutrition `dependsOn` body — the cascade in `/api/addons/[id]`; body owns the identity,
+weight series, and free-text objective that nutrition reads). The `/body` nav and `/api/body`
+prefix come on with it, but **this skill does not wire body's MCP** — run **`/body-mcp-setup`**
+(bridge `:8012`) next so agents can drive what just turned on:
+```sh
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+curl -s "$BOARD_URL/api/addons" | grep -o '"id":"body"[^}]*"enabled":true' && echo "body auto-enabled"
+```
 - **CHECKPOINT** — the catalog reports it enabled (and the bridge reachable):
   ```sh
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"
