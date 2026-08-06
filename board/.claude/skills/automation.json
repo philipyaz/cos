@@ -6,7 +6,7 @@
   },
   "mail-to-board": {
     "class": "scheduled",
-    "summary": "Reconciles your Gmail (received **and** sent) onto the board — links messages to cases, advances tasks, moves lanes, dedups — and **never** undoes your manual edits.",
+    "summary": "Reconciles your Gmail (received **and** sent) onto the board — links messages to cases, advances tasks, moves lanes, dedups — and **never** undoes your manual edits. Drops noise with a per-sender decision receipt.",
     "schedules": [{ "trigger": "Run /mail-to-board", "cadence": "~10–15 min" }]
   },
   "whatsapp-triage": {
@@ -24,7 +24,7 @@
   },
   "reminders-review": {
     "class": "scheduled",
-    "summary": "Reviews every **open reminder** and **closes** the ones already done or past their moment — auto-closing only what's *proven* done (finished checklist, linked case closed, delivery date passed) and **proposing** the rest (cold job-alerts, lapsed RSVPs) — so the reminders list stays a live to-do surface, not a graveyard.",
+    "summary": "Reviews every **open reminder** and **closes** the ones already done or past their moment — auto-closing only what's *proven* done (finished checklist, linked case closed, delivery date passed) and **proposing** the rest (cold job-alerts, lapsed RSVPs) — so the reminders list stays a live to-do surface, not a graveyard. Also surfaces newly filtered senders (the mail sweep's drops) for a keep-or-confirm.",
     "schedules": [{ "trigger": "Run /reminders-review", "cadence": "daily / every few hours" }]
   },
   "nutrition-chef": {

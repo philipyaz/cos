@@ -46,8 +46,10 @@ The server exposes the full v3 case / task / message lifecycle plus board ops, t
 receipt for; `mark_vault_ingested` stamps the receipt after a confirmed ingest), the **v3.5**
 **attention** read (`get_needs_attention` reads the board's four needs-attention buckets, now
 agent-reachable), and the **v3.6 starving rank** (the same tool now leads with `starving`, a
-single aging-ordered list across cases, open reminders, and unanswered messages). `[x]` marks
-optional args.
+single aging-ordered list across cases, open reminders, and unanswered messages). 
+and the **v3.7 triage decisions** triple (`record_triage_decision` writes the
+per-sender mail-drop receipt, `list_triage_decisions` reads the computed ratio + first-time senders,
+`resolve_triage_decision` writes a keep-or-confirm answer). `[x]` marks optional args.
 
 ### Reads
 
@@ -307,6 +309,41 @@ default (archived + future-snoozed excluded) to the full set.
 cases. Call this **only** after the vault MCP's `ingest_status` reports `completed` for an ingest that
 named them — the receipt means the knowledge **landed**, never that it was attempted. Unknown ids
 (e.g. merged/deleted between submit and completion) are skipped and reported back, not a batch failure.
+
+### Triage decisions
+
+The mail-triage **editorial-drop decision record** (cos-ops#41) — a per-`(sender, source, reason)`
+**fact** ("this sender's mail was judged noise"), deliberately not a log of dropped emails: hundreds
+of drops compress into tens of rows whose `count` bumps. `record_triage_decision` is the receipt
+`mail-to-board`'s five-test gate writes the moment it drops a thread — **before** the
+`cos/processed` watermark, so a failed write cannot produce a watermarked thread with no receipt.
+`list_triage_decisions` reads the computed dropped:promoted ratio and the first-time-dropped senders
+`/reminders-review`'s digest reviews (ADR 0017 — computed on read, never persisted).
+`resolve_triage_decision` writes the human's keep-or-confirm answer; a **reverse** is enforced
+fail-closed at the write — the board REFUSES a further drop for that sender+source (403
+`sender-reversed`) — and is never mirrored into the guard's sender-trust store: an editorial
+verdict, not a security one. Core (no add-on gate).
+
+#### `record_triage_decision(sender, source, reason)`
+`POST /api/triage-decisions` `{ sender, source, reason }`. Upserts by `(sender, source, reason)`: a
+repeat drop bumps `count` (200) rather than adding a row (201, new key). `reason` is which of the
+five reminder tests the thread failed: `notification` · `watch` · `no_stakes` · `open_loop` ·
+`want_courtesy`. A `sender-reversed` refusal (403) means the human reversed this sender via the
+digest — never drop their mail; surface the thread instead, and do not watermark.
+
+#### `list_triage_decisions(source, [status])`
+`GET /api/triage-decisions?source=&status=`. `source` is **required** on this tool (the raw HTTP GET
+allows an unscoped read for generality, but an unscoped ratio would divide gmail-only drops by an
+all-source message count). Read-only. Renders the dropped:promoted summary line, the first-time
+senders (each with its reasons×counts and the `TD-<n>` ids to resolve), then a compact row list.
+`status` (`active` | `reversed`) narrows the row list only — the summary always spans both.
+
+#### `resolve_triage_decision(id, resolution)`
+`PATCH /api/triage-decisions/{id}` `{ resolution }`. `resolution: "confirm"` stamps the review time
+only (the sender leaves the first-time set, the sweep keeps filtering); `"reverse"` also flips the
+row to `status: "reversed"` (every future drop attempt for that sender+source is refused). A sender
+dropped for more than one reason needs **every** one of its ids resolved the same way
+(`list_triage_decisions`' `firstTime[].ids`). 404 on a stale id, 400 on a bad resolution.
 
 ### Attention
 

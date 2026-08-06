@@ -43,6 +43,12 @@
 #      routes never reference `pending`, and the route-vs-tool wiring matches. Rides the
 #      SAME [2f] step id (ADR 0022: a new parser-grade gate rides an existing id) as its
 #      own file with its own echo + fail_reasons token.
+#      [2f] also rides
+#      triage-decisions-consumers.mjs (cos-ops#41) — the same ADR 0014 shape for
+#      TriageDecisionSummary's fields + the three triage MCP tools, consumed by
+#      mail-to-board's drop region (which also records BEFORE it watermarks) and
+#      reminders-review's digest STEP — a parser-grade gate rides an existing id
+#      rather than minting a new one.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -601,6 +607,24 @@ else
   echo "shopping-list-consumers: FAIL"
   fail=1
   fail_reasons="${fail_reasons} shopping-list-consumers"
+fi
+
+# --- 2f. triage-decisions-consumers (hard gate; rides [2f] — cos-ops#41) -----
+# The ADR 0014 gate: every top-level field TriageDecisionSummary (board/lib/triage-decisions.ts)
+# returns, and every triage tool the board MCP server registers, must be CONSUMED — by name —
+# by mail-to-board (which also records BEFORE it watermarks) and reminders-review's digest
+# STEP. Rides this existing [2f] id with its own echo line + fail_reasons token rather than
+# minting a new [2*] id — a parser-grade gate needs no new test step (cos-ops#21's direction;
+# #94's fitness-outcome-consumers and #98's shopping-list-consumers do the same). Static,
+# read-only, node-only.
+echo
+echo "--- [2f] triage-decisions-consumers (drop-record + digest field contract) ---"
+if node "${SCRIPT_DIR}/triage-decisions-consumers.mjs"; then
+  echo "triage-decisions-consumers: PASS"
+else
+  echo "triage-decisions-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} triage-decisions-consumers"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --
@@ -1399,6 +1423,41 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-fitness-plan-outcome: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-fitness-plan-outcome"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10k. api-triage-decisions (only when a board is healthy) ----------------
+# The mail-triage editorial-drop decision record (cos-ops#41, v16): a drop writes a receipt
+# keyed (sender, source, reason) — a repeat drop bumps `count`, adds no row; the sender is
+# NORMALIZED (a display-name+parenthetical form collapses to the bare address). The
+# dropped:promoted ratio + the first-time-dropped set are computed on read (ADR 0017): seeding
+# a second sender moves them immediately, confirming one excludes it from `firstTime` on the
+# very next read, and a further drop of an already-confirmed sender bumps its count without
+# resurrecting it. Reversing a sender's row is enforced FAIL-CLOSED — a further drop for that
+# sender (any reason) is refused 403 `code:"sender-reversed"`. Like [10h4]/[13d], the
+# "nothing computed is ever persisted to the store FILE" sub-check needs FILE access to the
+# running board's store, but (unlike them) this step still runs its HTTP-only checks under an
+# external COS_TEST_BOARD_URL board — only that one sub-check SKIPs without a local path
+# (architect finding 4: TEST_BOARD_DATA_DIR is shell-local and must be passed per-command).
+# Snapshots + restores board/data/cases.json (net-zero). Skipped entirely when no board.
+echo
+echo "--- [10k] api-triage-decisions (live board) ------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if [ -n "${TEST_BOARD_DATA_DIR}" ]; then
+    RUN_TRIAGE_OK=1
+    CRM_BASE_URL="${BASE}" COS_BOARD_DATA="${TEST_BOARD_DATA_DIR}/cases.json" node "${SCRIPT_DIR}/api-triage-decisions.mjs" || RUN_TRIAGE_OK=0
+  else
+    RUN_TRIAGE_OK=1
+    CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-triage-decisions.mjs" || RUN_TRIAGE_OK=0
+  fi
+  if [ "${RUN_TRIAGE_OK}" -eq 1 ]; then
+    echo "api-triage-decisions: PASS"
+  else
+    echo "api-triage-decisions: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-triage-decisions"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."

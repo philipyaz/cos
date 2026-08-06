@@ -34,6 +34,7 @@ import type {
   ShoppingStatus,
   ShoppingSource,
   MessageRecord,
+  MessageSource,
   CaseNote,
   Task,
   Subtask,
@@ -49,6 +50,8 @@ import type {
   TaskStatus,
   Priority,
   Actor,
+  TriageDecision,
+  TriageDropReason,
 } from "./types";
 import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, VALID_ARTIFACT_SOURCE, VALID_TRAINING_STATUS, VALID_SHOPPING_CATEGORY, VALID_SHOPPING_STATUS, VALID_SHOPPING_SOURCE, caseKind } from "./types";
 import {
@@ -95,6 +98,24 @@ export class VersionConflictError extends Error {}
 // catalog). Route handlers map it to a 400. Shape-only checks still happen
 // outside the lock; this is for validity that depends on db state.
 export class BadRequestError extends Error {}
+
+// FAIL-CLOSED refusal: the (sender, source) already carries a REVERSED triage decision —
+// the human said keep, so recording a further drop is refused rather than silently folded
+// in (a stale skill bundle, rebuilt but not re-uploaded to Cowork, must not be able to keep
+// dropping a sender Philip reversed). Carries the reversed row so the route can surface it.
+// Routes map it to 403 (NOT 409 — 409 already means "version conflict" on this server, and
+// the shared mcp-kit helper discards the response body on 409; a 403 flows through its
+// generic branch, which renders `detail`, so the guidance reaches the calling agent).
+export class TriageReversedError extends Error {
+  readonly decision: TriageDecision;
+  constructor(decision: TriageDecision) {
+    super(
+      `this sender was reversed by the human — never drop their mail; surface the thread in ` +
+        `the report instead. (sender: ${decision.sender}, source: ${decision.source})`,
+    );
+    this.decision = decision;
+  }
+}
 
 // FAIL-CLOSED role guard (multi-device): a SPOKE machine runs no state machine —
 // its board-facing tools point at the hub's BOARD_URL, and a spoke-local store
@@ -200,6 +221,9 @@ const nowISO = (): string => new Date().toISOString();
 // MessageRecord.url (v8): absent stays absent, present rides through unchanged.
 // v16 carries db.shoppingItems forward when it is an array — mirrors db.pantryItems. No
 // backfill, no synthesis.
+// v16 carries db.triageDecisions forward when it is an array (the per-sender mail-triage
+// editorial-drop decision record — mirrors db.healthEntries/db.coachingArtifacts). No
+// backfill: nothing to backfill, since no drop was ever recorded before this version.
 export function migrate(raw: unknown): DBShape {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
@@ -237,6 +261,7 @@ export function migrate(raw: unknown): DBShape {
   if (Array.isArray(obj.views)) db.views = obj.views as DBShape["views"];
   if (Array.isArray(obj.labels)) db.labels = obj.labels as DBShape["labels"];
   if (obj.settings && typeof obj.settings === "object") db.settings = obj.settings as DBShape["settings"];
+  if (Array.isArray(obj.triageDecisions)) db.triageDecisions = obj.triageDecisions as DBShape["triageDecisions"];
 
   // ── v14 carry-forward + synthesis ("body" add-on + nutrition redesign) ──────────────────────
   // v14 files already carry these singletons/arrays — take them verbatim (idempotent).
@@ -358,6 +383,9 @@ function validateDB(db: DBShape): void {
   for (const x of db.shoppingItems ?? []) {
     if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid shopping item: missing id");
   }
+  for (const x of db.triageDecisions ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid triage decision: missing id");
+  }
 }
 
 async function ensureFile(): Promise<void> {
@@ -365,7 +393,7 @@ async function ensureFile(): Promise<void> {
     await fs.access(DATA_FILE);
   } catch {
     await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [], foodLogs: [], pantryItems: [], mealPlanEntries: [], weights: [], healthEntries: [], coachingArtifacts: [], nutritionTargets: [], shoppingItems: [] };
+    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [], foodLogs: [], pantryItems: [], mealPlanEntries: [], weights: [], healthEntries: [], coachingArtifacts: [], nutritionTargets: [], shoppingItems: [], triageDecisions: [] };
     await fs.writeFile(DATA_FILE, JSON.stringify(empty, null, 2), "utf8");
   }
 }
@@ -389,6 +417,7 @@ function parseAndMigrate(text: string): DBShape {
   if (!db.coachingArtifacts) db.coachingArtifacts = [];
   if (!db.nutritionTargets) db.nutritionTargets = []; // agent-authored targets (v14); the three v14 singletons stay optional/absent until first set
   if (!db.shoppingItems) db.shoppingItems = []; // the persistent shopping list (v16)
+  if (!db.triageDecisions) db.triageDecisions = []; // mail-triage editorial-drop decisions (v16)
   if (!db.pending) db.pending = [];
   if (!db.views) db.views = [];
   if (!db.labels) db.labels = [];
@@ -1896,5 +1925,100 @@ export function applyShoppingItemUpdate(rec: ShoppingItem, patch: Record<string,
   if ("sourceRef" in patch) rec.sourceRef = toOptionalString(patch.sourceRef); // soft ref, never validated relationally
   if ("note" in patch) rec.note = toOptionalString(patch.note);
   rec.updatedAt = nowISO();
+  return rec;
+}
+
+// ── Mail-triage decisions (v16) ──────────────────────────────────────────────
+// The store's first POLICY collection: not a work artifact (case/message/reminder/plan/log)
+// but an editorial judgment about a SENDER. Written by mail-to-board's five-test drop gate,
+// consulted so a reversed sender is never dropped again, reviewed by /reminders-review's
+// first-time-senders digest. See board/lib/triage-decisions.ts for the computed read.
+export function nextTriageDecisionId(db: DBShape): string {
+  const max = (db.triageDecisions ?? [])
+    .map((x) => parseInt(x.id.replace(/^[A-Za-z]+-/, ""), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `TD-${max + 1}`;
+}
+
+export function findTriageDecision(db: DBShape, id: string): TriageDecision | undefined {
+  return (db.triageDecisions ?? []).find((d) => d.id === id);
+}
+
+// Deterministic normalization of a raw Gmail `from` header value into the sender key
+// TriageDecision rows are upserted by. Order matters — checked against 14 live-measured
+// non-bare forms (the plan's architect finding 1): the addr-spec inside real angle brackets,
+// THEN inside HTML-escaped angle brackets (`&lt;…&gt;` — some stored headers escape them),
+// THEN the first bare addr-spec anywhere in the string via a character class that excludes
+// whitespace/`<>(),` — so "Display Name (addr@host)" and "addr@host (parenthetical)" both
+// resolve to the bare address, with NEITHER surrounding paren attached, never a name
+// fragment (the rejected "first whitespace token" rule mis-keyed 11 of 117 live senders by
+// their first name, colliding unrelated senders and splitting one human into two keys — which
+// would silently break the reversal guarantee). Only when none of those find an "@" does the
+// whole trimmed value become the key (a bare display name like "Jordan Lee": stable, never a
+// name fragment). Lowercased last, mirroring the guard's TrustRecord.email key (no shared code
+// possible — that normalizer lives in the sidecar).
+export function normalizeTriageSender(raw: string): string {
+  const trimmed = (raw ?? "").trim();
+  const angle = trimmed.match(/<([^<>]+)>/);
+  if (angle) return angle[1].trim().toLowerCase();
+  const escapedAngle = trimmed.match(/&lt;([^&]+)&gt;/);
+  if (escapedAngle) return escapedAngle[1].trim().toLowerCase();
+  const bare = trimmed.match(/[^\s<>(),]+@[^\s<>(),]+/);
+  if (bare) return bare[0].toLowerCase();
+  return trimmed.toLowerCase();
+}
+
+// Record one editorial drop for (sender, source, reason) — normalizes the sender, then either
+// bumps an existing row's count or mints a new one (mirrors upsertNutritionTarget's
+// { artifact, created } shape). FAILS CLOSED first: ANY row for this (sender, source) —
+// whatever its reason — already "reversed" throws TriageReversedError, so a stale skill
+// bundle (rebuilt but not re-uploaded to Cowork — ADR 0024) cannot silently keep dropping a
+// sender the human said keep. A repeat drop of the same (sender, source, reason) bumps
+// `count` and adds no row; a new reason for an already-active sender adds a sibling row.
+export function recordTriageDrop(
+  db: DBShape,
+  input: { sender: string; source: MessageSource; reason: TriageDropReason },
+): { decision: TriageDecision; created: boolean } {
+  if (!db.triageDecisions) db.triageDecisions = [];
+  const sender = normalizeTriageSender(input.sender);
+  const reversed = db.triageDecisions.find(
+    (d) => d.sender === sender && d.source === input.source && d.status === "reversed",
+  );
+  if (reversed) throw new TriageReversedError(reversed);
+  const now = nowISO();
+  const existing = db.triageDecisions.find(
+    (d) => d.sender === sender && d.source === input.source && d.reason === input.reason,
+  );
+  if (existing) {
+    existing.count += 1;
+    existing.lastSeen = now;
+    return { decision: existing, created: false };
+  }
+  const decision: TriageDecision = {
+    id: nextTriageDecisionId(db),
+    sender,
+    source: input.source,
+    reason: input.reason,
+    count: 1,
+    firstSeen: now,
+    lastSeen: now,
+    status: "active",
+  };
+  db.triageDecisions.push(decision);
+  return { decision, created: true };
+}
+
+// Apply a human review answer to a decision row (/reminders-review's digest). "confirm" = keep
+// filtering — just stamps reviewedAt, which is what drops the sender out of the computed
+// first-time set. "reverse" = the human said KEEP — flips status, which makes every future
+// recordTriageDrop for this (sender, source) throw. Idempotent re-calls just restamp
+// reviewedAt (un-reversing is out of scope — no criterion needs it).
+export function applyTriageResolution(
+  rec: TriageDecision,
+  resolution: "confirm" | "reverse",
+): TriageDecision {
+  rec.reviewedAt = nowISO();
+  if (resolution === "reverse") rec.status = "reversed";
   return rec;
 }

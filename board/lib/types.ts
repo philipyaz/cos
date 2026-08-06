@@ -149,6 +149,11 @@ export const VALID_BIOLOGICAL_SEX: BiologicalSex[] = ["male", "female"];
 // "nutrition" add-on — purely additive; old v15 files read unchanged (the array defaults
 // absent). migrate() carries it forward when present, no backfill, no synthesis. New enums:
 // ShoppingCategory, ShoppingStatus, ShoppingSource.
+// v16 adds db.triageDecisions (TriageDecision[]) — the per-(sender, source, reason) editorial-drop
+// decision record mail-to-board's five-test gate writes when it drops a thread, and
+// /reminders-review's first-time-senders digest reviews. Purely additive; old files read unchanged
+// (triageDecisions defaults to []). migrate() carries it forward when present — no backfill, since
+// no drop was ever recorded before this version. New enums: TriageDropReason, TriageDecisionStatus.
 export const SCHEMA_VERSION = 16;
 
 // Who performed a mutation — drives activity attribution + note authorship.
@@ -852,6 +857,48 @@ export interface QuarantineRecord {
   releasedAt?: string; // ISO-8601 UTC; stamped on the status→released transition — the clock the TTL auto-purge measures from
 }
 
+// ── Mail-triage decisions (v16; this store, NOT the guard sidecar) ────────────
+// A per-(sender, source, reason) editorial-drop record — deliberately NOT a log of dropped
+// emails: mail-to-board's five-test gate (SKILL.md) fails a thread for one of five reasons and
+// this collection remembers the VERDICT, not the message. Structural twin of QuarantineRecord
+// (a dedup'd row, count/firstSeen/lastSeen, a human review lifecycle, no auto-delete) but a
+// deliberate vocabulary fork: an editorial "this sender is noise" judgment reads better as
+// active/reversed than the security released/dismissed or the reminder done/dismissed — do not
+// mint a fourth vocabulary for "the human acknowledged/overrode" in this domain.
+
+// Which of mail-to-board's five reminder tests the thread FAILED (the first failing test wins) —
+// the same vocabulary reminders-review names as its dismiss reason codes: Notification · Watch ·
+// No-stakes · Open-loop · Want/courtesy. One language across the intake gate and the sweep.
+export type TriageDropReason = "notification" | "watch" | "no_stakes" | "open_loop" | "want_courtesy";
+export const VALID_TRIAGE_DROP_REASON: TriageDropReason[] = [
+  "notification", "watch", "no_stakes", "open_loop", "want_courtesy",
+];
+
+//   active   — the standing judgment: this sender's mail (for this reason) is noise; drops fold in
+//   reversed — the human said KEEP: recording further drops for this sender+source is REFUSED
+//              (403 "sender-reversed"). Deliberate vocabulary fork from the quarantine lifecycle's
+//              released/dismissed and the reminder's done/dismissed: an editorial verdict needs the
+//              unambiguous word. Do not mint a fourth vocabulary for "the human overrode".
+export type TriageDecisionStatus = "active" | "reversed";
+export const VALID_TRIAGE_DECISION_STATUS: TriageDecisionStatus[] = ["active", "reversed"];
+
+// One editorial-drop decision — a per-(sender, source, reason) FACT ("this sender's mail was judged
+// noise"), deliberately NOT a log of dropped emails: hundreds of drops compress into one row whose
+// `count` bumps. `sender` is the normalized bare lowercase address (the upsert key half, like
+// TrustRecord.email). `reviewedAt` is stamped only when the human ANSWERS the digest (confirm or
+// reverse); absent = never asked-and-answered, so the sender is still "first-time" for review.
+export interface TriageDecision {
+  id: string;              // minted "TD-<n>"
+  sender: string;          // normalized: lowercased, trimmed, addr-spec extracted
+  source: MessageSource;   // "gmail" today; whatsapp-triage is the named follow-on
+  reason: TriageDropReason;
+  count: number;           // drops folded into this row (>= 1)
+  firstSeen: string;       // ISO — first drop
+  lastSeen: string;        // ISO — latest drop
+  status: TriageDecisionStatus;
+  reviewedAt?: string;     // ISO — set by resolve (confirm/reverse); absent = unreviewed
+}
+
 // ── Encrypted off-site backup (lives in ~/.cos-backups, NOT in this store) ─────
 // The Backups surface is a READ-ONLY health view over the off-site backup repo's
 // MANIFEST + the launchd agent + git push-state. None of this lives in cases.json
@@ -1097,6 +1144,7 @@ export interface DBShape {
   views?: SavedView[]; // saved views
   labels?: LabelDef[]; // the active label catalog (installed bundles + custom labels)
   settings?: Settings;
+  triageDecisions?: TriageDecision[]; // Mail-triage editorial-drop decisions (v16); core (mail triage) — no add-on gate
 }
 
 export const VALID_CASE_STATUS: CaseStatus[] = ["urgent", "todo", "in_progress", "waiting_for_input", "done"];
