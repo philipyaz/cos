@@ -30,6 +30,13 @@
 #      state-and-move-on) by JOB 0 of nutrition-chef/SKILL.md (HARD gate; the ADR
 #      0014 gate for cos-ops#18). Static, read-only, no board needed — catches the
 #      board computing an answer nobody reads.
+#      Also runs shopping-list-consumers.mjs (cos-ops#37) — the ADR 0014 gate's shopping
+#      twin: every ShoppingCandidatesResult field + every server.mjs shopping tool must
+#      be named inside JOB 6 of nutrition-chef/SKILL.md, a small set of load-bearing
+#      phrases must hold, the engine defines no new threshold constant, the shopping
+#      routes never reference `pending`, and the route-vs-tool wiring matches. Rides the
+#      SAME [2f] step id (ADR 0022: a new parser-grade gate rides an existing id) as its
+#      own file with its own echo + fail_reasons token.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -143,6 +150,14 @@
 #      while a same-aged spice/staple never does; no write path persists a lifecycle/horizon field or
 #      a guessed expiresAt; schemaVersion unchanged. Snapshots+restores cases.json. Skipped when no
 #      board, or under an external COS_TEST_BOARD_URL board (no file access to its store).
+#  10h5. api-nutrition-shopping — ONLY if a board is running: the v16 shopping-list + candidates
+#      contract (cos-ops#37). A `household` NON-FOOD item round-trips (create/list/get); PATCH
+#      status:"bought" stamps boughtAt, status:"needed" clears it; a stale expectedVersion 409s; a
+#      dangling sourceRef POSTs + reads fine (a soft ref); a planned in-window meal naming an
+#      invented ingredient surfaces as a candidate, is suppressed once added to the list, and two
+#      back-to-back candidate GETs return the SAME version (persists nothing); the GATE mirrors
+#      api-nutrition-gate; delete removes it. Plus an in-file route-vs-tool check (always-run home:
+#      shopping-list-consumers.mjs). Snapshots+restores cases.json. Skipped when no board is up.
 #  10i. api-fitness-push — ONLY if a board is running: a push INGEST → SUMMARIZE round-trip that
 #      kills the split-brain-taxonomy bug — POST /api/fitness/push a realistic HAE payload (sleep +
 #      heart_rate_variability metrics + a workout), then assert GET /api/fitness/summary returns
@@ -513,6 +528,24 @@ else
   echo "nutrition-status-consumers: FAIL"
   fail=1
   fail_reasons="${fail_reasons} nutrition-status-consumers"
+fi
+
+# --- 2f. shopping-list-consumers (hard gate; rides the [2f] step id — cos-ops#37) --
+# The ADR 0014 gate's shopping twin: every top-level field the shopping-candidates
+# engine (`ShoppingCandidatesResult` in board/lib/shopping-candidates.ts) returns, and
+# every shopping tool mcp/nutrition-server/server.mjs's TOOLS array registers, must be
+# CONSUMED — by name — inside JOB 6 of nutrition-chef/SKILL.md. Also enforces a small
+# set of load-bearing phrases, that the engine defines no new threshold constant, that
+# the shopping routes never reference `pending`, and the route-vs-tool wiring. Static,
+# read-only, node-only.
+echo
+echo "--- [2f] shopping-list-consumers (JOB 6 field + tool contract) ---"
+if node "${SCRIPT_DIR}/shopping-list-consumers.mjs"; then
+  echo "shopping-list-consumers: PASS"
+else
+  echo "shopping-list-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} shopping-list-consumers"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, one HARD sub-check) --
@@ -1131,6 +1164,29 @@ if [ "${BOARD_UP}" -eq 1 ] && [ -n "${TEST_BOARD_DATA_DIR}" ]; then
   fi
 elif [ "${BOARD_UP}" -eq 1 ]; then
   echo "SKIP: external test board (COS_TEST_BOARD_URL) — no file access to its store; shelf-life e2e needs the auto-started sandbox."
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10h5. api-nutrition-shopping (live board) --------------------------------
+# The v16 shopping-list + candidates contract (cos-ops#37): a `household` NON-FOOD item
+# round-trips; PATCH status:"bought" stamps boughtAt, status:"needed" clears it; a stale
+# expectedVersion 409s; a dangling sourceRef POSTs + reads fine (a soft ref); a planned
+# in-window meal naming an invented ingredient surfaces as a candidate, is suppressed once
+# added to the list, and two back-to-back candidate GETs return the SAME version (persists
+# nothing); the GATE mirrors api-nutrition-gate; delete removes it. Plus an in-file
+# route-vs-tool check (the always-run home is shopping-list-consumers.mjs — this copy can
+# SKIP). Snapshots+restores cases.json. Skipped when no board.
+echo
+echo "--- [10h5] api-nutrition-shopping (live board) ---------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-shopping.mjs"; then
+    echo "api-nutrition-shopping: PASS"
+  else
+    echo "api-nutrition-shopping: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-shopping"
+  fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
