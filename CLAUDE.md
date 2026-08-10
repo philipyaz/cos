@@ -123,6 +123,10 @@ node scripts/pack-skills.mjs         # rebuild operator-skill bundles + the gene
 - **A green `workflow_dispatch` CI run does NOT unblock a PR** — its checks attach to the commit but not
   the PR's status rollup, so branch protection keeps the PR `BLOCKED` even when `lint-test`/`python`
   pass. Re-trigger with a `pull_request` event (push a commit — an empty one is fine), never a re-dispatch.
+- **A local `tests/run.sh` result is never evidence about a PR — run `gh pr checks <N>` and report
+  what CI said.** The two disagree in both directions: steps that SKIP locally run in CI, and
+  `[13f] gen-roles` is red on any *configured* hub (`join-blob.mjs` reads the real `config/cos.env`)
+  while passing in CI. So `RESULT: FAIL` is routine here, and a real failure hides behind it.
 - **A new `mcp/*-server` is a root workspace member** — `npm install` at the repo root and commit
   `package-lock.json`, or CI's `npm ci` fails fast.
 - **Never `next build` in `board/` while a `next dev` is running** — they share `.next` and the running
