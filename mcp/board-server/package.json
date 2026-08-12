@@ -6,6 +6,6 @@
   "description": "MCP server that opens and maintains cases on the Cos board.",
   "bin": { "board-mcp": "server.mjs" },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.30.0"
   }
 }
