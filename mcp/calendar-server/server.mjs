@@ -369,7 +369,7 @@ async function handleCreateEvent(args) {
     if (typeof args.place !== "object" || args.place === null || Array.isArray(args.place)) {
       return err("'place' must be an object.");
     }
-    if (args.allDay === true || args.startTime !== undefined || args.endTime !== undefined) {
+    if (args.allDay === true || (typeof args.startTime === "string" && args.startTime !== "") || (typeof args.endTime === "string" && args.endTime !== "")) {
       return err("Either explicit times or 'place', not both.");
     }
   }

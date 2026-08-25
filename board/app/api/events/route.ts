@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
     if (typeof body.place !== "object") {
       return NextResponse.json({ error: "'place' must be an object." }, { status: 400 });
     }
-    if (body.allDay === true || "startTime" in body || "endTime" in body) {
+    if (body.allDay === true || body.startTime != null || body.endTime != null) {
       return NextResponse.json({ error: "Either explicit times or 'place', not both." }, { status: 400 });
     }
     const p = body.place as Record<string, unknown>;

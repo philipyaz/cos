@@ -265,11 +265,15 @@ It ranks the board's most-starved obligations, researches the concrete next step
 writes it into the obligation's own record, and places one linked *timed* chase
 block — never triaging messages, moving lanes, or setting labels.
 
-1. **Cadence.** Run this on the **weekly** scheduled sweep — the `automation.json`
-   catalogue carries a dedicated weekly row for it, separate from the hierarchy
-   tidy's own cadence. On a more frequent run it is idempotent by construction:
-   everything already chased carries a timed block inside the horizon and is
-   excluded from the rank, so a clean week no-ops.
+1. **Cadence — and the gate.** Run STEP 7 **only** when the invocation names the
+   lens — the `automation.json` catalogue's dedicated weekly row, *"Run
+   /board-organize — include the weekly staleness lens"* — or when the user asks
+   for it in so many words. On **every other** run of this skill (the 2–6-hourly /
+   daily tidy, a plain "organize my board") **skip straight to STEP 8**: the lens
+   is not idempotent on a frequent cadence — each pass chases the *next* three
+   entries (a chased entry leaves the rank once its block is placed), so an
+   ungated 2-hourly task would carpet the calendar with chase blocks by evening.
+   Within one week a re-run no-ops only for the three already chased.
 
 2. **Read, then sweep your own leftovers.** Call **`get_needs_attention`** (the
    `board` MCP) and take its `starving` list — the worst-first aging rank across
@@ -280,12 +284,16 @@ block — never triaging messages, moving lanes, or setting labels.
    `reminders-review` sweep can dismiss a reminder whose chase block *this* lens
    placed yesterday, and it knows nothing about calendar events. So `list_events`
    over the next 7 days and look for a FUTURE block this lens placed —
-   recognisable by its `(REM-n)`/`(MSG-n)` title marker (step 5 below) or its
-   `caseId` link — whose obligation is no longer live (the reminder is no longer
-   open, the message is no longer unanswered, the case is done/archived). That is
-   a stale artifact of your **own** prior run: `delete_event` it (auto mode:
-   delete and report; approval mode: into the batch). Clean up only what *this
-   lens* minted — never someone else's event.
+   recognisable **only** by the lens marker in its title: the `(CASE-n)` /
+   `(REM-n)` / `(MSG-n)` suffix every chase block carries (step 5 below) — whose
+   obligation is no longer live (the reminder is no longer open, the message is
+   no longer unanswered, the case is done/archived). That is a stale artifact of
+   your **own** prior run: `delete_event` it (auto mode: delete and report;
+   approval mode: into the batch). **A linked event WITHOUT the marker is never
+   touched** — a `caseId` link alone proves nothing (a human's "closing meeting
+   with Acme" is linked exactly the same way), `delete_event` is permanent (no
+   trash), and Guardrail 1 says the human's hand wins. Clean up only what *this
+   lens* minted, proven by the marker — never someone else's event.
 
 3. **Research — vault first, web only as a fallback.** For a **case** entry:
    `get_case` (its tasks, `vaultLinks`, and the manual-actions block, per STEP 3),
@@ -302,13 +310,16 @@ block — never triaging messages, moving lanes, or setting labels.
    check from STEP 3) — a human-authored task gets the research as a `propose`d
    `update_case` note instead, or is flagged in the report.
 
-   For a **reminder** entry, the reminder *is* the step: at most `update_reminder`
-   its `detail` with the researched specifics. Precedence with the daily
-   `reminders-review` sweep is **one-directional** — that sweep owns the
-   open/close/dismiss verdict; this lens **never** closes or dismisses a
-   reminder, and it **skips the chase** on any reminder carrying a pending
-   close/dismiss proposal (`list_pending`) — never allocate time for something
-   awaiting a "still relevant?" human call.
+   For a **reminder** entry, the reminder *is* the step: `update_reminder` its
+   `detail` with the researched specifics **only when `detail` is empty**. A
+   reminder carries no authorship trail (unlike a case's activity log), so a
+   non-empty `detail` must be assumed human-written — leave the record untouched
+   and put the research in the chase block's description and the report instead.
+   Precedence with the daily `reminders-review` sweep is **one-directional** —
+   that sweep owns the open/close/dismiss verdict; this lens **never** closes or
+   dismisses a reminder, and it **skips the chase** on any reminder carrying a
+   pending close/dismiss proposal (`list_pending`) — never allocate time for
+   something awaiting a "still relevant?" human call.
 
    For a **message** entry, the chase *is* the reply: put it in the report and
    the proposed block. Never mark it answered — only a real reply does that
@@ -336,9 +347,10 @@ block — never triaging messages, moving lanes, or setting labels.
      proposes; it does not assert the slot is free).
    - `durationMin` 30–60 by the action's size; `caseId` links the block (for a
      reminder/message chase, link its case when one exists, else standalone);
-     title = the action, **suffixed `(REM-n)` / `(MSG-n)` for a reminder/message
-     chase** (the marker the hygiene sweep in step 2 scans for — a case chase
-     needs none, its `caseId` link is the marker); **description = the payload**
+     title = the action, **suffixed with the lens marker — `(CASE-n)` /
+     `(REM-n)` / `(MSG-n)` — on EVERY chase block** (the only thing the hygiene
+     sweep in step 2 may delete by; a `caseId` link is not a marker — a human's
+     linked event has one too); **description = the payload**
      (the researched step verbatim — the lock-screen test: doable in the ninety
      seconds before a meeting).
    - On **409 `no_free_slot`** → retry the next preferred date inside the 7-day
@@ -407,10 +419,13 @@ it more often is cheap and safe.
   batch-atomic 400s); **you** enforce human authorship.
 - **Auto-apply only deterministic same-entity grouping; `propose` every judgment
   call.** In approval mode, `propose` everything consequential.
-- **Staleness lens weekly; vault before web; fill only empty fields — never
-  overwrite human text.** Blocks are timed, never all-day, placed by the board's
-  `place` (you pick date + windows + `busyWindows`; it picks the slot). Allocation
-  is derived from the calendar — never store a "chased" flag.
+- **Staleness lens ONLY when the invocation names it (weekly); vault before web;
+  fill only empty fields — never overwrite human text** (a reminder's non-empty
+  `detail` counts as human text). Blocks are timed, never all-day, placed by the
+  board's `place` (you pick date + windows + `busyWindows`; it picks the slot),
+  and every one carries the `(CASE-n)`/`(REM-n)`/`(MSG-n)` marker — the hygiene
+  sweep deletes marked blocks only, never a bare linked event. Allocation is
+  derived from the calendar — never store a "chased" flag.
 - **Idempotent.** Re-runs converge; a clean board no-ops.
 
 ## Worked examples

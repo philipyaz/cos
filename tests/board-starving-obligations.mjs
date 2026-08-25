@@ -147,6 +147,16 @@ test("(b) a case with no dueAt but long idle time still ranks, via stale-idle", 
 });
 
 // ── (c) allocation — skip, boundary, and the bounded horizon ────────────────
+test("(b2) untriaged raw intake filed just now is NOT starving; the same card untouched a day later is", () => {
+  const fresh = mkCase({ status: "todo", tasks: [], priority: undefined, createdAt: iso(0), updatedAt: iso(0) });
+  const dayOld = mkCase({ status: "todo", tasks: [], priority: undefined, createdAt: iso(-2), updatedAt: iso(-2) });
+  const out = starvingObligations({ ...EMPTY, cases: [fresh, dayOld] }, NOW);
+  assert.equal(out.find((e) => e.id === fresh.id), undefined, "a card the sweep filed this morning is not starving (score 0 would only swamp the tail)");
+  const entry = out.find((e) => e.id === dayOld.id);
+  assert.ok(entry, "the same shape idle for two days IS a member (untriaged + idle)");
+  assert.equal(entry.score, 2, "scored by its idle days");
+});
+
 test("(c) a linked TIMED event tomorrow suppresses the case entirely (already-allocated)", () => {
   const c = mkCase({ priority: "P1", tasks: [mkTask()], updatedAt: iso(-40) });
   const e = mkEvent({ caseId: c.id, date: dayOffset(TODAY, 1), startTime: "18:30", allDay: false });

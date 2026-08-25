@@ -507,12 +507,21 @@ export function starvingObligations(
     if (c.archivedAt) continue;
     if (c.snoozeUntil && ms(c.snoozeUntil) > t) continue;
     if (c.status === "done") continue;
-    const isMember = overdueIds.has(c.id) || isStale(c, now) || untriagedIds.has(c.id);
+    // Untriaged raw intake counts only once it has sat for a day: a dozen cards the mail sweep
+    // filed this morning are not starving (they'd all enter at score 0 and swamp the tail);
+    // the same cards untouched by tomorrow are.
+    const daysIdle = Math.max(0, Math.floor((t - ms(c.updatedAt)) / DAY_MS));
+    const isMember = overdueIds.has(c.id) || isStale(c, now) || (untriagedIds.has(c.id) && daysIdle > 0);
     if (!isMember) continue;
 
     // Allocation: a linked TIMED event within [today, horizon] suppresses the case entirely;
     // an all-day event never counts, past or future. Among linked timed events strictly in
     // the past, the most recent one is a candidate for "passed unactioned" escalation.
+    // HONESTY NOTE: a CalendarEvent carries no origin, so "passed block" means ANY past linked
+    // timed event — a chase block the lens placed OR a meeting the human linked by hand — and
+    // ANY later write to the case (a mail sweep linking a thread, too) clears it. The escalation
+    // is a heuristic over "a slot was on the calendar for this and the case was not touched
+    // after it", nothing narrower; the tool description says the same.
     let allocated = false;
     let mostRecentPastEvent: CalendarEvent | undefined;
     for (const e of eventsByCaseId(events, c.id)) {
@@ -543,7 +552,6 @@ export function starvingObligations(
       }
     }
 
-    const daysIdle = Math.max(0, Math.floor((t - ms(c.updatedAt)) / DAY_MS));
     const dueMs = ms(c.dueAt);
     const daysOverdue = !Number.isNaN(dueMs) && dueMs < t ? Math.floor((t - dueMs) / DAY_MS) : 0;
     const daysSincePassed = passedBlock?.daysSincePassed ?? 0;

@@ -328,7 +328,9 @@ nudge" sweep — the reconciliation entry point for detecting drift without wait
 
 **`starving` (cos-ops#24)** — a single list across cases, open reminders, and unanswered messages,
 ranked **worst-first** by an **aging** score that rises with `daysIdle` (×1), `daysOverdue` (×2),
-and a passed-unactioned chase block's `daysSincePassed` (×3) — so a long-idle low-priority
+and a passed-unactioned linked timed block's `daysSincePassed` (×3 — *any* past linked timed event
+the case was not touched after: the board cannot tell a chase block from a meeting the human
+linked, and any later write to the case clears it) — so a long-idle low-priority
 obligation eventually outranks a fresh high-priority one (static `priority` is a tie-break only,
 never a score input). An obligation with a linked **TIMED** calendar event in the next 7 days is
 excluded as **already-allocated**; an **all-day** linked event never allocates, past or future (a
