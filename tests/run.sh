@@ -33,12 +33,15 @@
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
-#      two HARD sub-checks: (3c) the board-assertion guardrail phrases must be
+#      three HARD sub-checks: (3c) the board-assertion guardrail phrases must be
 #      present in every second-brain-query/SKILL.md under vault/ and in the
 #      caller-side vault-operations skill (cos-ops#3); (3d) the vault-ingest
 #      receipt contract — vault-operations must carry the exact "stamp the
 #      receipt only on `completed`" phrases, so a future skill edit can't
-#      silently drop the only-on-completed rule (cos-ops#2).
+#      silently drop the only-on-completed rule (cos-ops#2); (3e) the releasing
+#      docs must never claim an owner bypass — the main ruleset's bypass_actors
+#      is deliberately empty, and this exact claim hid a 45-day release outage
+#      (cos-ops#23).
 # NOTE ON THE api-* STEPS (4-12): they drive a REAL board over HTTP, but against an
 # AUTO-STARTED, ISOLATED THROWAWAY board — an own-.next `next dev` on port 3999, its
 # store pointed at a sandbox seeded from tests/fixtures/board-seed.json (synthetic),
@@ -523,7 +526,7 @@ else
   fail_reasons="${fail_reasons} nutrition-status-consumers"
 fi
 
-# --- 3. vault property checks (grep; mostly WARN-level, one HARD sub-check) --
+# --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --
 # Post-migration the vault holds knowledge only: no task checkboxes in wiki/,
 # and reminders are drained to the board (no open "- [ ]" left). These are the
 # migration *target*; flagged as WARN so the suite is runnable while the
@@ -647,6 +650,61 @@ if [ "${receipt_gate_fail}" -ne 0 ]; then
   fail_reasons="${fail_reasons} vault-receipt-contract"
 else
   echo "OK: vault-ingest receipt contract present in vault-operations."
+fi
+
+# 3e. HARD GATE — releasing docs truth (cos-ops#23). The releasing docs must never
+# again claim an owner bypass: ruleset 17526068's `bypass_actors` is deliberately
+# empty, and this exact claim hid a 45-day release outage (ADR 0014: a load-bearing
+# rule is a gate, not prose alone — mirrors 3c/3d). Like 3c/3d it is a PRESENCE
+# check on the load-bearing phrase ("no owner bypass exists" must be stated in both
+# files), plus a case-insensitive guard against the three retired claims (a repo test
+# cannot observe the ruleset itself, only what the docs say about it). If a bypass
+# actor is ever legitimately added, update the docs and this sub-check in the same PR.
+releasing_truth_fail=0
+releasing_md="${REPO_ROOT}/docs/reference/releasing.md"
+release_please_yml="${REPO_ROOT}/.github/workflows/release-please.yml"
+
+if [ -f "${releasing_md}" ]; then
+  if ! grep -qiF -- "no owner bypass exists" "${releasing_md}"; then
+    echo "FAIL: ${releasing_md#"${REPO_ROOT}"/} no longer states that no owner bypass exists."
+    releasing_truth_fail=1
+  fi
+  for p in \
+    "Owner bypass (default)" \
+    "lets the repository owner bypass" \
+    "owner can bypass"; do
+    if grep -qiF -- "${p}" "${releasing_md}"; then
+      echo "FAIL: ${releasing_md#"${REPO_ROOT}"/} still claims an owner bypass: ${p}"
+      releasing_truth_fail=1
+    fi
+  done
+else
+  echo "FAIL: docs/reference/releasing.md not found."
+  releasing_truth_fail=1
+fi
+
+if [ -f "${release_please_yml}" ]; then
+  if ! grep -qiF -- "no owner bypass exists" "${release_please_yml}"; then
+    echo "FAIL: ${release_please_yml#"${REPO_ROOT}"/} no longer states that no owner bypass exists."
+    releasing_truth_fail=1
+  fi
+  if grep -qiF -- "merge via owner bypass" "${release_please_yml}"; then
+    echo "FAIL: ${release_please_yml#"${REPO_ROOT}"/} still claims an owner bypass: merge via owner bypass"
+    releasing_truth_fail=1
+  fi
+else
+  echo "FAIL: .github/workflows/release-please.yml not found."
+  releasing_truth_fail=1
+fi
+
+if [ "${releasing_truth_fail}" -ne 0 ]; then
+  echo "releasing-docs-truth: FAIL"
+  echo "  hint: ruleset 17526068's bypass_actors is [] and stays []; describe the removed"
+  echo "  claim without quoting it (\"no owner bypass exists\" is fine)."
+  fail=1
+  fail_reasons="${fail_reasons} releasing-docs-truth"
+else
+  echo "OK: releasing docs make no owner-bypass claim."
 fi
 
 # --- start the throwaway TEST board (api steps [4]-[12] drive THIS, never live)
