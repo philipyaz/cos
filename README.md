@@ -130,6 +130,13 @@ setup-vault → guard-setup → mcp-bridge-setup → backup-recovery
 
 When it finishes, open the board at your `$BOARD_URL` (`http://localhost:$BOARD_PORT` by default) and start triaging.
 
+> **Already running Cos and pulling an update?** Run the **`cos-upgrade`** skill (or, by hand,
+> `git pull` then `node scripts/upgrade-check.mjs`). The store migrates itself on the next board
+> start, but nothing else does — the production board, the launchd bridges, the Cowork skill
+> bundles and scheduled tasks all keep running the *old* version silently until they are rebuilt,
+> kicked, or re-uploaded. `upgrade-check` derives exactly that list from what your pull changed.
+> Runbook + per-release notes: [Upgrading](https://philipyaz.github.io/cos/reference/upgrading/).
+
 > **A second machine?** To just **view** your board from another device, you need nothing on it. On your
 > main machine — the **hub** — run the *production* board (`cd board && npm run build && npm run start`, or
 > the `boardapp` LaunchAgent) and expose it on your [Tailscale](https://tailscale.com) network with

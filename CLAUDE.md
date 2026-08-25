@@ -119,6 +119,8 @@ bash tests/run.sh                    # full test suite — sandboxed; the one li
 (cd board && npx --no-install tsc --noEmit && npm run lint)   # board typecheck + ESLint
 node tests/board-lint.mjs [path]     # store invariants — READ-ONLY; path defaults to the LIVE board/data/cases.json
 node scripts/pack-skills.mjs         # rebuild operator-skill bundles + the generated skills-README catalog; `--check` is the CI gate
+node scripts/upgrade-check.mjs       # AFTER a git pull on an existing install: the ordered post-pull checklist (rebuild/kickstart/re-upload/schedule) derived from the diff — the `cos-upgrade` skill runs it; never mutates
+node scripts/mark-skill-uploaded.mjs <skill>|--all|--list   # per-machine receipt of the bundles you uploaded to Cowork (mcp/logs/); upgrade-check lists hash drift against it
 ```
 
 - **Required CI checks:** `lint-test` (manifest + `.mcp.json` sync-check, board tsc + ESLint, then
@@ -145,3 +147,6 @@ node scripts/pack-skills.mjs         # rebuild operator-skill bundles + the gene
 - **Store schema discipline** (`docs/reference/migration.md`): **NEVER run a board older than the
   live store's `schemaVersion`** — older code silently drops the newer keys on write (compare the
   store's `schemaVersion` in `board/data/cases.json` with `SCHEMA_VERSION` in `board/lib/types.ts`).
+  **Upgrading an existing install is `cos-upgrade`** (`docs/reference/upgrading.md`): a pull migrates
+  the store on the next start but rebuilds/restarts/re-uploads NOTHING — every stale piece is a silent
+  no-op, and `scripts/upgrade-check.mjs` is what turns the diff into the list.

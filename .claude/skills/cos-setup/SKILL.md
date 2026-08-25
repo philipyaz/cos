@@ -574,6 +574,11 @@ After setup, most of it runs itself — make sure the user knows how to live wit
   snapshot + recovery-key readiness), **`/vault`** (vault wiring + Obsidian deep-link).
 - **When a client can't see a server:** re-run `mcp/ensure-bridges.sh`; if it's still missing, re-run
   **/mcp-bridge-setup**. Per-service logs for any WARN/DOWN live in `mcp/logs/<name>.{err,out}.log`.
+- **Pulling an update later is a different skill: `/cos-upgrade`.** A `git pull` migrates the store
+  on the next board start and nothing else — the production board, the launchd bridges, the Cowork
+  bundles and scheduled tasks keep running the old version silently. `/cos-upgrade` backs up, pulls,
+  runs `node scripts/upgrade-check.mjs` (the diff → the ordered checklist), applies the automatable
+  steps, and hands you the manual residue. Never re-run `cos-setup` to upgrade.
 - **The two standing gestures:** Guard ships **OFF** — flip it ON in `/security` once its model deps are
   ready (or deliberately leave it OFF; see **/guard-setup**). Backups then run **nightly at 03:30** on
   their own once **/backup-recovery** is set up.

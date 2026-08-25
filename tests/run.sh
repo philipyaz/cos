@@ -287,6 +287,8 @@
 #      plists (+ its REAL bind behavior via a throwaway http server), scheduled
 #      backup plist, spoke install-set scoping + loud role errors, the loader's
 #      spoke/localhost + invalid-role hard-fails. Run UNCONDITIONALLY (node only).
+#   13g. upgrade-check.mjs — the post-pull planner (scripts/upgrade-check.mjs): path → step
+#      contract + a CLI smoke test on a throwaway git repo. Hermetic; HARD gate.
 #  14. search-sidecar — headless python tests for the semantic search sidecar
 #      (search/test_search.py): index/topk/batch/determinism over BOTH backends,
 #      offline (COS_SEARCH_EMBEDDER=hash, no network). uv-GATED — skipped (not
@@ -1750,6 +1752,23 @@ else
   echo "gen-roles: FAIL"
   fail=1
   fail_reasons="${fail_reasons} gen-roles"
+fi
+
+# --- 13g. upgrade-check (hermetic; the post-pull planner's path → step contract) ----
+# scripts/upgrade-check.mjs turns a git range into the ordered post-pull checklist for
+# an EXISTING install (rebuild the board, kickstart the bridges whose code moved, upload
+# the rebuilt Cowork bundles, create the new scheduled triggers, add new config keys,
+# back up before a schema bump). Every one of those is a SILENT no-op when forgotten, so
+# the mapping is pinned here. Pure-function tests + a CLI smoke test on a throwaway git
+# repo in $TMPDIR: no board, no launchd, no config, no live data.
+echo
+echo "--- [13g] upgrade-check (hermetic post-pull planner) --------"
+if node "${SCRIPT_DIR}/upgrade-check.mjs"; then
+  echo "upgrade-check: PASS"
+else
+  echo "upgrade-check: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} upgrade-check"
 fi
 
 # --- 13. search sidecar (python, headless, deterministic) --------------------

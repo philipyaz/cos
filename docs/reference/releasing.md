@@ -39,6 +39,9 @@ Releases follow [Semantic Versioning](https://semver.org):
    `package.json` bump + `CHANGELOG.md` entry.
 3. The Release PR is your **staging area** — let it accumulate as more PRs land. Want richer
    notes than the commit subjects? Edit `CHANGELOG.md` *in the Release PR* before merging.
+   Always add an **"Upgrade notes"** paragraph there that links the release's section of
+   [Upgrading an existing install](upgrading.md) — the schema range, new config keys, and anything a
+   machine must re-render, re-upload, or restart; the conventional-commit changelog never says any of that.
 4. **To cut the release, merge the Release PR.** release-please then tags `vX.Y.Z`, publishes
    the GitHub Release from the changelog, and bumps `.release-please-manifest.json`.
 
