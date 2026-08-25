@@ -1429,7 +1429,7 @@ else
 fi
 
 # --- 10k. api-triage-decisions (only when a board is healthy) ----------------
-# The mail-triage editorial-drop decision record (cos-ops#41, v16): a drop writes a receipt
+# The mail-triage editorial-drop decision record (cos-ops#41, v17): a drop writes a receipt
 # keyed (sender, source, reason) — a repeat drop bumps `count`, adds no row; the sender is
 # NORMALIZED (a display-name+parenthetical form collapses to the bare address). The
 # dropped:promoted ratio + the first-time-dropped set are computed on read (ADR 0017): seeding

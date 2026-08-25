@@ -62,7 +62,7 @@
 // aging-ordered list across cases, open reminders, and unanswered messages computed by
 // starvingObligations (board/lib/selectors.ts); "already chased" is derived from a linked timed
 // calendar event within the next 7 days, never stored. Same route, no new tool.
-// v3.6: TRIAGE DECISIONS (cos-ops#41) — the mail-triage editorial-drop decision record. A drop
+// v3.7: TRIAGE DECISIONS (cos-ops#41) — the mail-triage editorial-drop decision record. A drop
 // is a real, frequent branch of mail-to-board's five-test gate that used to leave zero state;
 // record_triage_decision now writes the one receipt (sender, source, reason) the moment a thread
 // is dropped — upserted per (sender, source, reason), so hundreds of drops compress into tens of
@@ -885,7 +885,7 @@ async function handleMarkVaultIngested(args) {
 }
 
 // ── Triage decision tools ────────────────────────────────────────────────────
-// The mail-triage editorial-drop decision record (board/lib/triage-decisions.ts) — see the v3.6
+// The mail-triage editorial-drop decision record (board/lib/triage-decisions.ts) — see the v3.7
 // changelog note above. record_triage_decision WRITES the receipt; list_triage_decisions READS
 // the computed summary + first-time senders; resolve_triage_decision WRITES the human's answer.
 
@@ -978,8 +978,8 @@ async function handleResolveTriageDecision(args) {
 
   const d = data.decision;
   const verb =
-    args.resolution === "reverse"
-      ? "Reversed — the sweep will stop dropping this sender."
+    d.status === "reversed"
+      ? (args.resolution === "reverse" ? "Reversed — the sweep will stop dropping this sender." : "Row is already REVERSED — a confirm does not re-arm the filter; the sweep will not drop this sender.")
       : "Confirmed — the sweep keeps filtering this sender.";
   return text(`${d.id} ${d.sender} [${d.source}/${d.reason}] → ${d.status}. ${verb}`);
 }
@@ -1788,5 +1788,5 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 await start(
   server,
   new StdioServerTransport(),
-  `board MCP server v3.6 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
+  `board MCP server v3.7 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
 );

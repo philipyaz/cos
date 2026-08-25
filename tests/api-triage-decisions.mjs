@@ -199,12 +199,34 @@ async function main() {
       "criterion 6: an already-settled sender dropped again does NOT reappear in firstTime",
     );
 
+    // The review is SENDER-scoped: the same confirmed sender dropped under a NEW reason mints a
+    // sibling row (the five-test gate's `reason` is the first failing test, which varies email to
+    // email) — and the sender STILL stays out of firstTime (cos#100 review F2's fixture).
+    const drop1NewReason = await POST("/api/triage-decisions", { sender: "noise@example.com", source: "gmail", reason: "no_stakes" });
+    check(drop1NewReason.status === 201, `a NEW reason for the confirmed sender mints a sibling row → 201 (got ${drop1NewReason.status})`);
+    const afterNewReason = await getGmail();
+    check(
+      !(afterNewReason.body.summary?.firstTime || []).map((f) => f.sender).includes("noise@example.com"),
+      "…and the confirmed sender stays OUT of firstTime even with an unreviewed sibling row (sender-scoped, not row-scoped)",
+    );
+
+    // Filter validation on the read: an unknown source/status is a 400, never a silent unscoped fallback.
+    const badSourceRead = await GET("/api/triage-decisions?source=gmial");
+    check(badSourceRead.status === 400, `GET ?source=<typo> → 400 (got ${badSourceRead.status})`);
+    const badStatusRead = await GET("/api/triage-decisions?status=bogus");
+    check(badStatusRead.status === 400, `GET ?status=<unknown> → 400 (got ${badStatusRead.status})`);
+
     // ------------------------------------------------------------------------
     // (d) reversal is sender-scoped and board-enforced (fail closed).
     // ------------------------------------------------------------------------
     const reverse2 = await PATCH(`/api/triage-decisions/${encodeURIComponent(td2Id)}`, { resolution: "reverse" });
     check(reverse2.status === 200, `PATCH {resolution:reverse} → 200 (got ${reverse2.status})`);
     check(reverse2.body.decision?.status === "reversed", `reverse flips status to reversed (got "${reverse2.body.decision?.status}")`);
+    const onlyReversed = await GET("/api/triage-decisions?source=gmail&status=reversed");
+    check(
+      onlyReversed.status === 200 && Array.isArray(onlyReversed.body.decisions) && onlyReversed.body.decisions.length >= 1 && onlyReversed.body.decisions.every((d) => d.status === "reversed"),
+      `GET ?status=reversed filters the list to reversed rows only (got ${onlyReversed.body.decisions?.length} row(s))`,
+    );
 
     const rowCountBeforeRefusal = (await getGmail()).body.decisions.length;
     const countBeforeRefusal = reverse2.body.decision.count;

@@ -1,4 +1,4 @@
-# board MCP server (v3.6)
+# board MCP server (v3.7)
 
 A stdio MCP server (registry name **`board`**) that opens and maintains cases on the
 Cos board — the single to-do surface for both **work** and **life**. Every

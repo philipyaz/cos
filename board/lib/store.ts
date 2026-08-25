@@ -221,7 +221,7 @@ const nowISO = (): string => new Date().toISOString();
 // MessageRecord.url (v8): absent stays absent, present rides through unchanged.
 // v16 carries db.shoppingItems forward when it is an array — mirrors db.pantryItems. No
 // backfill, no synthesis.
-// v16 carries db.triageDecisions forward when it is an array (the per-sender mail-triage
+// v17 carries db.triageDecisions forward when it is an array (the per-sender mail-triage
 // editorial-drop decision record — mirrors db.healthEntries/db.coachingArtifacts). No
 // backfill: nothing to backfill, since no drop was ever recorded before this version.
 export function migrate(raw: unknown): DBShape {
@@ -417,7 +417,7 @@ function parseAndMigrate(text: string): DBShape {
   if (!db.coachingArtifacts) db.coachingArtifacts = [];
   if (!db.nutritionTargets) db.nutritionTargets = []; // agent-authored targets (v14); the three v14 singletons stay optional/absent until first set
   if (!db.shoppingItems) db.shoppingItems = []; // the persistent shopping list (v16)
-  if (!db.triageDecisions) db.triageDecisions = []; // mail-triage editorial-drop decisions (v16)
+  if (!db.triageDecisions) db.triageDecisions = []; // mail-triage editorial-drop decisions (v17)
   if (!db.pending) db.pending = [];
   if (!db.views) db.views = [];
   if (!db.labels) db.labels = [];
@@ -1928,7 +1928,7 @@ export function applyShoppingItemUpdate(rec: ShoppingItem, patch: Record<string,
   return rec;
 }
 
-// ── Mail-triage decisions (v16) ──────────────────────────────────────────────
+// ── Mail-triage decisions (v17) ──────────────────────────────────────────────
 // The store's first POLICY collection: not a work artifact (case/message/reminder/plan/log)
 // but an editorial judgment about a SENDER. Written by mail-to-board's five-test drop gate,
 // consulted so a reversed sender is never dropped again, reviewed by /reminders-review's
@@ -1959,13 +1959,27 @@ export function findTriageDecision(db: DBShape, id: string): TriageDecision | un
 // name fragment). Lowercased last, mirroring the guard's TrustRecord.email key (no shared code
 // possible — that normalizer lives in the sidecar).
 export function normalizeTriageSender(raw: string): string {
+  // Strip a `mailto:` prefix, surrounding quotes, and trailing sentence punctuation from an
+  // addr-spec — each of those forked one sender into two keys (`"a@b.com"` vs `a@b.com`,
+  // `a@b.com;` vs `a@b.com`), which silently breaks the reversal guarantee.
+  const clean = (addr: string): string =>
+    addr
+      .trim()
+      .replace(/^mailto:/i, "")
+      .replace(/^["']+|["']+$/g, "")
+      .replace(/[.;,]+$/, "")
+      .toLowerCase();
   const trimmed = (raw ?? "").trim();
   const angle = trimmed.match(/<([^<>]+)>/);
-  if (angle) return angle[1].trim().toLowerCase();
+  if (angle) return clean(angle[1]);
   const escapedAngle = trimmed.match(/&lt;([^&]+)&gt;/);
-  if (escapedAngle) return escapedAngle[1].trim().toLowerCase();
+  if (escapedAngle) return clean(escapedAngle[1]);
+  // A parenthesised addr-spec wins over a bare one: "Tips@Home newsletter (tips@example.com)" keys
+  // by the real address, not by the display name that happens to contain an "@".
+  const paren = trimmed.match(/\(([^()\s]+@[^()\s]+)\)/);
+  if (paren) return clean(paren[1]);
   const bare = trimmed.match(/[^\s<>(),]+@[^\s<>(),]+/);
-  if (bare) return bare[0].toLowerCase();
+  if (bare) return clean(bare[0]);
   return trimmed.toLowerCase();
 }
 

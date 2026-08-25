@@ -22,10 +22,15 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const sourceParam = sp.get("source")?.trim() || undefined;
   const statusParam = sp.get("status")?.trim() || undefined;
-  const source =
-    sourceParam && VALID_MESSAGE_SOURCE.includes(sourceParam as MessageSource)
-      ? (sourceParam as MessageSource)
-      : undefined;
+  // An unknown filter value is a 400, never a silent fallback to the unscoped (mixed-scope) summary —
+  // POST 400s on the same input, and a typo'd `?source=gmial` read as the gmail figure otherwise.
+  if (sourceParam && !VALID_MESSAGE_SOURCE.includes(sourceParam as MessageSource)) {
+    return NextResponse.json({ error: `'source' must be one of: ${VALID_MESSAGE_SOURCE.join(", ")}.` }, { status: 400 });
+  }
+  if (statusParam && !VALID_TRIAGE_DECISION_STATUS.includes(statusParam as TriageDecisionStatus)) {
+    return NextResponse.json({ error: `'status' must be one of: ${VALID_TRIAGE_DECISION_STATUS.join(", ")}.` }, { status: 400 });
+  }
+  const source = sourceParam ? (sourceParam as MessageSource) : undefined;
 
   const db = await readDB();
 

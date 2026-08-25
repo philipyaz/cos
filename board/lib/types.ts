@@ -149,12 +149,12 @@ export const VALID_BIOLOGICAL_SEX: BiologicalSex[] = ["male", "female"];
 // "nutrition" add-on — purely additive; old v15 files read unchanged (the array defaults
 // absent). migrate() carries it forward when present, no backfill, no synthesis. New enums:
 // ShoppingCategory, ShoppingStatus, ShoppingSource.
-// v16 adds db.triageDecisions (TriageDecision[]) — the per-(sender, source, reason) editorial-drop
+// v17 adds db.triageDecisions (TriageDecision[]) — the per-(sender, source, reason) editorial-drop
 // decision record mail-to-board's five-test gate writes when it drops a thread, and
 // /reminders-review's first-time-senders digest reviews. Purely additive; old files read unchanged
 // (triageDecisions defaults to []). migrate() carries it forward when present — no backfill, since
 // no drop was ever recorded before this version. New enums: TriageDropReason, TriageDecisionStatus.
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 // Who performed a mutation — drives activity attribution + note authorship.
 export type Actor = "human" | "agent" | "system";
@@ -857,7 +857,7 @@ export interface QuarantineRecord {
   releasedAt?: string; // ISO-8601 UTC; stamped on the status→released transition — the clock the TTL auto-purge measures from
 }
 
-// ── Mail-triage decisions (v16; this store, NOT the guard sidecar) ────────────
+// ── Mail-triage decisions (v17; this store, NOT the guard sidecar) ────────────
 // A per-(sender, source, reason) editorial-drop record — deliberately NOT a log of dropped
 // emails: mail-to-board's five-test gate (SKILL.md) fails a thread for one of five reasons and
 // this collection remembers the VERDICT, not the message. Structural twin of QuarantineRecord
@@ -1144,7 +1144,7 @@ export interface DBShape {
   views?: SavedView[]; // saved views
   labels?: LabelDef[]; // the active label catalog (installed bundles + custom labels)
   settings?: Settings;
-  triageDecisions?: TriageDecision[]; // Mail-triage editorial-drop decisions (v16); core (mail triage) — no add-on gate
+  triageDecisions?: TriageDecision[]; // Mail-triage editorial-drop decisions (v17); core (mail triage) — no add-on gate
 }
 
 export const VALID_CASE_STATUS: CaseStatus[] = ["urgent", "todo", "in_progress", "waiting_for_input", "done"];

@@ -23,6 +23,7 @@ import {
   TriageReversedError,
 } from "../../board/lib/store.ts";
 import type { DBShape, TriageDecision, MessageRecord } from "../../board/lib/types.ts";
+import { SCHEMA_VERSION } from "../../board/lib/types.ts";
 
 let seq = 0;
 function td(over: Partial<TriageDecision> = {}): TriageDecision {
@@ -57,7 +58,7 @@ function msg(over: Partial<MessageRecord> = {}): MessageRecord {
 
 function mkDb(over: Partial<DBShape> = {}): DBShape {
   return {
-    schemaVersion: 16,
+    schemaVersion: SCHEMA_VERSION,
     version: 1,
     cases: [],
     messages: [],
@@ -152,6 +153,12 @@ test("computeTriageSummary: promoted is messages-derived and independent of tria
 
 test("normalizeTriageSender: extracts the addr-spec, never a name fragment, across every measured shape", () => {
   assert.equal(normalizeTriageSender("dan@example.com"), "dan@example.com", "a bare address rides through lowercased");
+  assert.equal(normalizeTriageSender("Tips@Home newsletter (tips@example.com)"), "tips@example.com", "a parenthesised addr-spec wins over a display name that contains an @");
+  assert.equal(normalizeTriageSender("a@b.com;"), "a@b.com", "trailing ; stripped");
+  assert.equal(normalizeTriageSender("a@b.com."), "a@b.com", "trailing . stripped");
+  assert.equal(normalizeTriageSender('"a@b.com"'), "a@b.com", "surrounding quotes stripped");
+  assert.equal(normalizeTriageSender("mailto:A@B.com"), "a@b.com", "mailto: prefix dropped");
+  assert.equal(normalizeTriageSender("<MAILTO:x@y.org>"), "x@y.org", "…also inside angle brackets");
   assert.equal(
     normalizeTriageSender("promo@example.com (unsubscribe here)"),
     "promo@example.com",
@@ -251,12 +258,33 @@ test("applyTriageResolution: 'reverse' stamps reviewedAt AND flips status to rev
   assert.ok(typeof rec.reviewedAt === "string" && !Number.isNaN(Date.parse(rec.reviewedAt)));
 });
 
-test("applyTriageResolution: idempotent re-calls just restamp reviewedAt", () => {
+test("applyTriageResolution: idempotent re-calls just restamp reviewedAt (never earlier)", () => {
   const rec = td({ status: "active" });
   applyTriageResolution(rec, "confirm");
-  const first = rec.reviewedAt;
+  const first = rec.reviewedAt!;
   applyTriageResolution(rec, "confirm");
   assert.equal(rec.status, "active");
   assert.ok(typeof rec.reviewedAt === "string", "still a valid stamp after a second confirm");
-  void first; // both calls stamp "now" — equality isn't asserted (same-tick clocks can coincide)
+  assert.ok(rec.reviewedAt! >= first, "the second confirm re-stamps reviewedAt to now (monotonic, same-tick allowed)");
+});
+
+test("computeTriageSummary: a CONFIRMED sender dropped again under a NEW reason stays OUT of firstTime (sender-scoped review)", () => {
+  const db = mkDb({
+    triageDecisions: [
+      td({ id: "TD-1", sender: "news@example.com", source: "gmail", reason: "notification", status: "active", reviewedAt: "2026-08-10T09:00:00.000Z" }),
+      td({ id: "TD-2", sender: "news@example.com", source: "gmail", reason: "no_stakes", status: "active" }), // minted by a later sweep
+      td({ id: "TD-3", sender: "fresh@example.org", source: "gmail", reason: "notification", status: "active" }),
+    ],
+  });
+  const s = computeTriageSummary(db, "gmail");
+  assert.deepEqual(s.firstTime.map((f) => f.sender), ["fresh@example.org"], "the reviewed sender is settled for EVERY reason; only the never-reviewed sender is first-time");
+  assert.equal(s.senders, 2, "distinct (sender, source) pairs still count both");
+});
+
+test("computeTriageSummary: promoted counts INBOUND messages only — sent mail never ran the drop gate", () => {
+  const db = mkDb({
+    messages: [msg({ id: "M-1", source: "gmail" }), msg({ id: "M-2", source: "gmail", outbound: true }), msg({ id: "M-3", source: "whatsapp" })],
+  });
+  assert.equal(computeTriageSummary(db, "gmail").promoted, 1);
+  assert.equal(computeTriageSummary(db).promoted, 2, "unscoped: every inbound message, any source");
 });

@@ -1,5 +1,5 @@
-// Unit tests for the v15 → v16 migration that adds the mail-triage editorial-drop decision
-// record: db.triageDecisions (TriageDecision[]) — cos-ops#41. v16 is PURELY ADDITIVE — an old
+// Unit tests for the v16 → v17 migration that adds the mail-triage editorial-drop decision
+// record: db.triageDecisions (TriageDecision[]) — cos-ops#41. v17 is PURELY ADDITIVE — an old
 // v15 file reads unchanged, with NO triageDecisions key synthesized (no backfill: unlike v14's
 // nutritionGoal→bodyProfile/bodyObjective transform, this migration is a bare carry-forward,
 // exactly like db.pantryItems/db.nutritionTargets — there is nothing to backfill, since no drop
@@ -31,12 +31,12 @@ const DISK_DIR = await fsp.mkdtemp(nodePath.join(os.tmpdir(), "cos-triage-mig-")
 process.env.COS_DATA_DIR = DISK_DIR;
 const store = await import("../../board/lib/store.ts?triagemig");
 
-// A v15 store carrying pre-v16 state but WITHOUT db.triageDecisions — the realistic "old file"
-// a v16 binary reads.
+// A v16 store carrying pre-v17 state but WITHOUT db.triageDecisions — the realistic "old file"
+// a v17 binary reads.
 const V15_FIXTURE = {
-  schemaVersion: 15,
+  schemaVersion: 16,
   version: 3176,
-  cases: [{ id: "CASE-1", title: "Pre-v16 case", status: "todo", domain: "work", tasks: [], messageIds: [] }],
+  cases: [{ id: "CASE-1", title: "Pre-v17 case", status: "todo", domain: "work", tasks: [], messageIds: [] }],
   messages: [
     {
       id: "M-1",
@@ -55,16 +55,16 @@ const V15_FIXTURE = {
   settings: { autoSync: false },
 };
 
-test("migrate(): a v15 object without triageDecisions reads clean as v16 — NO key synthesized (no backfill)", () => {
+test("migrate(): a v16 object without triageDecisions reads clean as v17 — NO key synthesized (no backfill)", () => {
   const db = store.migrate(V15_FIXTURE);
 
   assert.equal(db.schemaVersion, SCHEMA_VERSION, "schemaVersion stamped to the current SCHEMA_VERSION");
   assert.equal(db.version, 3176, "the monotonic version is preserved through migration");
   assert.equal(db.triageDecisions, undefined, "no triageDecisions key is synthesized — absent stays absent");
   // The pre-existing v15 state rides through untouched (the additive guarantee).
-  assert.equal(db.messages.length, 1, "the v15 message survives the v16 read");
+  assert.equal(db.messages.length, 1, "the v16 message survives the v17 read");
   assert.equal(db.messages[0]?.id, "M-1");
-  assert.equal(db.cases[0]?.id, "CASE-1", "the pre-v16 case survives");
+  assert.equal(db.cases[0]?.id, "CASE-1", "the pre-v17 case survives");
 });
 
 test("migrate(): an object WITH triageDecisions carries the array forward verbatim", () => {
