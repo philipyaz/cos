@@ -12,6 +12,7 @@ import { assertAddonEnabled } from "@/lib/addons";
 import { resolveActor, storeErrorToResponse, isISODate, isHHMM } from "@/lib/route-helpers";
 import { planPlacement, DEFAULT_WORKING_HOURS, type BusyWindow, type CandidateWindow, type PlacementRequest } from "@/lib/placement";
 import { todayISO } from "@/lib/selectors";
+import { effectivePlanDayStatus } from "@/lib/fitness-plan-status";
 import type { CalendarEvent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -152,7 +153,7 @@ export async function POST(req: NextRequest) {
           throw new BadRequestError(`Each plan day needs a 'date' as YYYY-MM-DD (got ${JSON.stringify(day?.date)}).`);
         }
         const isRestDay = day.type === "rest" || day.type === "active_recovery";
-        const isResolved = (day.status ?? "planned") !== "planned";
+        const isResolved = effectivePlanDayStatus(day) !== "planned";
         if (!isRestDay && !isResolved && (typeof day.duration_min !== "number" || !Number.isFinite(day.duration_min) || day.duration_min <= 0)) {
           throw new BadRequestError(`Day ${day.date}: 'duration_min' must be a finite positive number.`);
         }
@@ -178,7 +179,7 @@ export async function POST(req: NextRequest) {
           });
           return;
         }
-        if ((day.status ?? "planned") !== "planned") {
+        if (effectivePlanDayStatus(day) !== "planned") {
           directResultByIndex.set(index, {
             date: day.date,
             action: "skipped",

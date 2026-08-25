@@ -10,7 +10,7 @@
 // the per-item presentation (renderItem, reading from the artifact payload + the artifact's own
 // id, needed for the per-day outcome write).
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { pushPlanToCalendar, setPlanDayOutcome } from "@/lib/fitness-client";
 import { formatDay } from "@/lib/fitness-format";
 import { isSessionDay } from "@/lib/fitness-plan-status";
@@ -86,7 +86,9 @@ export function TrainingPlanView() {
       kind="training_plan"
       title="Training plan"
       emptyHint="No training plans yet. Ask your Cos agent (e.g. in Claude Cowork: “make me a training plan”) to generate one — it'll appear here automatically."
-      renderItem={(payload, artifact) => <PlanBody plan={payload as unknown as TrainingPlan} artifactId={artifact.id} />}
+      renderItem={(payload, artifact) => (
+        <PlanBody plan={payload as unknown as TrainingPlan} artifactId={artifact.id} artifactUpdatedAt={artifact.updatedAt} />
+      )}
     />
   );
 }
@@ -94,18 +96,24 @@ export function TrainingPlanView() {
 // The rendered plan body — the EXACT presentational JSX from the original view, now reading
 // from the persisted artifact payload instead of an on-demand useState. Owns the calendar
 // push AND (cos-ops#19) the per-day outcome control — the two mutations a viewed plan drives.
-function PlanBody({ plan, artifactId }: { plan: TrainingPlan; artifactId: string }) {
+function PlanBody({ plan, artifactId, artifactUpdatedAt }: { plan: TrainingPlan; artifactId: string; artifactUpdatedAt: string }) {
   const [pushing, setPushing] = useState(false);
   const [pushResult, setPushResult] = useState<{ created: number; updated: number; skipped: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Per-day outcome control: which date's write is in flight (disables that row's buttons
   // only), and an optimistic overlay of {date -> {status, movedTo}} applied on top of the
-  // fetched payload so a tap feels instant without waiting on an SSE round-trip. Reset when
-  // the viewed artifact changes (ArtifactFeed does not remount PlanBody on prev/next).
+  // fetched payload so a tap feels instant without waiting on an SSE round-trip. The overlay
+  // is KEYED to the artifact identity + updatedAt it was written against: the SSE refetch
+  // after any day write (ours or an agent's set_plan_day_outcome) yields a new updatedAt, at
+  // which point the server payload is the truth and the overlay is dropped — so an agent-side
+  // move/revert on a day the user tapped can never stay hidden behind a stale overlay. Keyed
+  // state instead of a reset effect: no setState-in-effect, and prev/next artifact (ArtifactFeed
+  // does not remount PlanBody) is just another key change.
+  const overlayKey = `${artifactId}@${artifactUpdatedAt}`;
   const [pendingDate, setPendingDate] = useState<string | null>(null);
-  const [overrides, setOverrides] = useState<Record<string, { status: string; movedTo?: string }>>({});
-  useEffect(() => setOverrides({}), [artifactId]);
+  const [overlay, setOverlay] = useState<{ key: string; map: Record<string, { status: string; movedTo?: string }> }>({ key: overlayKey, map: {} });
+  const overrides = overlay.key === overlayKey ? overlay.map : {};
 
   const days = Array.isArray(plan.days) ? plan.days : [];
 
@@ -138,7 +146,7 @@ function PlanBody({ plan, artifactId }: { plan: TrainingPlan; artifactId: string
     setError(null);
     try {
       await setPlanDayOutcome(artifactId, { date, status });
-      setOverrides((prev) => ({ ...prev, [date]: { status } }));
+      setOverlay((prev) => ({ key: overlayKey, map: { ...(prev.key === overlayKey ? prev.map : {}), [date]: { status } } }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not update outcome");
     } finally {

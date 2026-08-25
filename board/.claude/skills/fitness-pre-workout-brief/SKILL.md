@@ -98,7 +98,11 @@ session the watch already proved.
   1. `set_plan_day_outcome(old_artifact_id, old_date, "moved", moved_to: <new date>)`.
   2. Re-save the week (or the target week) via `save_training_plan` with the session placed on
      its new date — **never include `status`, `movedTo`, or `eventId` keys in the days you
-     send**; the board carries them forward from the old day.
+     send**; the board carries them forward from the old day. **Keep the old date's day entry**
+     in what you send (the board carries its `moved` status + calendar receipt forward by date;
+     dropping the entry loses both), and keep **one entry per date**: a session pulled onto a
+     date that already has one is MERGED into that single entry (or the existing session is
+     pushed to another free day) — the board rejects two entries on one date (400).
   3. `push_plan_to_calendar` for the affected week (ops#17's idempotent path) so the calendar
      reflects the move. **Read the user's REAL calendar yourself first** — this skill does not
      inherit that instruction from `fitness-training-plan`'s STEP 8 (a Cowork bundle is
@@ -107,7 +111,10 @@ session the watch already proved.
      `{date, start, end}` busy times — never a title or attendee — and pass them as
      `busy_windows` on the push. Cos uses `busy_windows` for that one call only and **never
      stores or syncs** it.
-  Relay any `skipped` result the push reports, same as the weekly skill does.
+  Relay any `skipped` result the push reports, same as the weekly skill does — and when the
+  moved day's own result comes back `resolved` **with an `eventId`**, its original session is
+  still on the calendar: tell the user and offer to remove it via the `calendar` MCP's delete
+  tool (the board never deletes it).
 - **A clean day adds nothing.** Nothing unresolved and nothing worth proposing to move →
   **no extra output** in the brief — no "all clear" paragraph. The brief simply starts at
   STEP 1 of the procedure below.

@@ -45,6 +45,14 @@ export function isSessionDay(day: { type?: unknown }): boolean {
   return type !== "rest" && type !== "active_recovery";
 }
 
+// The ONE reader of a day's outcome: a valid `status` is itself, anything else (absent, null,
+// a stray "Done", "") is "planned". Every consumer — this module, the push route's resolved-day
+// skip, the view — must go through this, so the readers cannot drift on what "resolved" means
+// (checkTrainingPlan rejects an invalid status at save time; this is the belt to that brace).
+export function effectivePlanDayStatus(day: { status?: unknown }): PlanDayOutcome {
+  return VALID_PLAN_DAY_OUTCOME.includes(day?.status as PlanDayOutcome) ? (day.status as PlanDayOutcome) : "planned";
+}
+
 export interface PlanReconciliation {
   sessionDays: number; // deny-list days in the plan (the batched line's "N planned")
   outcomes: { done: number; skipped: number; moved: number; planned: number }; // over session days
@@ -78,9 +86,7 @@ export function computePlanReconciliation(input: {
     if (!date) continue; // no date — nothing to reconcile against
 
     sessionDays++;
-    const status: PlanDayOutcome = VALID_PLAN_DAY_OUTCOME.includes(day.status as PlanDayOutcome)
-      ? (day.status as PlanDayOutcome)
-      : "planned";
+    const status = effectivePlanDayStatus(day);
     outcomes[status]++;
 
     if (status === "planned" && date < today) {

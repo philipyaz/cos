@@ -278,6 +278,17 @@ A training plan stops being **write-once** (cos-ops#19): two OPTIONAL keys on ea
 These are **facts the user confirmed** (ADR 0017's stored-fact category, the same as
 `MealPlanEntry.status` on the nutrition side) — the board records them, it never infers one.
 
+**Save-time validation (`save_training_plan` / `POST /api/fitness/coaching`).** The board owns
+these keys, so it validates them on every save (400 otherwise): a present `status` must be one
+of the four outcomes (a stray `"Done"` is rejected — otherwise the push route and the
+reconciliation could disagree on what "resolved" means; both read through the one
+`effectivePlanDayStatus` reader), `movedTo` is required as `YYYY-MM-DD` exactly when `status` is
+`"moved"` and rejected otherwise, and **one entry per date** — every reader (the day route, the
+carry-forward, the calendar receipts, the push) addresses a day by its date, so a second entry
+on the same date would be unreachable by all of them. A `null` `status`/`movedTo` is **absent**,
+never an error: a model that serialises every optional key still saves, and the recorded
+outcome carries forward (below).
+
 **The targeted write — `PATCH /api/fitness/coaching/<id>/day`** (body `{ date, status,
 movedTo?, expectedVersion? }`) sets ONE day's outcome without re-saving the artifact; the
 agent's twin is the fitness MCP's **`set_plan_day_outcome`** tool — the same route, so a UI tap

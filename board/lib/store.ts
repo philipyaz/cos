@@ -1195,7 +1195,11 @@ export function upsertCoachingArtifact(
           const carriedEventId = outgoingEventIdByDate.get(day.date);
           if (carriedEventId) day.eventId = carriedEventId;
         }
-        if (!("status" in day)) {
+        if (day.status == null) {
+          // null/undefined ≡ absent (a model that serialises every optional key must not wipe
+          // the recorded outcomes): drop the stray keys, then inherit the outgoing outcome.
+          delete day.status;
+          delete day.movedTo;
           const carriedOutcome = outgoingOutcomeByDate.get(day.date);
           if (carriedOutcome) {
             day.status = carriedOutcome.status;

@@ -16,6 +16,7 @@ import {
   computePlanReconciliation,
   isSessionDay,
   VALID_PLAN_DAY_OUTCOME,
+  effectivePlanDayStatus,
 } from "../../board/lib/fitness-plan-status.ts";
 import type { HealthEntry } from "../../board/lib/types.ts";
 
@@ -202,4 +203,13 @@ test("computePlanReconciliation: sessionDays equals the sum of every outcomes bu
     r.sessionDays,
     "every session day is counted in exactly one outcomes bucket",
   );
+});
+
+test("effectivePlanDayStatus: the ONE reader — valid is itself, anything else is 'planned'", () => {
+  assert.equal(effectivePlanDayStatus({ status: "done" }), "done");
+  assert.equal(effectivePlanDayStatus({ status: "moved" }), "moved");
+  assert.equal(effectivePlanDayStatus({}), "planned");
+  assert.equal(effectivePlanDayStatus({ status: null }), "planned");
+  assert.equal(effectivePlanDayStatus({ status: "Done" }), "planned", "a stray capitalised value is not a resolution");
+  assert.equal(effectivePlanDayStatus({ status: "" }), "planned");
 });

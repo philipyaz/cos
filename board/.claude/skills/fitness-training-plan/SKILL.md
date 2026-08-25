@@ -77,12 +77,20 @@ rotation reads intentions instead of reality.
   strength + Wed stretch are unanswered — done, skipped, or move one into this week?"* **In
   every mode**: an outcome is a fact only the user knows — **never guess, never mark an
   unanswered day**; it simply stays `planned` (the issue's "Never fabricate" rule — the same
-  discipline JOB 0 uses for nutrition intake).
+  discipline JOB 0 uses for nutrition intake). **In an unattended (scheduled) run nobody can
+  answer:** put the batched question in the run report (and in the new plan's `weekly_notes`)
+  and **proceed to STEP 1 immediately** — the unanswered days stay `planned` and are re-asked
+  next run. Only a conversational run waits for the answer; the weekly plan is never skipped
+  because a question went unanswered.
 - **Answers.** "done" / "skipped" → `set_plan_day_outcome(artifact_id, date, status)`. "move it
   [to \<date\>]" → `set_plan_day_outcome(artifact_id, date, "moved", moved_to:<chosen date>)`
   **and** carry that session into the new week's plan you're about to author (place it on
   `moved_to`'s date when you reach STEP 6) — that's the cross-week relocation; STEP 8's push
-  materialises it once you save.
+  materialises it once you save. Two rules the board enforces on the re-save (400 otherwise):
+  **keep the old date's day entry** in the week you re-save (its `moved` status and its calendar
+  receipt carry forward by date — dropping the entry loses both), and **one entry per date** — a
+  session moved onto a date that already has one is MERGED into that single entry (or the
+  existing session is pushed to another free date), never a second entry on the same date.
 - **Nothing unresolved, or no prior plan** → say so in **one line** and go straight to STEP 1.
 
 ### 1. FETCH the goal + constraints — `get_athlete_profile {}` + the body add-on
@@ -248,13 +256,14 @@ single yes before calling it. In auto mode, call it and report.
 
 **Relay every `skipped` result with its reason** — `rest_day` (expected, no action
 needed), `resolved` (the day was already marked done/skipped/moved by STEP 0.5's close-out or
-the training-plan view; expected, no action needed), `no_free_slot` (the day was genuinely
+the training-plan view; expected), `no_free_slot` (the day was genuinely
 fully booked; tell the user which day), or `outside_working_hours` (every candidate slot fell
 inside working hours — this is a policy skip, not congestion; tell the user their working day
-left no margin). When a skipped rest day's result carries an `eventId`, the plan changed
-since that day was last pushed and a stale session is still on the calendar — tell
-the user and offer to remove it via the `calendar` MCP's delete tool (the board
-itself never deletes it). (The `/fitness/training-plan` page's own "Add to calendar"
+left no margin). When a skipped result — a rest day OR a `resolved` day — carries an
+`eventId`, a session is still on the calendar for a slot that no longer holds one (the plan
+changed since that day was last pushed, or the day was **moved** and its original slot is now
+stale) — tell the user and offer to remove it via the `calendar` MCP's delete tool (the board
+itself never deletes it). A `resolved` result without an `eventId` needs no action. (The `/fitness/training-plan` page's own "Add to calendar"
 button calls the same route server-side; either path works, but only this skill's
 path can supply `busy_windows`.)
 

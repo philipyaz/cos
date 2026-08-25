@@ -95,10 +95,11 @@ const closeOutYesterdaySection = closeOutYesterdayMatch[0];
 
 // --- every engine field must be consumed (named) inside the training-plan close-out section ----
 for (const key of keys) {
+  // The BACKTICKED field reference — plain prose ("record the outcomes") must not satisfy it.
   check(
-    closeOutSection.includes(key),
-    `fitness-training-plan's "### 0.5 CLOSE OUT" section consumes '${key}' — not found as a literal ` +
-      `substring of that section (an incidental mention elsewhere in SKILL.md does not count)`,
+    closeOutSection.includes("`" + key + "`"),
+    `fitness-training-plan's "### 0.5 CLOSE OUT" section consumes '\`${key}\`' — not found as a backticked ` +
+      `field reference in that section (an incidental prose mention does not count)`,
   );
 }
 // `unresolvedDays` is the one field the daily close-out also reads directly.
@@ -108,16 +109,21 @@ check(
 );
 
 // --- job 2: fixed, load-bearing, SECTION-SCOPED phrases (few, individually named) --------------
-for (const phrase of ["set_plan_day_outcome", "provenDone", "one batched"]) {
+for (const phrase of ["set_plan_day_outcome", "provenDone", "one batched", "unattended", "proceed to STEP 1", "keep the old date", "one entry per date"]) {
   check(containsPhrase(closeOutSection, phrase), `the training-plan "### 0.5" section states '${phrase}'`);
 }
+check(
+  containsPhrase(trainingPlanSrc, "a rest day OR a `resolved` day — carries an\n`eventId`") ||
+    containsPhrase(trainingPlanSrc, "a rest day OR a `resolved` day"),
+  "fitness-training-plan/SKILL.md relays a resolved day's stale eventId like a rest day's (offer to remove)",
+);
 check(containsPhrase(step4Section, "outcomes, not intentions"), `the training-plan STEP 4 section states 'outcomes, not intentions'`);
 check(
   containsPhrase(trainingPlanSrc, "never include `status`"),
   "fitness-training-plan/SKILL.md states the re-save discipline: never include `status` (…) in the days you send",
 );
 
-for (const phrase of ["set_plan_day_outcome", "provenDone", "busy_windows"]) {
+for (const phrase of ["set_plan_day_outcome", "provenDone", "busy_windows", "keep the old date", "one entry per date"]) {
   check(containsPhrase(closeOutYesterdaySection, phrase), `the brief's "## STEP 1.5" section states '${phrase}'`);
 }
 for (const phrase of ["never relocate", "confirmation", "no extra output"]) {
@@ -125,7 +131,9 @@ for (const phrase of ["never relocate", "confirmation", "no extra output"]) {
 }
 
 // --- job 3: the route-vs-tool regex pair (always-run home; the api test's copy can SKIP) -------
-const DAY_ROUTE_RE = /coaching\/.*\/day/;
+// Anchored to the CODE shape (a template literal ending in /day`), so a doc comment that
+// mentions the path cannot satisfy it.
+const DAY_ROUTE_RE = /\/api\/fitness\/coaching\/\$\{[^}]+\}\/day`/;
 const serverSrc = readFileSync(SERVER_FILE, "utf8");
 const clientSrc = readFileSync(CLIENT_FILE, "utf8");
 check(DAY_ROUTE_RE.test(serverSrc), "mcp/fitness-server/server.mjs references the /day-suffixed coaching path");

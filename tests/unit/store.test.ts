@@ -1120,6 +1120,29 @@ test("upsertCoachingArtifact: carry-forward never clobbers an eventId already pr
   assert.equal(days[0].eventId, "EVT-ALREADY-SET", "an incoming day's own eventId is never overwritten by carry-forward");
 });
 
+test("upsertCoachingArtifact: an incoming day with status:null is ABSENT — the recorded outcome carries forward (cos#94 review F1)", () => {
+  const db = makeDB({});
+  const days = [
+    { date: "2026-01-05", type: "training", status: "done" },
+    { date: "2026-01-06", type: "training", status: "moved", movedTo: "2026-01-08" },
+    { date: "2026-01-07", type: "training" },
+  ];
+  upsertCoachingArtifact(db, { kind: "training_plan", periodKey: "2026-W02", source: "agent", payload: { week: "2026-W02", days }, generatedAt: ISO });
+  // A model that serialises every optional key: status:null, movedTo:null on every day.
+  const regen = [
+    { date: "2026-01-05", type: "training", status: null, movedTo: null },
+    { date: "2026-01-06", type: "training", status: null, movedTo: null },
+    { date: "2026-01-07", type: "training", status: null, movedTo: null },
+  ];
+  const { artifact } = upsertCoachingArtifact(db, { kind: "training_plan", periodKey: "2026-W02", source: "agent", payload: { week: "2026-W02", days: regen }, generatedAt: ISO });
+  const out = artifact.payload.days as Record<string, unknown>[];
+  assert.equal(out[0].status, "done", "done carried forward over status:null");
+  assert.equal(out[1].status, "moved", "moved carried forward over status:null");
+  assert.equal(out[1].movedTo, "2026-01-08", "movedTo carried with the moved status");
+  assert.equal("status" in out[2], false, "a day that never had an outcome does not gain a null one");
+  assert.equal("movedTo" in out[2], false, "no stray movedTo either");
+});
+
 test("upsertCoachingArtifact: carry-forward is training_plan ONLY — other kinds replace payload untouched", () => {
   const db = makeDB({
     coachingArtifacts: [

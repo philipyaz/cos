@@ -159,11 +159,15 @@ async function main() {
     check(afterD1.body.artifact.payload.weekly_notes === "outcome-channel test plan", "plan-level 'weekly_notes' is untouched");
 
     // ── (b) schema untouched — the outcome rides the verbatim payload ───────────
+    // The sandbox store is the seeded fixture (an OLDER schemaVersion by design), so the first
+    // write of this run stamps the CODE's version: "no migration of its own" is asserted against
+    // /api/healthz's schemaVersion (the code), never the pre-write file.
+    const hz = await GET("/api/healthz");
     const rawAfterD1 = await fs.readFile(DATA_FILE, "utf8");
     const schemaVersionAfter = JSON.parse(rawAfterD1).schemaVersion;
     check(
-      schemaVersionAfter === schemaVersionBefore,
-      `schemaVersion unchanged by a day write (before=${schemaVersionBefore}, after=${schemaVersionAfter})`,
+      typeof hz.body?.schemaVersion === "number" && schemaVersionAfter === hz.body.schemaVersion,
+      `a day write leaves the store at the code's SCHEMA_VERSION (seed ${schemaVersionBefore} → ${schemaVersionAfter}, code ${hz.body?.schemaVersion}) — no migration of its own`,
     );
 
     // ── (c) computed + immediate — reconciliation reflects the write right away ─
@@ -257,6 +261,20 @@ async function main() {
       `${D_REST} still reports skipped/rest_day`,
     );
     check(push.body.created === 0, `nothing at all is created — every day is either resolved, rest, or an unanswered past day (got ${push.body.created})`);
+
+    // ── (g) save-time validation of the board-owned keys + one entry per date ────
+    const withStatus = (mut) => ({ kind: "training_plan", periodKey: WEEK, source: "agent", payload: { week: WEEK, recovery_status: "good", days: mut(seedDays()) } });
+    const strayStatus = await POST("/api/fitness/coaching", withStatus((days) => days.map((d, i) => (i === 0 ? { ...d, status: "Done" } : d))));
+    check(strayStatus.status === 400, `save with a stray status "Done" → 400 (got ${strayStatus.status})`);
+    const movedNoTarget = await POST("/api/fitness/coaching", withStatus((days) => days.map((d, i) => (i === 0 ? { ...d, status: "moved" } : d))));
+    check(movedNoTarget.status === 400, `save with status "moved" and no movedTo → 400 (got ${movedNoTarget.status})`);
+    const dupDate = await POST("/api/fitness/coaching", withStatus((days) => [...days, { ...days[0] }]));
+    check(dupDate.status === 400 && /two entries dated/.test(dupDate.body.error ?? ""), `save with two entries on one date → 400 naming the date (got ${dupDate.status}: ${dupDate.body.error})`);
+    const nullStatus = await POST("/api/fitness/coaching", withStatus((days) => days.map((d) => ({ ...d, status: null, movedTo: null }))));
+    check(nullStatus.status === 200 || nullStatus.status === 201, `a re-save with status:null on every day (a model that serialises every key) is accepted (got ${nullStatus.status})`);
+    const afterNull = byDate(nullStatus.body.artifact?.payload?.days ?? []);
+    check(afterNull[D1]?.status === "done" && afterNull[D2]?.status === "done", `…and the recorded outcomes carried forward over status:null (${D1}=${afterNull[D1]?.status}, ${D2}=${afterNull[D2]?.status})`);
+    check(!("status" in (afterNull[D3] ?? {})), `…while a never-answered day (${D3}) gains no null status key`);
   } finally {
     await fs.writeFile(DATA_FILE, snapshot, "utf8");
     console.log("  ↩ restored board/data/cases.json to its pre-test state");
