@@ -37,9 +37,10 @@ username. The only value still derived inline is `$U=$(id -u)`, which `launchctl
 The whole system runs on these ports — keep them free
 (`lsof -nP -iTCP:<port> -sTCP:LISTEN`): **3000** board app · **8001** board · **8003** calendar ·
 **8004** guard · **8005** vault (core bridges) · **8002** openwhispr · **8006** whatsapp · **8007**
-nutrition (optional add-on bridges) · **8008** search · **8009** guard · **8010** whatsapp-go
-(sidecars). The `8002` (openwhispr), `8006`/`8010` (WhatsApp), and `8007` (Nutrition & Chef) ports
-are only needed if you run those optional add-ons (Steps 3.4 / 3.5 / 3.6).
+nutrition · **8011** fitness · **8012** body (optional add-on bridges) · **8008** search · **8009**
+guard · **8010** whatsapp-go (sidecars). The `8002` (openwhispr), `8006`/`8010` (WhatsApp), `8007`
+(Nutrition & Chef), `8011` (Fitness), and `8012` (Body) ports are only needed if you run those
+optional add-ons (Steps 3.4–3.8).
 
 ---
 
@@ -194,6 +195,10 @@ WHATSAPP_GO_PORT="8010"
 # nutrition-mcp-setup). NUTRITION_BRIDGE_PORT is the supergateway HTTP bridge for Claude Code;
 # the add-on is gated per-board via Settings.addons, so naming the port only documents it.
 NUTRITION_BRIDGE_PORT="8007"
+# Fitness + Body add-ons (optional; in-repo mcp/fitness-server + mcp/body-server, wired by
+# fitness-mcp-setup / body-mcp-setup — Steps 3.7 / 3.8). Same "documents the port" role as above.
+FITNESS_BRIDGE_PORT="8011"
+BODY_BRIDGE_PORT="8012"
 EOF
   mv "$tmp" config/cos.env
   echo "Wrote config/cos.env — review it, then continue. setup-vault (Step 1) fills VAULT_NAME."
@@ -378,7 +383,9 @@ fi
   (`Settings.addons.nutrition.enabled`) so its food-log / pantry / meal-plan **writes** land and the
   three `/nutrition/*` nav pages appear — so the **`/nutrition-chef`** operator skill can log meals,
   track the pantry, and plan a week. Entirely optional and the SIMPLEST add-on (no sidecar, no
-  external repo, no secret); skip it if you don't want nutrition on the board.
+  external repo, no secret); skip it if you don't want nutrition on the board. Enabling nutrition
+  also **hard auto-enables** the foundational `body` add-on (`dependsOn` in `board/lib/addons.ts`;
+  the cascade in `/api/addons/[id]`) — **Step 3.8** wires the `body` MCP that just came on.
 - **Why HERE (after the core bridges)** — it reuses the same supergateway/launchd/`ensure-bridges.sh`
   machinery Step 3 set up, and it is a pure wrapper over the **board** API (Steps 1–3 must be live).
   Its data rides `cases.json`, so it is covered by Step 4's backup automatically — but its position
@@ -395,7 +402,58 @@ fi
     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}' \
     | grep -o '"name":"nutrition"' && echo "nutrition MCP OK"
-  curl -s "$BOARD_URL/api/addons" | grep -o '"id":"nutrition"[^}]*"enabled":true' && echo "add-on enabled"
+  curl -s "$BOARD_URL/api/addons" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).addons.find(x=>x.id==="nutrition");process.exit(a&&a.enabled===true?0:1)})' && echo "add-on enabled"
+  ```
+
+### Step 3.7 — fitness-mcp-setup (OPTIONAL: the Fitness add-on)
+- **What it does** — wires the built-in **`fitness`** add-on MCP (a thin in-repo Node `fetch`
+  wrapper over the board's `/api/fitness/*` routes, fronted by a supergateway + launchd bridge on
+  `:8011` / `$FITNESS_BRIDGE_PORT`, plus a direct Cowork stdio entry), then **ENABLES** the add-on
+  (`Settings.addons.fitness.enabled`) so its writes land and the `/fitness` + `/fitness/*` nav pages
+  appear — so the 7-skill fitness operator family (**`/fitness-coach`**, **`/fitness-training-plan`**,
+  …) can drive it. Enabling fitness also **hard auto-enables** the foundational `body` add-on
+  (`dependsOn` in `board/lib/addons.ts`) — **Step 3.8** wires the `body` MCP that just came on.
+  Entirely optional; skip it if you don't want fitness on the board.
+- **Why HERE (after the core bridges)** — it reuses the same supergateway/launchd/`ensure-bridges.sh`
+  machinery Step 3 set up, and it is a pure wrapper over the **board** API (Steps 1–3 must be live).
+  Its data rides `cases.json`, so it is covered by Step 4's backup automatically.
+- **Prereq** — node + supergateway (from Step 3) and the **board** reachable on `CRM_BASE_URL`. The
+  loader seeds `FITNESS_BRIDGE_PORT=8011` when `cos.env` lacks it — no `cos.env` edit needed.
+- **Run** — invoke **`/fitness-mcp-setup`** (confirm the port → verify the stdio server → the
+  `.mcp.json` entry → install the `:8011` bridge → register Cowork → ENABLE the add-on → verify a
+  round-trip — its §1–§7).
+- **CHECKPOINT** — mirror 3.6's: the fitness MCP answers and the add-on is enabled:
+  ```sh
+  source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+  curl -s -X POST "$FITNESS_BRIDGE_URL/mcp" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}' \
+    | grep -o '"name":"fitness"' && echo "fitness MCP OK"
+  curl -s "$BOARD_URL/api/addons" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).addons.find(x=>x.id==="fitness");process.exit(a&&a.enabled===true?0:1)})' && echo "add-on enabled"
+  ```
+
+### Step 3.8 — body-mcp-setup (CONDITIONAL: the foundational Body add-on — REQUIRED after 3.6 or 3.7)
+- **What it does** — wires the built-in **`body`** add-on MCP (a thin in-repo Node `fetch` wrapper
+  over the board's `/api/body/*` routes, fronted by a supergateway + launchd bridge on `:8012` /
+  `$BODY_BRIDGE_PORT`, plus a direct Cowork stdio entry). `body` is the **single owner** of body
+  identity, the weight + body-composition series, and the free-text objective that Nutrition and
+  Fitness both read.
+- **Why this step is REQUIRED if you ran 3.6 or 3.7** — enabling nutrition or fitness already
+  **auto-enabled `body`** (the hard-dependency cascade in `/api/addons/[id]`), so the `/body` nav and
+  `/api/body` prefix are live NOW — but until this step runs, that surface has no agent access, and
+  no other skill wires it. This is the exact invisible step cos-ops#35 closes. **Skip only if you
+  skipped BOTH 3.6 and 3.7.** Running body **standalone** (weight tracking alone, with neither
+  nutrition nor fitness) is also legitimate — see the skill's §6 to enable it directly.
+- **Run** — invoke **`/body-mcp-setup`** (same §1–§7 flow as 3.6/3.7; its §6 *confirms* the
+  auto-enable rather than flipping it).
+- **CHECKPOINT** — the body MCP answers and the add-on is enabled:
+  ```sh
+  source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+  curl -s -X POST "$BODY_BRIDGE_URL/mcp" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}' \
+    | grep -o '"name":"body"' && echo "body MCP OK"
+  curl -s "$BOARD_URL/api/addons" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).addons.find(x=>x.id==="body");process.exit(a&&a.enabled===true?0:1)})' && echo "add-on enabled"
   ```
 
 ### Step 4 — backup-recovery (LAST: protect the now-populated stores)
@@ -426,8 +484,9 @@ Run from the repo root with the board dev app up (`cd board && npm run dev`, por
 Start each shell with `source "$(git rev-parse --show-toplevel)/config/load-config.sh"`:
 
 1. **All four core bridges answer** (the step-3 loop) → `board / calendar / guard / vault` (plus
-   `openwhispr` on `:8002`, `whatsapp` on `:8006`, and/or `nutrition` on `:8007` if you ran the
-   Step 3.4 / 3.5 / 3.6 add-ons). `launchctl list | grep chiefofstaff` shows each with exit 0.
+   `openwhispr` on `:8002`, `whatsapp` on `:8006`, `nutrition` on `:8007`, `fitness` on `:8011`,
+   and/or `body` on `:8012` if you ran the Step 3.4–3.8 add-ons). `launchctl list | grep
+   chiefofstaff` shows each with exit 0.
 2. **Guard sidecar healthy** — `curl -s "$GUARD_SIDECAR_URL/healthz"` → `{"ok":true,
    "classifier":"model:…"}` (or the deliberate `heuristic-fallback`). The **search** sidecar is
    best-effort: `curl -s "$SEARCH_SIDECAR_URL/healthz"` → `{"ok":true}` (a cold/absent one just
@@ -458,9 +517,10 @@ calls behind a permission prompt. Walk the user through the one-time activation:
 
 1. **Quit + reopen Cowork (⌘Q)** so it re-reads the config.
 2. **Settings → Connectors** — confirm the local MCP servers (**board**, **calendar**, **guard**,
-   **vault**, plus **openwhispr**/**whatsapp**/**nutrition** if added) are listed and enabled. They run as local
-   stdio `command` servers (not custom HTTP connectors), so they appear automatically once the config
-   is read — if they don't, it didn't parse: re-check §5 of **/mcp-bridge-setup**.
+   **vault**, plus **openwhispr**/**whatsapp**/**nutrition**/**fitness**/**body** if added) are listed
+   and enabled. They run as local stdio `command` servers (not custom HTTP connectors), so they
+   appear automatically once the config is read — if they don't, it didn't parse: re-check §5 of
+   **/mcp-bridge-setup**.
 3. **Allow their tools** — the first time an agent calls a server's tool, Cowork asks for permission;
    choose **"Always allow"** per server so routine agent runs aren't interrupted by a prompt every
    call (or approve per-tool if you prefer — "Always allow" is the smooth default for your own local
@@ -499,9 +559,9 @@ After setup, most of it runs itself — make sure the user knows how to live wit
 
 - **The bridges + sidecars are launchd-managed.** The core four (`board`, `calendar`, `guard`,
   `vault`), the `search`/`guardsvc` uv sidecars, and any optional add-ons you wired
-  (`openwhispr`/`whatsapp`/`nutrition`) start at login and **crash-restart** on their own
-  (`KeepAlive`). A normal next session needs **no action** — Cowork and Claude Code reach them
-  through the bridges whether or not the board dev app is running.
+  (`openwhispr`/`whatsapp`/`nutrition`/`fitness`/`body`) start at login and **crash-restart** on
+  their own (`KeepAlive`). A normal next session needs **no action** — Cowork and Claude Code reach
+  them through the bridges whether or not the board dev app is running.
 - **Starting the board self-heals them.** `cd board && npm run dev` (or `npm run start`) runs
   `mcp/ensure-bridges.sh` *first*, which bootstraps + kickstarts every service and prints one line each
   (`[mcp] vault bridge up on :$VAULT_BRIDGE_PORT` … or `WARN: <name> bridge DOWN on :<port> — see
