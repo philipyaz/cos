@@ -197,3 +197,14 @@ never the data: update the code (`git pull`) and restart the board.
   `ShoppingStatus`, `ShoppingSource`. The candidates read (`GET /api/nutrition/shopping/candidates`
   / `get_shopping_candidates`) is computed on read, never persisted. Full design:
   [Nutrition](../features/nutrition.md#the-shopping-list-v16).
+- **v16 → v17 — `db.triageDecisions[]` (the mail-triage drop record).** Adds the optional
+  `db.triageDecisions?: TriageDecision[]` array — the store's first **policy** collection: one row per
+  `(sender, source, reason)` (store-minted `TD-<n>` ids; the sender is normalised to its addr-spec), a
+  fact ("this sender's mail was judged noise") rather than a log of dropped emails; a repeat drop bumps
+  `count`, a human `confirm` stamps `reviewedAt` (sender-scoped: every reason row of that sender is
+  settled), a `reverse` sets `status: "reversed"` and fails every later drop of that sender closed
+  (403 `sender-reversed`). **Purely additive + back-compatible:** old v16 files read unchanged —
+  `migrate()` carries the array forward when present and a missing key defaults to `[]`, no backfill.
+  **New enums:** `TriageDropReason`, `TriageDecisionStatus`. The dropped:promoted ratio and the
+  first-time-dropped set are computed on read, never persisted. Full design:
+  [Triage skills](../architecture/triage-skills.md).
