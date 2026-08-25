@@ -673,8 +673,9 @@ const UPDATE_SHOPPING_ITEM_TOOL = {
     " Pass only the fields you want to change (any of: name, category, quantity, unit, status, " +
     "source, sourceRef, note). THE ONE-CALL TICK-OFF: `update_shopping_item(id, {status: " +
     "\"bought\"})` flips the item in a single round trip and stamps `boughtAt` automatically — " +
-    "setting any other status clears it. `status: \"dismissed\"` keeps history (not deleted) " +
-    "but stops suggesting it; use `remove_shopping_item` only for an explicit hard delete.",
+    "setting any other status clears it. `status: \"dismissed\"` keeps history (not deleted) and is " +
+    "INERT — it does NOT stop future suggestions (a re-offer is expected; to stop one, add the item as " +
+    "needed, buy it, or fix the pantry row); use `remove_shopping_item` only for an explicit hard delete.",
   inputSchema: {
     type: "object",
     properties: {

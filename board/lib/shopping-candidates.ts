@@ -30,21 +30,32 @@ export interface ShoppingCandidatesResult {
   suppressed: { onList: number; inPantry: number; boughtInWindow: number };
 }
 
-// Two names MATCH when either's normalised KEY contains the other (both non-empty).
-// normalizePantryName (nutrition-format.ts) is the vertical's declared identity key for food
-// names — the substring frame is the MATCHER, composed over that one KEY, so this mints no
-// second normalisation rule (the pantry reconcile route already names normalizePantryName as
-// the vertical's rule). Makes "eggs" match "2 eggs" and an accented pantry name match its
-// unaccented ingredient line. Known, accepted cost: containment also fires on unrelated foods
-// that share a substring (e.g. "rice" ⊂ "Rice vinegar") — under-suppression is the bias to
-// have here (a re-offer costs one line in a batched question; a wrong suppression is a
-// forgotten item, the exact failure this feature exists to prevent), so the trade is kept and
-// pinned by a unit test, not hidden.
-function namesMatch(a: string, b: string): boolean {
-  const na = normalizePantryName(a);
-  const nb = normalizePantryName(b);
-  if (!na || !nb) return false;
-  return na.includes(nb) || nb.includes(na);
+// Name matching: token-subset, ONE direction. Both names go through normalizePantryName
+// (nutrition-format.ts — the vertical's declared identity key for food names, so this mints no
+// second normalisation rule), are split into whole-word tokens (each singularised with the same
+// trailing-s rule), and a pantry/list ROW matches an ingredient LINE when EVERY token of the row's
+// name is a whole token of the line. "2 eggs" ⊇ "Eggs" still matches, and an accented pantry name
+// matches its unaccented ingredient line — but "eggs" ≠ "Eggplant", "rice" ⊉ "Rice vinegar",
+// "milk" ⊉ "Oat milk", "butter" ⊉ "Peanut butter", "chicken" ⊉ "Chicken stock". The earlier
+// bidirectional-substring frame suppressed every one of those (a planned staple reported "in
+// pantry" because a compound product shared its letters) — a wrong suppression is a forgotten
+// item, the exact failure this feature exists to prevent, so the bias is deliberately UNDER-
+// suppression: a planned "olive oil" is re-offered even when the pantry holds "oil"? No — the
+// pantry row "oil" (one token) IS a subset of "olive oil", so that one suppresses; a planned
+// "oil" against a pantry "olive oil" is re-offered (a re-offer costs one line in a batched
+// question). Pinned by unit tests, not hidden.
+function tokenKeys(name: string): string[] {
+  return normalizePantryName(name)
+    .split(/[\s,;()/]+/)
+    .map((t) => t.replace(/[^\p{L}\p{N}]/gu, ""))
+    .filter(Boolean)
+    .map((t) => (t.length >= 4 && t.endsWith("s") && !t.endsWith("ss") ? t.slice(0, -1) : t));
+}
+function namesMatch(line: string, rowName: string): boolean {
+  const lineTokens = new Set(tokenKeys(line));
+  const rowTokens = tokenKeys(rowName);
+  if (lineTokens.size === 0 || rowTokens.length === 0) return false;
+  return rowTokens.every((t) => lineTokens.has(t));
 }
 
 // Compute the shopping candidates. ALWAYS resolvable: empty arrays → no candidates, zero
@@ -81,13 +92,30 @@ export function computeShoppingCandidates(input: {
     if (shoppingItems.some((s) => s.status === "needed" && namesMatch(name, s.name))) return "onList";
     if (
       shoppingItems.some(
-        (s) => s.status === "bought" && !!s.boughtAt && s.boughtAt.slice(0, 10) >= from && namesMatch(name, s.name),
+        (s) =>
+          s.status === "bought" &&
+          !!s.boughtAt &&
+          s.boughtAt.slice(0, 10) >= from &&
+          s.boughtAt.slice(0, 10) <= to &&
+          namesMatch(name, s.name),
       )
     ) {
       return "boughtInWindow";
     }
     return null;
   }
+
+  // The pantry-side facts + inferences come from computeNutritionStatus — NEVER re-derived here,
+  // and no new threshold constant is defined anywhere in this module. Computed FIRST because the
+  // plan-side pass needs to know which pantry rows are NOT usable stock: an expired row, or one
+  // likely past its freshness horizon, must not make a planned ingredient read as "in pantry" —
+  // that swallowed the ingredient entirely (the plan side resolved it, so the pantry side's own
+  // FACT/INFERRED candidate for the same name never surfaced: zero candidates, "in pantry: 1").
+  const status = computeNutritionStatus({ mealPlanEntries, foodLogs, pantryItems, nutritionTargets, today });
+  const notOnHand = new Set<string>([
+    ...status.expiredPantryItems.ids,
+    ...status.pantryLifecycle.likelyPastHorizon.items.map((i) => i.id),
+  ]);
 
   // ── Plan side: every ingredient line of every "planned" meal in [from, to] ──────────────────
   const plannedMeals = mealPlanEntries
@@ -104,7 +132,7 @@ export function computeShoppingCandidates(input: {
       const key = normalizePantryName(line);
       if (!key || resolved.has(key)) continue;
 
-      if (pantryItems.some((p) => namesMatch(line, p.name))) {
+      if (pantryItems.some((p) => !notOnHand.has(p.id) && namesMatch(line, p.name))) {
         inPantry++;
         resolved.add(key);
         continue;
@@ -138,9 +166,10 @@ export function computeShoppingCandidates(input: {
     a._date !== b._date ? (a._date < b._date ? -1 : 1) : a._key < b._key ? -1 : a._key > b._key ? 1 : 0,
   );
 
-  // ── Pantry side: computeNutritionStatus's facts + inferences — NEVER re-derived here, and no
-  // new threshold constant is defined anywhere in this module. ─────────────────────────────────
-  const status = computeNutritionStatus({ mealPlanEntries, foodLogs, pantryItems, nutritionTargets, today });
+  // ── Pantry side: computeNutritionStatus's facts + inferences (computed above). A planned
+  // ingredient whose only stock is expired/past-horizon was NOT resolved by the plan side, so it
+  // surfaces there as a plan candidate; the pantry row's own fact/inference then dedupes on the
+  // shared name key (first writer wins — the plan side, which names the meal that needs it). ─────
 
   const expiredCandidates: (ShoppingCandidate & { _key: string })[] = [];
   for (const id of status.expiredPantryItems.ids) {

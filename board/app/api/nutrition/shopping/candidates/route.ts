@@ -1,3 +1,4 @@
+import { isISODate } from "@/lib/route-helpers";
 import { NextResponse, type NextRequest } from "next/server";
 import { readDB } from "@/lib/store";
 import { computeShoppingCandidates } from "@/lib/shopping-candidates";
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
   const from = sp.get("from")?.trim() || today;
   const to = sp.get("to")?.trim() || addDays(today, 6);
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+  if (!isISODate(from) || !isISODate(to)) {
     return NextResponse.json({ error: "'from'/'to' must be YYYY-MM-DD." }, { status: 400 });
   }
   if (from > to) {

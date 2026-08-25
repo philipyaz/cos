@@ -185,15 +185,68 @@ test("computeShoppingCandidates: normalizePantryName composition — quantity-pr
   assert.equal(r.suppressed.inPantry, 2);
 });
 
-test("computeShoppingCandidates: DOCUMENTED false positive — pantry 'Rice vinegar' suppresses planned 'rice' (inPantry)", () => {
-  // The containment matcher's accepted trade (architect finding 6): under-suppression is the
-  // bias, and this is the cost side of that bias — pinned here so it is recorded, not assumed.
+test("computeShoppingCandidates: token-subset matching — a compound pantry product never suppresses the plain staple it contains", () => {
+  // The bidirectional-substring matcher suppressed every one of these (cos#98 review F2):
+  // planned staples reported "in pantry" because a compound product shared their letters.
   const r = compute({
-    mealPlanEntries: [meal({ ingredients: ["rice"] })],
-    pantryItems: [pantryItem({ id: "PANTRY-1", name: "Rice vinegar" })],
+    mealPlanEntries: [meal({ ingredients: ["rice", "eggs", "milk", "butter", "chicken", "salt", "cream", "tea"] })],
+    pantryItems: [
+      pantryItem({ id: "PANTRY-1", name: "Rice vinegar" }),
+      pantryItem({ id: "PANTRY-2", name: "Eggplant" }),
+      pantryItem({ id: "PANTRY-3", name: "Oat milk" }),
+      pantryItem({ id: "PANTRY-4", name: "Peanut butter" }),
+      pantryItem({ id: "PANTRY-5", name: "Chicken stock" }),
+      pantryItem({ id: "PANTRY-6", name: "Salted butter" }),
+      pantryItem({ id: "PANTRY-7", name: "Ice cream" }),
+      pantryItem({ id: "PANTRY-8", name: "Steak" }),
+    ],
   });
-  assert.deepEqual(r.candidates, []);
-  assert.equal(r.suppressed.inPantry, 1, "'rice' ⊂ normalized 'rice vinegar' — a known, accepted false positive");
+  assert.deepEqual(
+    r.candidates.map((c) => c.name),
+    ["rice", "eggs", "milk", "butter", "chicken", "salt", "cream", "tea"].sort(),
+    "every plain staple is re-offered — none is swallowed by a compound product",
+  );
+  assert.equal(r.suppressed.inPantry, 0);
+});
+
+test("computeShoppingCandidates: a one-token pantry row still suppresses the compound line that contains it (row ⊆ line)", () => {
+  const r = compute({
+    mealPlanEntries: [meal({ ingredients: ["olive oil", "2 eggs"] })],
+    pantryItems: [pantryItem({ id: "PANTRY-1", name: "Oil" }), pantryItem({ id: "PANTRY-2", name: "Eggs" })],
+  });
+  assert.deepEqual(r.candidates, [], "pantry 'Oil' covers planned 'olive oil'; 'Eggs' covers '2 eggs'");
+  assert.equal(r.suppressed.inPantry, 2);
+});
+
+test("computeShoppingCandidates: EXPIRED stock is not stock — a planned ingredient whose only pantry row is expired stays a candidate (cos#98 review F1)", () => {
+  const r = compute({
+    mealPlanEntries: [meal({ id: "MEAL-1", title: "Sunday spinach pie", date: "2026-08-11", ingredients: ["spinach"] })],
+    pantryItems: [pantryItem({ id: "PANTRY-1", name: "Spinach", category: "produce", location: "fridge", expiresAt: "2026-08-01", updatedAt: "2026-08-01T09:00:00.000Z" })],
+  });
+  assert.equal(r.candidates.length, 1, "the Friday headline scenario: expired spinach in the fridge + spinach on Sunday's plan → ONE candidate, not zero");
+  assert.equal(r.candidates[0].source, "plan", "pinned: the plan side names the meal that needs it (first writer wins on the shared name key)");
+  assert.equal(r.suppressed.inPantry, 0, "an expired row is not 'in pantry'");
+});
+
+test("computeShoppingCandidates: a pantry row likely past its freshness horizon is not stock either (inferred — still a candidate)", () => {
+  const r = compute({
+    mealPlanEntries: [meal({ id: "MEAL-1", title: "Salad", date: "2026-08-11", ingredients: ["spinach"] })],
+    // produce × fridge horizon is 7 days; 40 days old, no expiresAt → likelyPastHorizon.
+    pantryItems: [pantryItem({ id: "PANTRY-1", name: "Spinach", category: "produce", location: "fridge", updatedAt: "2026-07-01T09:00:00.000Z" })],
+  });
+  assert.equal(r.candidates.length, 1);
+  assert.equal(r.suppressed.inPantry, 0);
+});
+
+test("computeShoppingCandidates: boughtInWindow is bounded on BOTH ends — a row bought after `to` does not count", () => {
+  const r = compute({
+    mealPlanEntries: [meal({ ingredients: ["flour"] })],
+    shoppingItems: [shoppingRow({ id: "SHOP-1", name: "flour", status: "bought", boughtAt: "2026-12-25T10:00:00.000Z" })],
+    from: "2026-08-10",
+    to: "2026-08-16",
+  });
+  assert.equal(r.candidates.length, 1, "a December purchase is not 'bought this window' for an August window");
+  assert.equal(r.suppressed.boughtInWindow, 0);
 });
 
 test("computeShoppingCandidates: the same ingredient across two meals dedupes to ONE candidate, attributed to the earlier meal", () => {

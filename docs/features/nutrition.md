@@ -360,13 +360,16 @@ discipline as the status read above:
   status engine above and never re-derived.
 
 Matching reuses the vertical's one declared name-identity key, `normalizePantryName` (the bulk
-reconcile's own upsert key, above): two names match when either's normalised key **contains** the
-other, so `"eggs"` matches `"2 eggs"` and an accented pantry name matches its unaccented ingredient
-line. This is a deliberate **under-suppression bias** — a re-offered item costs one line in a
-batched question; a wrongly-suppressed one is a forgotten item, the exact failure this feature
-exists to prevent. The trade-off's cost is real and known: the same containment rule occasionally
-matches an unrelated food that happens to share a substring (e.g. a planned "rice" suppressed by a
-pantry "rice vinegar") — accepted, and pinned by a unit test rather than left to be rediscovered.
+reconcile's own upsert key, above), split into whole-word tokens: a pantry or list **row** matches
+a planned ingredient **line** when every token of the row's name is a whole token of the line —
+so `"Eggs"` matches `"2 eggs"` and an accented pantry name matches its unaccented ingredient line,
+but `"Eggplant"` does not match `"eggs"`, `"Rice vinegar"` does not match `"rice"`, `"Oat milk"`
+does not match `"milk"`. This is a deliberate **under-suppression bias** — a re-offered item costs
+one line in a batched question; a wrongly-suppressed one is a forgotten item, the exact failure
+this feature exists to prevent. The other half of the same bias: a pantry row that is **expired**
+or **likely past its freshness horizon** is not usable stock, so it never makes a planned
+ingredient read as "in pantry" — the ingredient stays a candidate. Both rules are pinned by unit
+tests rather than left to be rediscovered.
 
 **Fact vs. inference, never blurred.** An expired row states a fact (`expired <expiresAt>`); a
 freshness-horizon row carries the label **`(inferred — no printed date)`**, verbatim, at every hop

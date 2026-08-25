@@ -140,6 +140,14 @@ test("applyShoppingItemUpdate: flipping status to 'bought' stamps boughtAt; any 
   assert.equal(rec.status, "dismissed");
   assert.equal(rec.boughtAt, undefined, "boughtAt also clears on dismissed");
 
+  // An idempotent retry (a timed-out bridge call re-sent, a double tap) must not move the
+  // purchase date forward: "bought" → "bought" keeps the original stamp.
+  store.applyShoppingItemUpdate(rec, { status: "bought" });
+  const firstStamp = rec.boughtAt;
+  store.applyShoppingItemUpdate(rec, { status: "bought" });
+  assert.equal(rec.boughtAt, firstStamp, "re-sending status:'bought' keeps the original boughtAt");
+  store.applyShoppingItemUpdate(rec, { status: "needed" });
+
   // boughtAt is server-stamped ONLY — a patch trying to set it directly is ignored (an update
   // that never touches `status` leaves the existing boughtAt exactly as it was).
   store.applyShoppingItemUpdate(rec, { boughtAt: "2020-01-01T00:00:00.000Z" });

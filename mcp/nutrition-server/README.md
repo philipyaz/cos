@@ -250,8 +250,9 @@ suggest."
 #### `update_shopping_item(id, [name], [category], [quantity], [unit], [status], [source], [sourceRef], [note])`
 `PATCH /api/nutrition/shopping/{id}`. **Gated.** Pass only the fields to change. The
 **one-call tick-off**: `status: "bought"` stamps `boughtAt` in the same round trip; any
-other status clears it. `status: "dismissed"` keeps history (not deleted) but stops the row
-suggesting itself again via `get_shopping_candidates`.
+other status clears it. `status: "dismissed"` keeps history (not deleted) and is **inert** — it does
+not stop `get_shopping_candidates` re-offering the item (add it as `needed`, buy it, or fix the pantry
+row to stop a re-offer).
 
 #### `remove_shopping_item(id)`
 `DELETE /api/nutrition/shopping/{id}`. **Gated.** Hard-removes the item (shopping items

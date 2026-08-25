@@ -1879,8 +1879,16 @@ export function applyShoppingItemUpdate(rec: ShoppingItem, patch: Record<string,
   if ("quantity" in patch) rec.quantity = toOptionalNumber(patch.quantity);
   if ("unit" in patch) rec.unit = toOptionalString(patch.unit);
   if ("status" in patch && VALID_SHOPPING_STATUS.includes(patch.status as ShoppingStatus)) {
-    rec.status = patch.status as ShoppingStatus;
-    rec.boughtAt = rec.status === "bought" ? nowISO() : undefined;
+    const next = patch.status as ShoppingStatus;
+    // Stamp on the TRANSITION into "bought" only: an idempotent retry (a timed-out bridge call
+    // re-sent, a double tap) must not move the purchase date forward — the candidates engine
+    // keys its "bought this window" suppression on boughtAt.
+    if (next === "bought") {
+      if (rec.status !== "bought" || !rec.boughtAt) rec.boughtAt = nowISO();
+    } else {
+      rec.boughtAt = undefined;
+    }
+    rec.status = next;
   }
   if ("source" in patch && VALID_SHOPPING_SOURCE.includes(patch.source as ShoppingSource)) {
     rec.source = patch.source as ShoppingSource;

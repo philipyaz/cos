@@ -30,8 +30,10 @@ the MCP just stores what you author. The nutrition tools are thin: `log_food` /
 `list_food_log` / `get_food_log` / `update_food_log` / `delete_food_log`; `read_pantry`
 / `add_pantry_item` / `update_pantry_item` / `remove_pantry_item`; `plan_meal` /
 `list_meal_plan` / `get_meal_plan` / `update_meal_plan` / `remove_meal_plan`; the
-DIETARY-PROFILE pair `get_diet_profile` / `set_diet_profile`; and the AGENT-AUTHORED
-TARGETS `save_nutrition_targets` / `list_nutrition_targets` / `get_nutrition_targets`.
+DIETARY-PROFILE pair `get_diet_profile` / `set_diet_profile`; the AGENT-AUTHORED
+TARGETS `save_nutrition_targets` / `list_nutrition_targets` / `get_nutrition_targets`; and
+the SHOPPING LIST `list_shopping` / `add_shopping_item` / `update_shopping_item` /
+`remove_shopping_item` + the computed `get_shopping_candidates` (JOB 6).
 
 > **The board does NOT compute targets — YOU do (the `save_training_plan` law).** There
 > is no longer a diet "engine" on the board. You read the inputs (the user's free-text
@@ -564,16 +566,17 @@ renders it grouped by category).
 > **Example.** Friday, auto mode, right after JOB 0's reconcile. `list_shopping()` → 3
 > `needed` rows already on it (milk, olive oil, batteries). `get_shopping_candidates()` →
 > window `2026-08-07` → `2026-08-13`; candidates: `flour` (`source: "plan"`, for "Sunday
-> pancakes" on 2026-08-09), `spinach` (`source: "pantry"`, `expired 2026-08-04`), `Sumac`
-> (`source: "pantry"`, likely past its ~730-day freshness horizon at 812 days (inferred —
-> no printed date)); suppressed: 1 already listed, 2 in pantry, 0 bought this window.
-> Proven set = {flour} → write it directly: `add_shopping_item(name: "flour", source:
-> "plan", sourceRef: "MEAL-41")`. Judgement set = {spinach, Sumac} → **one** consolidated
-> question: *"Also add spinach (expired 4 days ago) and Sumac (likely past its ~730-day
-> freshness horizon at 812 days, inferred — no printed date)?"* On yes:
-> `add_shopping_item(name: "spinach", source: "pantry", sourceRef: "PANTRY-9")` and
-> `add_shopping_item(name: "Sumac", source: "pantry", sourceRef: "PANTRY-22", note:
-> "likely past its ~730-day freshness horizon at 812 days (inferred — no printed date)")`.
+> pancakes" on 2026-08-09), `spinach` (`source: "pantry"`, `expired 2026-08-04`),
+> `Salad leaves` (`source: "pantry"`, likely past its ~7-day freshness horizon at 12 days
+> (inferred — no printed date)); suppressed: 1 already listed, 2 in pantry, 0 bought this
+> window. Proven set = {flour} → write it directly: `add_shopping_item(name: "flour",
+> source: "plan", sourceRef: "MEAL-41")`. Judgement set = {spinach, Salad leaves} → **one**
+> consolidated question, the label kept verbatim: *"Also add spinach (expired 2026-08-04)
+> and Salad leaves (likely past its ~7-day freshness horizon at 12 days (inferred — no
+> printed date))?"* On yes: `add_shopping_item(name: "spinach", source: "pantry",
+> sourceRef: "PANTRY-9")` and `add_shopping_item(name: "Salad leaves", source: "pantry",
+> sourceRef: "PANTRY-22", note: "likely past its ~7-day freshness horizon at 12 days
+> (inferred — no printed date)")`.
 > Report `SHOP-14`, `SHOP-15`, `SHOP-16` + the aisle-grouped list.
 
 ---
