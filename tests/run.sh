@@ -295,8 +295,14 @@ TEST_BOARD_PORT="${COS_TEST_BOARD_PORT:-3999}"
 BASE=""
 BOARD_UP=0
 # Set only for the AUTO-STARTED board (empty under COS_TEST_BOARD_URL): the
-# sandbox data dir, for the one test (api-schema-guard) that must rewrite the
-# store FILE to stage its scenario. Never points at live data.
+# sandbox data dir. Once the sandbox board is UP it is exported to every api-*
+# step as COS_BOARD_DATA (the store file the tests snapshot, restore, and read
+# raw). Every api-*.mjs falls back to the literal board/data/cases.json when the
+# variable is absent — so before this export the 33 steps that were invoked
+# without it snapshotted + restored the LIVE file while the sandbox board wrote
+# elsewhere: their raw-store assertions were vacuous (cos#93's red api-events),
+# and on a dev hub the restore could overwrite a live write made mid-run. Never
+# points at live data.
 TEST_BOARD_DATA_DIR=""
 HTTP_CODE="test-board"
 # Shared by the test board AND the test processes so trust-derivation agrees on
@@ -355,6 +361,8 @@ start_test_board() {
     code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "${url}/api/cases" 2>/dev/null || echo 000)"
     if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ]; then
       BASE="${url}"; BOARD_UP=1
+      # Every api-* step inherits the sandbox store path (see TEST_BOARD_DATA_DIR above).
+      export COS_BOARD_DATA="${TEST_BOARD_DATA_DIR}/cases.json"
       echo "test board UP at ${BASE} (seeded synthetic sandbox; the live store is never touched)."
       return 0
     fi

@@ -96,9 +96,18 @@ async function main() {
     check(typeof lc0?.excluded?.staples === "number", "pantryLifecycle.excluded.staples is a number");
 
     let initialSchemaVersion = null;
+    let codeSchemaVersion = null;
     if (DATA_FILE) {
       initialSchemaVersion = JSON.parse(snapshot).schemaVersion;
       check(typeof initialSchemaVersion === "number", `store file has a numeric schemaVersion (got ${initialSchemaVersion})`);
+      // The code's SCHEMA_VERSION, from /api/healthz. The sandbox store is the seeded fixture
+      // (an OLDER schemaVersion by design — run.sh restores it before every net-zero step), so
+      // the first write of this run stamps the code's version on disk: "unchanged" must be
+      // asserted against the CODE's version, not the pre-write file, or the check reads the
+      // migrate-on-read stamp as a migration this feature shipped.
+      const hz = await GET("/api/healthz");
+      codeSchemaVersion = hz.body?.schemaVersion;
+      check(typeof codeSchemaVersion === "number", `healthz reports the code's schemaVersion (got ${codeSchemaVersion})`);
     } else {
       console.log("  SKIP: COS_BOARD_DATA not set — schemaVersion baseline / file-surgery checks below will skip.");
     }
@@ -301,8 +310,8 @@ async function main() {
       check(allClean, "no pantry item anywhere carries a computed lifecycle/horizon/freshness key");
 
       check(
-        storeAfter.schemaVersion === initialSchemaVersion,
-        `schemaVersion unchanged (${initialSchemaVersion} → ${storeAfter.schemaVersion}) — this feature ships no migration`,
+        storeAfter.schemaVersion === codeSchemaVersion,
+        `store schemaVersion is the code's SCHEMA_VERSION (seed ${initialSchemaVersion} → ${storeAfter.schemaVersion}, code ${codeSchemaVersion}) — this feature ships no migration of its own`,
       );
     } else {
       console.log("  SKIP: nothing-persisted file checks need COS_BOARD_DATA — not set.");
