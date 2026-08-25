@@ -74,19 +74,27 @@ This is wired up once and then runs itself. The moving parts:
 !!! warning "The bot's Release PR CI run parks — it needs a nudge"
     The Release PR *does* get a `lint-test` / `python` CI run created on every push — but
     when it's opened with the default `GITHUB_TOKEN`, the run parks at `action_required`
-    awaiting manual approval. The repo's fork-PR contributor-approval policy catches the
-    bot's own PRs too, so the checks never report and the strict `main` ruleset blocks the
-    merge. **No owner bypass exists** — the `main` ruleset has zero bypass actors,
-    deliberately — so this has to be unstuck, not skipped.
+    awaiting manual approval. The repo's contributor-approval policy for workflow runs
+    (*Settings → Actions → General → "Approval for running fork pull request workflows from
+    contributors"*; `gh api repos/philipyaz/cos/actions/permissions/fork-pr-contributor-approval`)
+    catches the bot's own PRs too, so the checks never report and the strict `main` ruleset
+    blocks the merge (the parked runs are visible under *Actions*, filtered by the branch
+    `release-please--branches--main--components--cos`). **No owner bypass exists** — the
+    `main` ruleset has zero bypass actors, deliberately — so this has to be unstuck, not
+    skipped.
 
-    - **Primary path (the default): a `RELEASE_PLEASE_TOKEN` secret.** A fine-grained PAT
+    - **Primary path (recommended): a `RELEASE_PLEASE_TOKEN` secret.** A fine-grained PAT
       (repository `philipyaz/cos` only; *Contents: Read and write* + *Pull requests: Read
       and write*), stored as a repository Actions secret. The workflow already prefers it
       (`secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN`) — pushes/PRs made with it
       trigger CI as the token's owner, so the checks gate the merge normally, every time.
-      **Failure mode:** an expired PAT falls back to `GITHUB_TOKEN` silently — the symptom
-      is a Release PR with no reported checks again; fix by re-minting and
-      `gh secret set RELEASE_PLEASE_TOKEN --repo philipyaz/cos`.
+      **Failure mode:** an expired PAT does **not** fall back — the `||` only fires on an
+      absent/empty secret, and an expired token is still a non-empty string. Instead the
+      `release-please` workflow on `main` fails red (bad credentials) and the Release PR
+      stops being refreshed, so its version and changelog go stale. Check
+      `gh run list --workflow release-please.yml` after a merge to `main`; fix by
+      re-minting and `gh secret set RELEASE_PLEASE_TOKEN --repo philipyaz/cos`. Only an
+      absent secret falls back to `GITHUB_TOKEN` — and then the runs park again.
     - **One-off unblock (no secret set yet).** Approve the parked run from the Actions tab
       ("Approve and run"), or push an empty commit to the Release PR's branch yourself — a
       `pull_request` event from a maintainer runs CI unparked. Merge promptly: the next push

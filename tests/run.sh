@@ -526,7 +526,7 @@ else
   fail_reasons="${fail_reasons} nutrition-status-consumers"
 fi
 
-# --- 3. vault property checks (grep; mostly WARN-level, one HARD sub-check) --
+# --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --
 # Post-migration the vault holds knowledge only: no task checkboxes in wiki/,
 # and reminders are drained to the board (no open "- [ ]" left). These are the
 # migration *target*; flagged as WARN so the suite is runnable while the
@@ -655,17 +655,25 @@ fi
 # 3e. HARD GATE — releasing docs truth (cos-ops#23). The releasing docs must never
 # again claim an owner bypass: ruleset 17526068's `bypass_actors` is deliberately
 # empty, and this exact claim hid a 45-day release outage (ADR 0014: a load-bearing
-# rule is a gate, not prose alone — mirrors 3c/3d). If a bypass actor is ever
-# legitimately added, update the docs and this sub-check in the same PR.
+# rule is a gate, not prose alone — mirrors 3c/3d). Like 3c/3d it is a PRESENCE
+# check on the load-bearing phrase ("no owner bypass exists" must be stated in both
+# files), plus a case-insensitive guard against the three retired claims (a repo test
+# cannot observe the ruleset itself, only what the docs say about it). If a bypass
+# actor is ever legitimately added, update the docs and this sub-check in the same PR.
 releasing_truth_fail=0
 releasing_md="${REPO_ROOT}/docs/reference/releasing.md"
 release_please_yml="${REPO_ROOT}/.github/workflows/release-please.yml"
 
 if [ -f "${releasing_md}" ]; then
+  if ! grep -qiF -- "no owner bypass exists" "${releasing_md}"; then
+    echo "FAIL: ${releasing_md#"${REPO_ROOT}"/} no longer states that no owner bypass exists."
+    releasing_truth_fail=1
+  fi
   for p in \
     "Owner bypass (default)" \
-    "lets the repository owner bypass"; do
-    if grep -qF -- "${p}" "${releasing_md}"; then
+    "lets the repository owner bypass" \
+    "owner can bypass"; do
+    if grep -qiF -- "${p}" "${releasing_md}"; then
       echo "FAIL: ${releasing_md#"${REPO_ROOT}"/} still claims an owner bypass: ${p}"
       releasing_truth_fail=1
     fi
@@ -676,7 +684,11 @@ else
 fi
 
 if [ -f "${release_please_yml}" ]; then
-  if grep -qF -- "merge via owner bypass" "${release_please_yml}"; then
+  if ! grep -qiF -- "no owner bypass exists" "${release_please_yml}"; then
+    echo "FAIL: ${release_please_yml#"${REPO_ROOT}"/} no longer states that no owner bypass exists."
+    releasing_truth_fail=1
+  fi
+  if grep -qiF -- "merge via owner bypass" "${release_please_yml}"; then
     echo "FAIL: ${release_please_yml#"${REPO_ROOT}"/} still claims an owner bypass: merge via owner bypass"
     releasing_truth_fail=1
   fi

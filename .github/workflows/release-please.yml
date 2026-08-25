@@ -30,7 +30,9 @@ jobs:
           # Prefer a PAT (RELEASE_PLEASE_TOKEN) so the Release PR's CI runs as the token's
           # owner. Falling back to the default GITHUB_TOKEN gets a CI run created, but it
           # parks at action_required (no owner bypass exists to skip this — approve by hand
-          # or empty-commit to unstick). See docs/reference/releasing.md → "One-time setup".
+          # or empty-commit to unstick). NOTE: `||` falls back only on an ABSENT secret — an
+          # expired PAT is still non-empty, so this job fails red instead (re-mint the PAT).
+          # See docs/reference/releasing.md → "One-time setup".
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
