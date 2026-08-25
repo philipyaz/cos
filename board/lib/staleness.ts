@@ -54,5 +54,7 @@ export function wholeDaysBetween(fromDay: string, toDay: string): number {
 // here at the tighter attention threshold per cos-ops#20 (the brief's direction is EARLIER agent
 // detection, and agingWaiting's 3-day rule is the one becoming a public API contract at this
 // moment). Measured zero live-membership change on the day it shipped: no case sat in the 3–5 day
-// idle band on the live store.
+// idle band on the live store. Also consumed by starvingObligations (./selectors) as the
+// membership gate over open reminders and unanswered messages, and (via isStale) over cases —
+// cos-ops#24's aging rank.
 export const STALE_AFTER_DAYS = 3;

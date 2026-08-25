@@ -9,8 +9,8 @@ import {
   BadRequestError,
 } from "@/lib/store";
 import { assertAddonEnabled } from "@/lib/addons";
-import { resolveActor, storeErrorToResponse, isISODate, isHHMM } from "@/lib/route-helpers";
-import { planPlacement, DEFAULT_WORKING_HOURS, type BusyWindow, type CandidateWindow, type PlacementRequest } from "@/lib/placement";
+import { resolveActor, storeErrorToResponse, isISODate, parseBusyWindows } from "@/lib/route-helpers";
+import { planPlacement, DEFAULT_WORKING_HOURS, type CandidateWindow, type PlacementRequest } from "@/lib/placement";
 import { todayISO } from "@/lib/selectors";
 import { effectivePlanDayStatus } from "@/lib/fitness-plan-status";
 import type { CalendarEvent } from "@/lib/types";
@@ -104,23 +104,11 @@ export async function POST(req: NextRequest) {
 
   // Optional caller-supplied busy windows (ops#25) — the agent's own read of the REAL
   // calendar, used-and-discarded by the engine; never persisted anywhere below.
-  const rawBusyWindows = body.busyWindows !== undefined ? body.busyWindows : [];
-  if (!Array.isArray(rawBusyWindows)) {
-    return NextResponse.json({ error: "'busyWindows' must be an array." }, { status: 400 });
+  const parsedBusyWindows = parseBusyWindows(body.busyWindows);
+  if ("error" in parsedBusyWindows) {
+    return NextResponse.json({ error: parsedBusyWindows.error }, { status: 400 });
   }
-  const busyWindows: BusyWindow[] = [];
-  for (const raw of rawBusyWindows) {
-    const date = (raw as Record<string, unknown> | null)?.date;
-    const start = (raw as Record<string, unknown> | null)?.start;
-    const end = (raw as Record<string, unknown> | null)?.end;
-    if (!isISODate(date) || !isHHMM(start) || !isHHMM(end) || start >= end) {
-      return NextResponse.json(
-        { error: "Each 'busyWindows' entry needs 'date' (YYYY-MM-DD) and 'start' < 'end' (HH:MM)." },
-        { status: 400 },
-      );
-    }
-    busyWindows.push({ date, start, end });
-  }
+  const busyWindows = parsedBusyWindows;
 
   const actor = resolveActor(req, body);
   void actor;

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { NotFoundError, VersionConflictError, BadRequestError, SchemaAheadError, SpokeRoleError } from "@/lib/store";
 import { recordDevice } from "@/lib/devices";
 import type { Actor } from "@/lib/types";
+import type { BusyWindow } from "@/lib/placement";
 
 // Calendar-day ("YYYY-MM-DD") shape guard — a pure, lock-free, db-free string predicate
 // shared by every route that takes a calendar-day field (the nutrition + events routes).
@@ -15,6 +16,31 @@ export const isISODate = (v: unknown): v is string =>
 // Calendar/timezone correctness is out of scope; this is a shape check only.
 export const isHHMM = (v: unknown): v is string =>
   typeof v === "string" && /^\d{2}:\d{2}$/.test(v);
+
+// Parse + validate a raw `busyWindows` request field into BusyWindow[] — the agent's own
+// per-call read of the user's REAL calendar (ADR 0021: used-and-discarded by the placement
+// engine, never persisted). `raw` undefined (the field was omitted) reads as "no busy windows".
+// Single-sourced here (cos-ops#24) so the fitness/nutrition calendar pushes and the generic
+// events route's `place` mode share ONE validator instead of a third byte-identical copy — the
+// error string is preserved VERBATIM from the two pre-existing copies so their api tests stay
+// green unchanged.
+export function parseBusyWindows(raw: unknown): BusyWindow[] | { error: string } {
+  const rawArr = raw !== undefined ? raw : [];
+  if (!Array.isArray(rawArr)) {
+    return { error: "'busyWindows' must be an array." };
+  }
+  const busyWindows: BusyWindow[] = [];
+  for (const item of rawArr) {
+    const date = (item as Record<string, unknown> | null)?.date;
+    const start = (item as Record<string, unknown> | null)?.start;
+    const end = (item as Record<string, unknown> | null)?.end;
+    if (!isISODate(date) || !isHHMM(start) || !isHHMM(end) || start >= end) {
+      return { error: "Each 'busyWindows' entry needs 'date' (YYYY-MM-DD) and 'start' < 'end' (HH:MM)." };
+    }
+    busyWindows.push({ date, start, end });
+  }
+  return busyWindows;
+}
 
 // "human" by default; an MCP/agent write flags itself via { actor:"agent" } or
 // the `x-actor: agent` header so its writes are attributed correctly. Every write

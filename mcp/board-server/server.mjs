@@ -30,7 +30,7 @@
 //   labels  : install_label_bundle, uninstall_label_bundle (configure the taxonomy)
 //   approval: propose, approve, reject
 //   vault   : get_vault_coverage, mark_vault_ingested (the vault-ingest receipt)
-//   attention: get_needs_attention (the four needs-attention buckets)
+//   attention: get_needs_attention (the four buckets + the starving rank)
 //
 // v3.2: reminders are ENRICHED — create_reminder/update_reminder carry catalog
 // `labels` + a short `tasks` checklist, link_reminder_message attaches an email to
@@ -55,6 +55,11 @@
 // (cos-ops#20). get_needs_attention reads the four buckets the needsAttention selector computes
 // (overdue, agingWaiting, untriaged, unlinked — previously UI-only, board/components/board/
 // needs-attention.tsx); rides `/api/cases/needs-attention`.
+//
+// v3.6: STARVING RANK — get_needs_attention now leads with `starving` (cos-ops#24), a single
+// aging-ordered list across cases, open reminders, and unanswered messages computed by
+// starvingObligations (board/lib/selectors.ts); "already chased" is derived from a linked timed
+// calendar event within the next 7 days, never stored. Same route, no new tool.
 //
 // HIERARCHY (v3): the board is a strict 3-tier tree of MAX DEPTH 3, where ALL THREE
 // tiers are the SAME CaseRecord (id CASE-<n>) distinguished by a `kind` field:
@@ -886,23 +891,41 @@ function needsAttentionBucketLines(tag, cases, render) {
   return lines;
 }
 
-// Read the four needsAttention buckets. No args — the selector excludes archived
-// cases by definition in every bucket, so an includeArchived knob would change
-// what the buckets mean, not just their scope.
+// Read the four needsAttention buckets PLUS the starving rank (cos-ops#24). No args — the
+// selector excludes archived cases by definition in every bucket, so an includeArchived knob
+// would change what the buckets mean, not just their scope.
 async function handleGetNeedsAttention() {
   const { data, errorResult } = await api("GET", "/api/cases/needs-attention");
   if (errorResult) return errorResult;
 
-  const counts = data.counts ?? { overdue: 0, agingWaiting: 0, untriaged: 0, unlinked: 0, total: 0 };
-  if (counts.total === 0) {
-    return text("Nothing needs attention — overdue, aging, untriaged and unlinked are all clear.");
+  const counts = data.counts ?? { overdue: 0, agingWaiting: 0, untriaged: 0, unlinked: 0, starving: 0, total: 0 };
+  const starving = data.starving ?? [];
+  // counts.total === 0 no longer implies nothing to say: a stale-idle in_progress case (or a
+  // starving reminder/message) lives in NONE of the four buckets, so it can be the ONLY thing
+  // this tool would otherwise go silent on.
+  if (counts.total === 0 && starving.length === 0) {
+    return text(
+      "Nothing needs attention — overdue, aging, untriaged and unlinked are all clear, and " +
+        "nothing is starving."
+    );
   }
 
   const lines = [
-    `Needs attention — ${counts.total} (overdue ${counts.overdue}, aging ${counts.agingWaiting}, ` +
-      `untriaged ${counts.untriaged}, unlinked ${counts.unlinked}). Buckets overlap, so this is a ` +
-      `sum of bucket sizes, not a count of distinct cases.`,
+    `Needs attention — ${counts.total} in the four buckets (overdue ${counts.overdue}, aging ` +
+      `${counts.agingWaiting}, untriaged ${counts.untriaged}, unlinked ${counts.unlinked}), ` +
+      `starving ${counts.starving}. Buckets overlap each other AND the starving rank, so neither ` +
+      `is a count of distinct cases.`,
   ];
+  // Worst-first is the headline: the starving rank renders BEFORE the four buckets.
+  lines.push(
+    ...needsAttentionBucketLines("starving", starving, (s) => {
+      let line = `score ${s.score} · ${s.kind} · idle ${s.daysIdle} d`;
+      if (s.daysOverdue > 0) line += ` · overdue ${s.daysOverdue} d`;
+      if (s.passedBlock) line += ` · block passed ${s.passedBlock.daysSincePassed} d ago`;
+      if (s.kind === "message" && s.from) line += ` · from ${s.from}`;
+      return line;
+    })
+  );
   lines.push(
     ...needsAttentionBucketLines(
       "overdue",
@@ -1644,5 +1667,5 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 await start(
   server,
   new StdioServerTransport(),
-  `board MCP server v3.5 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
+  `board MCP server v3.6 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
 );

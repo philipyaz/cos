@@ -393,13 +393,22 @@ const LIST_INITIATIVES_TOOL = {
 const GET_NEEDS_ATTENTION_TOOL = {
   name: "get_needs_attention",
   description:
-    "Read the board's own \"what needs attention\" report — four buckets computed live off the " +
-    "`needsAttention` selector: overdue (past due, not done), agingWaiting (waiting_for_input idle " +
-    "> 3 days), untriaged (todo lane, no tasks, no priority — raw intake), unlinked (no " +
-    "vaultLinks, not done). Buckets OVERLAP (a case can be both overdue and unlinked) — do not sum " +
-    "them into a distinct-case count; use the response's own `counts.total`. Call this FIRST in " +
-    "any \"where is Philip at / what needs a nudge\" sweep — the reconciliation entry point that " +
-    "lets an agent detect drift without waiting on his prompt. `GET /api/cases/needs-attention`.",
+    "Read the board's own \"what needs attention\" report. Leads with `starving` — a single " +
+    "ranked worst-first list across cases, open reminders, and unanswered messages whose rank " +
+    "RISES with days idle (×1), days overdue (×2), and a passed-unactioned linked timed block (×3 — " +
+    "ANY past linked timed event the case was not touched after; the board cannot tell a chase block " +
+    "from a meeting the human linked); an " +
+    "obligation with a linked TIMED event in the next 7 days is excluded as already-allocated " +
+    "(all-day events never count — they're deadline markers). Use it as the entry point of the " +
+    "weekly staleness lens (board-organize) and any \"what is Philip forgetting that has teeth\" " +
+    "read. Then four buckets computed live off the `needsAttention` selector: overdue (past due, " +
+    "not done), agingWaiting (waiting_for_input idle > 3 days), untriaged (todo lane, no tasks, no " +
+    "priority — raw intake; it enters `starving` only once idle for a day), unlinked (no vaultLinks, not done). Buckets OVERLAP (a case can be " +
+    "both overdue and unlinked) — do not sum them into a distinct-case count; use the response's " +
+    "own `counts.total` (the starving rank overlaps the buckets too and is never folded into it). " +
+    "Call this FIRST in any \"where is Philip at / what needs a nudge\" sweep — the reconciliation " +
+    "entry point that lets an agent detect drift without waiting on his prompt. " +
+    "`GET /api/cases/needs-attention`.",
   inputSchema: { type: "object", properties: {} },
 };
 
