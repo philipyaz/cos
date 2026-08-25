@@ -188,3 +188,12 @@ never the data: update the code (`git pull`) and restart the board.
   answers *"what has the vault never been told?"* — cases carrying `vaultLinks` whose receipt
   is absent or older than the case's own `updatedAt` — the deterministic alarm for a capture
   pipeline that fails silently. Full design: [vault-async](vault-async.md).
+- **v15 → v16 — `db.shoppingItems[]` (the persistent shopping list).** Adds the optional
+  `db.shoppingItems?: ShoppingItem[]` array (store-minted `SHOP-<n>` ids; `category` deliberately
+  includes non-food `household` / `personal-care`; `status` `needed` → `bought` stamps `boughtAt`
+  server-side on the transition, any other status clears it; `source` + a soft `sourceRef`). **Purely
+  additive + back-compatible:** old v15 files read unchanged — `migrate()` carries the array forward
+  when present and a missing key defaults to `[]`, no backfill. **New enums:** `ShoppingCategory`,
+  `ShoppingStatus`, `ShoppingSource`. The candidates read (`GET /api/nutrition/shopping/candidates`
+  / `get_shopping_candidates`) is computed on read, never persisted. Full design:
+  [Nutrition](../features/nutrition.md#the-shopping-list-v16).

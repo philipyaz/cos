@@ -1,6 +1,6 @@
 ---
 name: nutrition-mcp-setup
-description: Stand up the `nutrition` MCP for the "Nutrition & Chef" add-on on a new machine and wire it into both Claude clients — the simplest of the optional add-ons (a pure thin fetch-wrapper over the board's /api/nutrition/* routes, like the calendar server; NO sidecar, NO external repo, all in-repo at mcp/nutrition-server). It is exposed to Claude Code via a supergateway + launchd BRIDGE on $NUTRITION_BRIDGE_PORT/:8007 and to Claude Cowork Desktop as a direct stdio command, and the add-on must be ENABLED (Settings.addons.nutrition.enabled) for its 14 tools' WRITES to land + its /nutrition nav to appear. Use when setting up the nutrition/chef add-on on a new machine, when Cowork or Code can't see the `nutrition` server, when the nutrition bridge (:8007) is down, when log_food / plan_meal / add_pantry_item write but the board 404s them, or when enabling/disabling the Nutrition & Chef add-on.
+description: Stand up the `nutrition` MCP for the "Nutrition & Chef" add-on on a new machine and wire it into both Claude clients — the simplest of the optional add-ons (a pure thin fetch-wrapper over the board's /api/nutrition/* routes, like the calendar server; NO sidecar, NO external repo, all in-repo at mcp/nutrition-server). It is exposed to Claude Code via a supergateway + launchd BRIDGE on $NUTRITION_BRIDGE_PORT/:8007 and to Claude Cowork Desktop as a direct stdio command, and the add-on must be ENABLED (Settings.addons.nutrition.enabled) for its tools' WRITES to land + its /nutrition nav to appear. Use when setting up the nutrition/chef add-on on a new machine, when Cowork or Code can't see the `nutrition` server, when the nutrition bridge (:8007) is down, when log_food / plan_meal / add_pantry_item write but the board 404s them, or when enabling/disabling the Nutrition & Chef add-on.
 ---
 
 # Nutrition & Chef MCP setup (the simplest add-on — thin fetch-wrapper bridge :8007)
@@ -296,7 +296,7 @@ echo "Uninstalled the nutrition bridge + both registrations. ⌘Q + reopen Cowor
   hides/404s the `/nutrition/*` pages, but GET reads (`list_*`, `get_*`, `read_pantry`) stay open
   and the **`/addons` catalog link stays reachable**. So the classic "log_food keeps failing with
   Not found." is almost always *the add-on is off* (§6), not a bridge fault — check `/api/addons`.
-- **The estimation INTELLIGENCE is NOT in the MCP.** The 14 tools just store the numbers you give
+- **The estimation INTELLIGENCE is NOT in the MCP.** The tools just store the numbers you give
   them; the MCP never estimates calories/macros. That judgment lives in the operator skill
   (`/nutrition-chef`). Don't expect `log_food` to fill in calories from a description — pass them.
 - **`COS_MCP_IDLE_EXIT_MS` lives ONLY in the bridge plist, never in the Cowork config.** mcp-kit's

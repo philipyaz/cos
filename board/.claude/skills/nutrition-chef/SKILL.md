@@ -4,16 +4,16 @@ description: >
   The Nutrition & Chef operator — turns a plain-language food/kitchen request into
   structured writes on the Cos board via the `nutrition` MCP. Every invocation FIRST
   reconciles the meal plan, then LOGS what you ate (calories, macros, a health flag),
-  maintains the PANTRY (add / read / update / remove, low stock + expiring soon, or a
-  whole shop or receipt photo in one confirmed write), PLANS meals from what's on
-  hand (honoring ALLERGIES + diet, onto the calendar by default), owns the DIETARY
-  PROFILE, and AUTHORS the daily nutrition targets — always not-medical-advice framed.
-  Use when the user says "log what I ate", "I had X for lunch", "what's in my fridge",
-  "add Y to the pantry", "here's my shopping receipt", "plan meals",
-  "what can I cook", "meal plan for the week", "I cooked the salmon", "reconcile my
-  meal plan", "set my allergies", "I'm vegan / I'm doing keto", "what's my calorie
-  target", or otherwise asks to track food, manage the kitchen, plan meals, set
-  dietary preferences, or get nutrition targets.
+  maintains the PANTRY (add / read / update / remove, or a whole shop or receipt
+  photo in one confirmed write), keeps the persistent SHOPPING LIST (non-food too),
+  PLANS meals from what's on hand (honoring ALLERGIES + diet, onto the calendar by
+  default), owns the DIETARY PROFILE, and AUTHORS the daily nutrition targets —
+  always not-medical-advice framed. Use when the user says "log what I ate", "what's
+  in my fridge", "add Y to the pantry", "here's my shopping receipt", "what's on my
+  shopping list", "add batteries to my list", "I bought the milk", "plan meals",
+  "reconcile my meal plan", "what can I cook", "set my allergies", "I'm vegan / I'm
+  doing keto", "what's my calorie target", or otherwise asks to track food, manage
+  the kitchen or shopping list, or plan meals.
 ---
 
 # Nutrition & Chef (the kitchen operator)
@@ -30,8 +30,10 @@ the MCP just stores what you author. The nutrition tools are thin: `log_food` /
 `list_food_log` / `get_food_log` / `update_food_log` / `delete_food_log`; `read_pantry`
 / `add_pantry_item` / `update_pantry_item` / `remove_pantry_item`; `plan_meal` /
 `list_meal_plan` / `get_meal_plan` / `update_meal_plan` / `remove_meal_plan`; the
-DIETARY-PROFILE pair `get_diet_profile` / `set_diet_profile`; and the AGENT-AUTHORED
-TARGETS `save_nutrition_targets` / `list_nutrition_targets` / `get_nutrition_targets`.
+DIETARY-PROFILE pair `get_diet_profile` / `set_diet_profile`; the AGENT-AUTHORED
+TARGETS `save_nutrition_targets` / `list_nutrition_targets` / `get_nutrition_targets`; and
+the SHOPPING LIST `list_shopping` / `add_shopping_item` / `update_shopping_item` /
+`remove_shopping_item` + the computed `get_shopping_candidates` (JOB 6).
 
 > **The board does NOT compute targets — YOU do (the `save_training_plan` law).** There
 > is no longer a diet "engine" on the board. You read the inputs (the user's free-text
@@ -498,6 +500,87 @@ read now — there's no per-day chip).
 
 ---
 
+## JOB 6 — The shopping list ("what should I buy", the Friday draft)
+
+The shopping list (`db.shoppingItems`) is **persistent state** — unlike a candidate
+suggestion, a row you write survives between shops, and it deliberately holds **non-food
+too** (the brief is explicit: "not only about nutrition"). This job reads the list, drafts
+against it on Fridays, and ticks items off as they get bought.
+
+**1. Triggers.** "what's on my shopping list", "add X to my list", "I bought / got the
+milk", and the Friday scheduled run ("take stock of the pantry and draft the shopping
+list").
+
+**2. Read first, every time.** `list_shopping()` (defaults to `needed`) +
+`get_shopping_candidates()` (defaults to the coming week). Consume every field the read
+returns by name: state the **window** it covers, walk the **candidates**, and report the
+**suppressed** counts in one line — N already listed, N in pantry, N bought this window.
+
+**3. The Friday draft.** By the time this runs, JOB 0 has already reconciled. Split the
+candidates into two sets:
+
+- the **proven set** — every `source: "plan"` candidate: an ingredient this week's plan
+  names that the pantry does not hold.
+- the **judgement set** — every `source: "pantry"` candidate (an `expired` row is a FACT;
+  a freshness-horizon row is an INFERENCE — surface it with its `(inferred — no printed
+  date)` label intact, never paraphrased) plus anything you know from context the state
+  can't see (a non-food need, something mentioned in chat).
+
+**4. Write it — batched, never per item.** **auto mode**: `add_shopping_item` each proven
+row directly (`source: "plan"`, `sourceRef` the meal's id), log every write, then ask **at
+most one** consolidated question covering the whole judgement set. **approval mode**: lay
+the whole proposed list out in chat (proven + judgement together) and take **exactly one**
+yes covering all of it. Never a prompt per item. **Nothing routes through the pending
+queue** — confirmation here is conversational, exactly like JOB 2's bulk capture.
+
+**5. A clean list is a no-op.** No candidates and nothing left to ask → produce **no
+output at all** — don't announce "nothing to buy," say nothing (the `/reminders-review`
+don't-chase-silence contract).
+
+**6. Ticking off.** `update_shopping_item(id, status: "bought")` — one call per tick;
+`boughtAt` stamps itself, you never set it yourself. After the ticks, **offer** one
+`reconcile_pantry` covering the bought rows that are actually food (JOB 2 owns bulk pantry
+writes) — offer, never silently mutate the inventory. `household` / `personal-care` /
+`bakery` rows are **excluded** from that offer (the pantry vocabulary has no slot for
+them) — say which rows you left out.
+
+**7. Category mapping (the two vocabularies differ).** A pantry-derived candidate whose
+pantry row is `grain` or `spice` gets shopping category `pantry`; every other pantry
+category name maps straight across (`produce`→`produce`, `protein`→`protein`,
+`dairy`→`dairy`, `frozen`→`frozen`). When you're unsure, **omit `category`** rather than
+guess.
+
+**8. Provenance for accepted inferences.** When a confirmed **inferred** (freshness-
+horizon) candidate is written onto the list, carry its `reason` — the label included —
+into the new row's `note`, so an inference that makes it into stored state keeps saying it
+was one.
+
+**9. "Don't need it" / removing.** `update_shopping_item(id, status: "dismissed")` keeps
+history and is inert — a dismissed row never suppresses a future candidate (a standing
+"never offer X again" memory is a bigger semantic than one label). `remove_shopping_item`
+only on an explicit delete ask — hard remove, confirm in approval mode.
+
+**10. Report** the minted `SHOP-` ids and the aisle-grouped list (`list_shopping` already
+renders it grouped by category).
+
+> **Example.** Friday, auto mode, right after JOB 0's reconcile. `list_shopping()` → 3
+> `needed` rows already on it (milk, olive oil, batteries). `get_shopping_candidates()` →
+> window `2026-08-07` → `2026-08-13`; candidates: `flour` (`source: "plan"`, for "Sunday
+> pancakes" on 2026-08-09), `spinach` (`source: "pantry"`, `expired 2026-08-04`),
+> `Salad leaves` (`source: "pantry"`, likely past its ~7-day freshness horizon at 12 days
+> (inferred — no printed date)); suppressed: 1 already listed, 2 in pantry, 0 bought this
+> window. Proven set = {flour} → write it directly: `add_shopping_item(name: "flour",
+> source: "plan", sourceRef: "MEAL-41")`. Judgement set = {spinach, Salad leaves} → **one**
+> consolidated question, the label kept verbatim: *"Also add spinach (expired 2026-08-04)
+> and Salad leaves (likely past its ~7-day freshness horizon at 12 days (inferred — no
+> printed date))?"* On yes: `add_shopping_item(name: "spinach", source: "pantry",
+> sourceRef: "PANTRY-9")` and `add_shopping_item(name: "Salad leaves", source: "pantry",
+> sourceRef: "PANTRY-22", note: "likely past its ~7-day freshness horizon at 12 days
+> (inferred — no printed date)")`.
+> Report `SHOP-14`, `SHOP-15`, `SHOP-16` + the aisle-grouped list.
+
+---
+
 ## Conventions (guardrails recap)
 
 - **`nutrition` MCP only, via the tools.** Never `bash`/`curl`. The board UI is the
@@ -545,6 +628,14 @@ read now — there's no per-day chip).
   not-medical-advice framing. Read back with `get_nutrition_targets` / `list_nutrition_targets`.
   **Weight + the body goal are the `body` MCP's** (`log_weight` / `get_body_objective` /
   `get_body_status`), not this skill's — this skill READS them.
+- **Shopping list (JOB 6):** persistent state (`db.shoppingItems`, non-food too) —
+  `get_shopping_candidates` **computes** suggestions, it never auto-writes them. Auto
+  mode writes only the proven `source: "plan"` set directly, then **at most one** batched
+  question for the judgement (pantry) set; approval mode takes **exactly one** yes for
+  the whole proposed list. A clean list is a no-op — **no output at all**. Ticking
+  `bought` **offers one `reconcile_pantry`** for the food rows (never silent). `dismissed`
+  keeps history (inert — never suppresses a future candidate). Removes are hard, like
+  every other delete in this skill.
 - **NOT MEDICAL ADVICE.** Targets are informational estimates — **say so**, surface the
   engine's `not-medical-advice` flag, and **defer medical conditions, pregnancy/
   breastfeeding, eating-disorder history, or an under-18 user to a clinician or
@@ -552,6 +643,6 @@ read now — there's no per-day chip).
 - **Removes are HARD.** `delete_food_log` / `remove_pantry_item` / `remove_meal_plan`
   have no soft-archive — they're irreversible, unlike the board's soft `archive_case`.
   Confirm before removing in approval mode.
-- **Report** what you wrote: the minted ids (`FOOD-`/`PANTRY-`/`MEAL-`/`NTARGET-`) and the
-  useful rollup (the day's calorie total, what's expiring, the week's agenda, the new
-  weight trend + remaining-to-go).
+- **Report** what you wrote: the minted ids (`FOOD-`/`PANTRY-`/`MEAL-`/`NTARGET-`/`SHOP-`)
+  and the useful rollup (the day's calorie total, what's expiring, the week's agenda, the
+  new weight trend + remaining-to-go, the aisle-grouped shopping list).
