@@ -29,7 +29,11 @@
 #      engine returns must be CONSUMED (a defined action, or an explicit
 #      state-and-move-on) by JOB 0 of nutrition-chef/SKILL.md (HARD gate; the ADR
 #      0014 gate for cos-ops#18). Static, read-only, no board needed — catches the
-#      board computing an answer nobody reads.
+#      board computing an answer nobody reads. Also runs
+#      fitness-outcome-consumers.mjs in the same step (ADR 0022 — a parser-grade
+#      gate rides an EXISTING step id rather than minting a new one): every
+#      top-level field of the fitness PlanReconciliation engine must be consumed by
+#      the weekly + daily close-out sections of the two fitness skills (cos-ops#19).
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -510,7 +514,7 @@ else
   fail_reasons="${fail_reasons} skill-frontmatter"
 fi
 
-# --- 2f. nutrition-status-consumers (hard gate) -------------------------------
+# --- 2f. nutrition-status-consumers + fitness-outcome-consumers (hard gate) --
 # The ADR 0014 gate (cos-ops#18): every top-level field the nutrition status engine
 # (`NutritionStatus` in board/lib/nutrition-status.ts) returns must be CONSUMED — a
 # defined action, or an explicit state-and-move-on — by JOB 0 of nutrition-chef/SKILL.md,
@@ -524,6 +528,24 @@ else
   echo "nutrition-status-consumers: FAIL"
   fail=1
   fail_reasons="${fail_reasons} nutrition-status-consumers"
+fi
+
+# The same ADR 0014 gate for the fitness per-day close-out (cos-ops#19): every
+# top-level field of `PlanReconciliation` (board/lib/fitness-plan-status.ts) must be
+# consumed by fitness-training-plan/SKILL.md's "### 0.5 CLOSE OUT last week" section
+# AND `unresolvedDays` by fitness-pre-workout-brief/SKILL.md's "## STEP 1.5" section;
+# also pins the route-vs-tool check (the PATCH .../day route and the fitness-client /
+# MCP server both reference it) as an ALWAYS-RUN static check, since the live-board
+# api test's own copy of that assertion silently SKIPs when no board is up. Rides
+# THIS existing step id rather than minting a new one (ADR 0022 — the static [2*]
+# family already hit its five-in-eight-days revisit trigger).
+echo "--- [2f] fitness-outcome-consumers (close-out field contract) ---"
+if node "${SCRIPT_DIR}/fitness-outcome-consumers.mjs"; then
+  echo "fitness-outcome-consumers: PASS"
+else
+  echo "fitness-outcome-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} fitness-outcome-consumers"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --
@@ -1271,6 +1293,34 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-fitness-push-plan: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-fitness-push-plan"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10j3. api-fitness-plan-outcome (only when a board is healthy) ----------
+# The per-day training-plan OUTCOME channel (cos-ops#19: PATCH /api/fitness/coaching/<id>/day
+# + the computed `reconciliation` on GET .../coaching/<id>) with the "fitness" add-on ENABLED:
+# a targeted PATCH changes exactly one day's status, byte-identical elsewhere; SCHEMA_VERSION
+# is untouched (the outcome rides the verbatim payload); `reconciliation.unresolvedDays`
+# reflects the write on the very next GET; a same-date healthEntries workout PROVES exactly
+# one day (provenDone:true + healthEntryId), never the others; an unanswered day stays
+# `planned` and is never written by a mere read; validation (bad status, moved without
+# moved_to, moved_to on a non-moved status, an unknown date, a rest-day date) 400s; the
+# add-on GATE closes the write while the read stays open; the route-vs-tool regex pair
+# (also duplicated, always-run, in fitness-outcome-consumers.mjs — this step SKIPs when no
+# board is up); and push-plan-to-calendar reports a resolved future day as skipped/resolved
+# with no event created. Snapshots + restores board/data/cases.json (coachingArtifacts +
+# healthEntries + settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10j3] api-fitness-plan-outcome (live board) -------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-plan-outcome.mjs"; then
+    echo "api-fitness-plan-outcome: PASS"
+  else
+    echo "api-fitness-plan-outcome: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-plan-outcome"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."

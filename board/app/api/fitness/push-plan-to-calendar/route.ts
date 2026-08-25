@@ -12,6 +12,7 @@ import { assertAddonEnabled } from "@/lib/addons";
 import { resolveActor, storeErrorToResponse, isISODate, isHHMM } from "@/lib/route-helpers";
 import { planPlacement, DEFAULT_WORKING_HOURS, type BusyWindow, type CandidateWindow, type PlacementRequest } from "@/lib/placement";
 import { todayISO } from "@/lib/selectors";
+import { effectivePlanDayStatus } from "@/lib/fitness-plan-status";
 import type { CalendarEvent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,8 @@ interface PlanDay {
   description?: string;
   zones?: string;
   eventId?: string;
+  status?: string; // cos-ops#19: absent ≡ "planned"; done/skipped/moved are RESOLVED — never placed
+  movedTo?: string;
 }
 
 interface PushResult {
@@ -66,6 +69,13 @@ function sessionDescription(day: PlanDay): string {
 // days are a DENY-list (never an allow-list on "training" — the skill's own day-type enum
 // is open, so an allow-list would skip every session of the next generated plan). GATED on
 // the "fitness" add-on (assertAddonEnabled is the first statement inside mutate()).
+//
+// OUTCOME-AWARE (cos-ops#19): a day whose effective status is done/skipped/moved is RESOLVED
+// — it never reaches the placement engine and is reported directly as
+// { action: "skipped", reason: "resolved" }, carrying its stale receipt (if any) exactly like
+// the rest-day branch. Never materialise a session that already happened, was declined, or now
+// lives on another date; a `moved` session's NEW date is an ordinary day entry in the re-saved
+// plan, placed by this same normal path.
 //
 // `busyWindows` (ops#25) is the agent's own read of the user's REAL calendar — per-call
 // only, used-and-discarded by the engine, NEVER persisted. The working-hours preference
@@ -134,14 +144,17 @@ export async function POST(req: NextRequest) {
       }
       const days = artifact.payload.days as PlanDay[];
 
-      // Up-front shape validation (mirrors the prior route): every day needs an ISO
-      // date; a non-rest/non-active-recovery day needs a finite positive duration_min.
+      // Up-front shape validation (mirrors the prior route): every day needs an ISO date; a
+      // non-rest/non-active-recovery, UNRESOLVED day needs a finite positive duration_min. A
+      // day already done/skipped/moved is exempted here too (cos-ops#19) — a skipped day with
+      // a malformed duration must skip, not fail the whole push.
       for (const day of days) {
         if (!isISODate(day?.date)) {
           throw new BadRequestError(`Each plan day needs a 'date' as YYYY-MM-DD (got ${JSON.stringify(day?.date)}).`);
         }
         const isRestDay = day.type === "rest" || day.type === "active_recovery";
-        if (!isRestDay && (typeof day.duration_min !== "number" || !Number.isFinite(day.duration_min) || day.duration_min <= 0)) {
+        const isResolved = effectivePlanDayStatus(day) !== "planned";
+        if (!isRestDay && !isResolved && (typeof day.duration_min !== "number" || !Number.isFinite(day.duration_min) || day.duration_min <= 0)) {
           throw new BadRequestError(`Day ${day.date}: 'duration_min' must be a finite positive number.`);
         }
       }
@@ -150,17 +163,27 @@ export async function POST(req: NextRequest) {
       const today = todayISO(new Date());
       const now = new Date().toISOString();
 
-      // Rest/active-recovery days never reach the engine — they are reported directly,
-      // carrying a stale receipt (if any) so the agent can offer to remove the orphaned
-      // event via the calendar MCP (the state machine itself never deletes).
-      const restResultByIndex = new Map<number, PushResult>();
+      // Rest/active-recovery days AND already-resolved (done/skipped/moved, cos-ops#19) days
+      // never reach the engine — both are reported directly, carrying a stale receipt (if any)
+      // so the agent can offer to remove the orphaned event via the calendar MCP (the state
+      // machine itself never deletes).
+      const directResultByIndex = new Map<number, PushResult>();
       const requests: PlacementRequest[] = [];
       days.forEach((day, index) => {
         if (day.type === "rest" || day.type === "active_recovery") {
-          restResultByIndex.set(index, {
+          directResultByIndex.set(index, {
             date: day.date,
             action: "skipped",
             reason: "rest_day",
+            ...(day.eventId ? { eventId: day.eventId } : {}),
+          });
+          return;
+        }
+        if (effectivePlanDayStatus(day) !== "planned") {
+          directResultByIndex.set(index, {
+            date: day.date,
+            action: "skipped",
+            reason: "resolved",
             ...(day.eventId ? { eventId: day.eventId } : {}),
           });
           return;
@@ -218,7 +241,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const results: PushResult[] = days.map((_, index) => restResultByIndex.get(index) ?? opResultByIndex.get(index)!);
+      const results: PushResult[] = days.map((_, index) => directResultByIndex.get(index) ?? opResultByIndex.get(index)!);
       artifact.updatedAt = now;
 
       const created = results.filter((r) => r.action === "created").length;
