@@ -41,7 +41,8 @@ see [README → Manual quickstart (just the board)](./README.md#manual-quickstar
 1. **Branch** off `main` — never commit to `main` directly.
 2. Keep it **scoped**: one concern per pull request. A tight PR that does one thing well beats a sprawling one.
 3. Open a **PR** with a clear description of the what and the why. Link the issue if there is one.
-4. Make sure the tests pass (`tests/run.sh`) before you ask for review.
+4. Make sure the tests pass (`tests/run.sh`) before you ask for review — CI is the gate; a step that
+   reads real machine state can be red locally on a configured hub (see `CLAUDE.md` on local-vs-CI).
 
 ## Coding conventions
 
