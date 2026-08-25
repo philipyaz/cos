@@ -117,6 +117,7 @@ the same sense as `.mcp.json` and `docs/reference/labels.md`.
     suits git better: it zlib-compresses and deltas blobs itself, which works on a mostly-plain-text
     stored zip and barely at all on a deflated one.
 
-CI runs `--check` on every PR. If it fails, you edited a skill and forgot the rebuild — run the
-packer and commit. That failure is the point: it is the only thing standing between a reworded
+CI runs `--check` on every PR. If it fails, either you edited a skill and forgot the rebuild, or a
+merge/rebase brought in another branch's edit to the same skill (the zips are binary; git cannot
+merge them) — either way, run the packer and commit. That failure is the point: it is the only thing standing between a reworded
 guardrail and a scheduled task that keeps following last month's version of it.
