@@ -295,6 +295,21 @@ process directly and speak newline-delimited JSON-RPC to it:
   regression guard for the inflight-id-Set fix (a counter would leak the cancelled request and
   never re-arm). Both **SKIP gracefully** (exit `0`) if the server's deps aren't installed.
 
+### 12d. Upgrade planner (headless — the post-pull contract)
+
+**`upgrade-check.mjs`** (`run.sh` step **[13g]**) pins `scripts/upgrade-check.mjs`, the deterministic
+planner behind the `cos-upgrade` skill: given a git range it derives the ordered post-pull checklist
+for an *existing* install from the changed paths + the service manifest — back up before a schema
+bump, `npm install` on a lockfile change, `gen-launchd --install` on a descriptor change,
+`kickstart -k` exactly the bridges/sidecars whose source dir moved (a shared `packages/mcp-kit`
+change → every bridge), rebuild the board on any `board/` change, upload the rebuilt Cowork
+bundles, create/edit the scheduled triggers `automation.json` gained, add the `cos.env.example`
+keys the live `cos.env` lacks, and a **BLOCKER** when the store is *newer* than the target code (a
+downgrade). Every one of those is a silent no-op when forgotten, which is why the mapping is a test.
+Pure-function checks over a synthetic manifest, plus a CLI smoke test that builds a throwaway git
+repo in `$TMPDIR` (two commits, a fake `LaunchAgents/`, a fake store) and asserts the JSON report,
+the `ORIG_HEAD` default, and `--strict`'s exit 2. No board, no launchd, no config, no live data.
+
 ### 13. Search sidecar (python — headless, deterministic)
 
 `../search/test_search.py` covers the semantic search sidecar **without a board and

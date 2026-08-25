@@ -146,4 +146,6 @@ nav:
       - Labels: reference/labels.md
       - Troubleshooting: reference/troubleshooting.md
       - Releases & versioning: reference/releasing.md
+      - Upgrading an existing install: reference/upgrading.md
+      - Store migrations (schema ledger): reference/migration.md
   - Changelog: changelog.md
