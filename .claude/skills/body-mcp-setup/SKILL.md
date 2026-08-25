@@ -177,7 +177,7 @@ page light up live and writes start landing.
 - **CHECKPOINT** — the catalog reports it enabled:
   ```sh
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-  curl -s "$BOARD_URL/api/addons" | grep -o '"id":"body"[^}]*"enabled":true' && echo "add-on enabled"
+  curl -s "$BOARD_URL/api/addons" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).addons.find(x=>x.id==="body");process.exit(a&&a.enabled===true?0:1)})' && echo "add-on enabled"
   ```
 
 ### 7. End-to-end verify (a tool call round-trips through the board)

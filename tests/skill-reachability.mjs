@@ -97,7 +97,7 @@ const scan1Count = violations.length
 // SCAN 2 (registry -> reference, cos-ops#35): every add-on's registry-declared setupSkill must be
 // reachable from cos-setup — either sequenced as a step, or explicitly declared out of scope with
 // a reason. Source-level regex over board/lib/addons.ts as TEXT, not an import — the house idiom
-// for a tests/ static gate (tests/shopping-list-consumers.mjs parses the same file the same way).
+// for a tests/ static gate (tests/board-lint.mjs reads its inputs the same way).
 const ADDONS_FILE = join(REPO_ROOT, 'board', 'lib', 'addons.ts')
 const ROOT_SKILLS_DIR = join(REPO_ROOT, '.claude', 'skills')
 const COS_SETUP_FILE = join(ROOT_SKILLS_DIR, 'cos-setup', 'SKILL.md')
@@ -114,6 +114,17 @@ const addonsSrc = readFileSync(ADDONS_FILE, 'utf8')
 const setupSkills = new Set(
   [...addonsSrc.matchAll(/setupSkill:\s*["']([a-z0-9-]+)["']/g)].map((m) => m[1]),
 )
+// Every `setupSkill:` key in the registry must have parsed as a plain quoted kebab string — a
+// template literal, a shared const, or an odd name would otherwise silently shrink the checked
+// set (a per-entry false negative the >= 1 guard below cannot see).
+const setupSkillKeys = (addonsSrc.match(/\bsetupSkill\s*:(?!\s*string\b)/g) || []).length // registry entries only, not the interface's `setupSkill: string`
+if (setupSkillKeys !== setupSkills.size) {
+  violations.push(
+    `board/lib/addons.ts has ${setupSkillKeys} setupSkill key(s) but only ${setupSkills.size} parsed as a ` +
+      'plain quoted kebab-case string — every setupSkill value must be written as "name-mcp-setup" so this ' +
+      'gate can see it.',
+  )
+}
 
 if (setupSkills.size === 0) {
   // The parse itself broke (regex or registry moved) — deliberately >= 1, not an exact count, so
@@ -131,7 +142,9 @@ if (setupSkills.size === 0) {
           "does not exist — a typo'd or renamed setupSkill value.",
       )
     }
-    if (!new RegExp('/' + name + '(?![\\w-])').test(cosSetupSrc)) {
+    // The slash-invocation form only: `/name` not preceded by a path/word character, so a bare
+    // file-path mention (`.claude/skills/name/SKILL.md`) does not count as reachability.
+    if (!new RegExp('(?<![\\w./-])/' + name + '(?![\\w-])').test(cosSetupSrc)) {
       violations.push(
         `\`/${name}\` is declared as an add-on's setupSkill in board/lib/addons.ts but ` +
           '.claude/skills/cos-setup/SKILL.md never references it — sequence it as a step (or ' +

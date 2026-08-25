@@ -195,6 +195,10 @@ WHATSAPP_GO_PORT="8010"
 # nutrition-mcp-setup). NUTRITION_BRIDGE_PORT is the supergateway HTTP bridge for Claude Code;
 # the add-on is gated per-board via Settings.addons, so naming the port only documents it.
 NUTRITION_BRIDGE_PORT="8007"
+# Fitness + Body add-ons (optional; in-repo mcp/fitness-server + mcp/body-server, wired by
+# fitness-mcp-setup / body-mcp-setup — Steps 3.7 / 3.8). Same "documents the port" role as above.
+FITNESS_BRIDGE_PORT="8011"
+BODY_BRIDGE_PORT="8012"
 EOF
   mv "$tmp" config/cos.env
   echo "Wrote config/cos.env — review it, then continue. setup-vault (Step 1) fills VAULT_NAME."
@@ -398,7 +402,7 @@ fi
     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}' \
     | grep -o '"name":"nutrition"' && echo "nutrition MCP OK"
-  curl -s "$BOARD_URL/api/addons" | grep -o '"id":"nutrition"[^}]*"enabled":true' && echo "add-on enabled"
+  curl -s "$BOARD_URL/api/addons" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).addons.find(x=>x.id==="nutrition");process.exit(a&&a.enabled===true?0:1)})' && echo "add-on enabled"
   ```
 
 ### Step 3.7 — fitness-mcp-setup (OPTIONAL: the Fitness add-on)
@@ -425,7 +429,7 @@ fi
     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}' \
     | grep -o '"name":"fitness"' && echo "fitness MCP OK"
-  curl -s "$BOARD_URL/api/addons" | grep -o '"id":"fitness"[^}]*"enabled":true' && echo "add-on enabled"
+  curl -s "$BOARD_URL/api/addons" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).addons.find(x=>x.id==="fitness");process.exit(a&&a.enabled===true?0:1)})' && echo "add-on enabled"
   ```
 
 ### Step 3.8 — body-mcp-setup (CONDITIONAL: the foundational Body add-on — REQUIRED after 3.6 or 3.7)
@@ -449,7 +453,7 @@ fi
     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}' \
     | grep -o '"name":"body"' && echo "body MCP OK"
-  curl -s "$BOARD_URL/api/addons" | grep -o '"id":"body"[^}]*"enabled":true' && echo "add-on enabled"
+  curl -s "$BOARD_URL/api/addons" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).addons.find(x=>x.id==="body");process.exit(a&&a.enabled===true?0:1)})' && echo "add-on enabled"
   ```
 
 ### Step 4 — backup-recovery (LAST: protect the now-populated stores)

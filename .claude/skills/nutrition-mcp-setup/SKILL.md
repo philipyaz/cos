@@ -186,12 +186,12 @@ prefix come on with it, but **this skill does not wire body's MCP** — run **`/
 (bridge `:8012`) next so agents can drive what just turned on:
 ```sh
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-curl -s "$BOARD_URL/api/addons" | grep -o '"id":"body"[^}]*"enabled":true' && echo "body auto-enabled"
+curl -s "$BOARD_URL/api/addons" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).addons.find(x=>x.id==="body");process.exit(a&&a.enabled===true?0:1)})' && echo "body auto-enabled"
 ```
 - **CHECKPOINT** — the catalog reports it enabled (and the bridge reachable):
   ```sh
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-  curl -s "$BOARD_URL/api/addons" | grep -o '"id":"nutrition"[^}]*"enabled":true' && echo "add-on enabled"
+  curl -s "$BOARD_URL/api/addons" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).addons.find(x=>x.id==="nutrition");process.exit(a&&a.enabled===true?0:1)})' && echo "add-on enabled"
   ```
 
 ### 7. End-to-end verify (a tool call round-trips through the board)
