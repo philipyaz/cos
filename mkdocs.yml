@@ -123,24 +123,20 @@ nav:
       - Platform API: architecture/platform-api.md
       - Add-ons: architecture/addons.md
       - Case hierarchy: architecture/hierarchy.md
+      - Multi-device (hub & spoke): architecture/multi-device.md
   - Features:
       - Board: features/board.md
       - Activity: features/activity.md
       - Calendar: features/calendar.md
+      - Calendar placement: features/placement.md
       - Reminders: features/reminders.md
       - Priorities: features/priorities.md
       - Unanswered messages: features/unanswered-messages.md
-  - Security:
-      - Prompt-injection guard: security/guard.md
-  - Features:
-      - Board: features/board.md
-      - Calendar: features/calendar.md
-      - Reminders: features/reminders.md
-      - Priorities: features/priorities.md
-      - Activity: features/activity.md
       - Body: features/body.md
       - Nutrition & Chef: features/nutrition.md
       - Fitness: features/fitness.md
+  - Security:
+      - Prompt-injection guard: security/guard.md
   - Subsystems:
       - Semantic search: reference/search.md
       - Encrypted backup: reference/backup.md
@@ -150,4 +146,6 @@ nav:
       - Labels: reference/labels.md
       - Troubleshooting: reference/troubleshooting.md
       - Releases & versioning: reference/releasing.md
+      - Upgrading an existing install: reference/upgrading.md
+      - Store migrations (schema ledger): reference/migration.md
   - Changelog: changelog.md

@@ -50,9 +50,11 @@ export interface ProfileResponse {
   version?: number; // present on the POST response (the write stamps the store version)
 }
 export interface PushPlanResponse {
+  results: { date: string; action: "created" | "updated" | "skipped"; reason?: string; eventId?: string }[];
   created: number;
-  failed: number;
-  results: { date: string; ok: boolean }[];
+  updated: number;
+  skipped: number;
+  version?: number;
 }
 
 // POST /api/fitness/profile — create-or-replace the athlete training-profile singleton. The
@@ -62,15 +64,15 @@ export function setProfile(input: Record<string, unknown>): Promise<ProfileRespo
   return request("/api/fitness/profile", { method: "POST", body: JSON.stringify(input) });
 }
 
-// POST /api/fitness/push-plan-to-calendar — materialize a generated training plan's days as
-// calendar events (db.events). The route validates every day.date (YYYY-MM-DD) + each
-// non-rest day's duration before the write. GATED server-side (disabled add-on → 404).
-export function pushPlanToCalendar(
-  plan: { days: Record<string, unknown>[] },
-): Promise<PushPlanResponse> {
+// POST /api/fitness/push-plan-to-calendar — reconciling materialisation of a PERSISTED
+// training plan's sessions as calendar events (db.events), keyed by the plan's ISO week
+// (periodKey). Idempotent (per-day eventId receipts on the artifact, carried forward across
+// a regenerate) and overlap-safe (board/lib/placement.ts) — a re-push never duplicates or
+// double-books. GATED server-side (disabled add-on → 404).
+export function pushPlanToCalendar(input: { periodKey: string }): Promise<PushPlanResponse> {
   return request("/api/fitness/push-plan-to-calendar", {
     method: "POST",
-    body: JSON.stringify({ plan }),
+    body: JSON.stringify(input),
   });
 }
 
@@ -158,4 +160,27 @@ export function getCoachingArtifact(id: string): Promise<CoachingItemResponse> {
 // GATED server-side (disabled add-on → 404).
 export function deleteCoachingArtifact(id: string): Promise<{ ok: boolean; version?: number }> {
   return request(`/api/fitness/coaching/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// ── Per-day plan outcomes (cos-ops#19) ──────────────────────────────────────────
+// A TARGETED write on ONE day of a training_plan artifact — never re-saves the rest of the
+// plan. The agent's twin is the fitness MCP's `set_plan_day_outcome` — SAME route, by design
+// (the route-vs-tool check pins it). GATED server-side (disabled add-on → 404).
+
+export interface PlanDayOutcomeResponse {
+  artifact: CoachingArtifact;
+  day: Record<string, unknown>; // the mutated day entry (verbatim per-day shape)
+  version?: number;
+}
+
+// PATCH /api/fitness/coaching/<id>/day — record what actually happened to one planned day.
+// `status: "moved"` requires `movedTo`; every other status clears it board-side.
+export function setPlanDayOutcome(
+  artifactId: string,
+  input: { date: string; status: string; movedTo?: string },
+): Promise<PlanDayOutcomeResponse> {
+  return request(`/api/fitness/coaching/${encodeURIComponent(artifactId)}/day`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
 }

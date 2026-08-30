@@ -10,13 +10,16 @@ The MCP is the **agent's twin** of the board's nutrition UI: both write through 
 HTTP API. The UI writes are attributed to **`human`**; every write this server makes is
 attributed to **`agent`** (see [Actor attribution](#actor-attribution)).
 
-This is an **add-on**, not a core server. It covers four verticals, all on the same tool
+This is an **add-on**, not a core server. It covers five verticals, all on the same tool
 shape + gate model: the **food-log** (`FOOD-<n>`, `/api/nutrition/log`), the **pantry**
 (`PANTRY-<n>`, `/api/nutrition/pantry`), the **meal-plan** (`MEAL-<n>`,
-`/api/nutrition/plan`), and the **weight-loss** vertical — a weigh-in series
+`/api/nutrition/plan`), the **weight-loss** vertical — a weigh-in series
 (`WEIGHT-<n>`, `/api/nutrition/weight`), a goal/profile **singleton**
 (`/api/nutrition/goal`), and a derived read-only **targets** projection
-(`/api/nutrition/targets`, computed by `board/lib/nutrition-targets.ts`).
+(`/api/nutrition/targets`, computed by `board/lib/nutrition-targets.ts`) — and the **v16
+shopping list** (`SHOP-<n>`, `/api/nutrition/shopping`): a persistent list plus a
+**computed, never-stored** suggestion read (`get_shopping_candidates`, composing this
+week's meal plan against the pantry — see `board/lib/shopping-candidates.ts`).
 
 ## This is an add-on — writes are GATED
 
@@ -105,6 +108,16 @@ only — not medical advice.
 
 ### Reads
 
+#### `get_nutrition_status()`
+`GET /api/nutrition/status`. Read-only, **UNGATED** (works even if the add-on is disabled). The
+deterministic RECONCILIATION status — the read `/nutrition-chef` runs FIRST, on every invocation,
+before any planning. Returns `stalePlannedMeals` (past-dated `planned` meal-plan entries — count,
+oldest date/age, ids), `provablyCooked` (the subset with a same-date+slot food-log entry naming
+their `MEAL-<n>` id — the auto-closeable set), `daysSinceLastFoodLog`, `daysSinceLastPantryWrite`,
+`expiredPantryItems`, and `hasNutritionTargets` + `daysSinceLastTargets`. Nothing here is stored —
+every field is recomputed fresh from the food log, pantry, meal plan, and targets already on the
+board.
+
 #### `list_food_log([from], [to], [slot], [date])`
 `GET /api/nutrition/log`. Lists entries **grouped by day** with a **per-day calorie rollup**,
 one line per entry (slot · description · kcal · macros · health · ~est). Read-only (works even
@@ -137,6 +150,23 @@ A null/empty value on an optional macro / `note` / `health` clears it.
 #### `delete_food_log(id)`
 `DELETE /api/nutrition/log/{id}`. Hard-removes the entry (food-log entries have no soft-archive).
 **Gated**.
+
+### Pantry lifecycle
+
+#### `reconcile_pantry(items)`
+`POST /api/nutrition/pantry/reconcile`. Applies a WHOLE shop or photo extraction as **ONE** gated
+write. **Gated**.
+
+- `items` **(required)**, non-empty array of `{ name, [quantity], [unit], [category], [location],
+  [expiresAt] }`. Only `name` is required per item.
+- Upserts by a **normalised** name (trim, casefold, accent-strip, trailing plural) — a re-shop
+  **updates** the existing row instead of minting a duplicate. The submitted `name` is only the
+  match key; it never overwrites the stored name.
+- **Never removes** anything — use `remove_pantry_item` for that. Rejects the **whole batch**
+  (writing nothing) if any item is malformed.
+- Does **not** resolve semantic aliases (the same food in another language, or at a different pack
+  size) — merge those yourself first (`read_pantry`), then submit the resolved list.
+- Returns `{ added, updated, skipped, version }` — one `db.version` bump for the whole batch.
 
 ### Weight-loss reads
 
@@ -189,6 +219,45 @@ there is exactly one. **Gated**.
 - `rateKgPerWeek` — DESIRED weekly loss, default `0.5`; the targets engine **clamps** it for
   safety (≤1%/wk of body weight, ≤1.0 kg/wk).
 - `weightUnit` — `kg | lb`, a display/entry preference only (storage stays kg); default `kg`.
+
+### Shopping-list reads (v16)
+
+#### `list_shopping([status], [category])`
+`GET /api/nutrition/shopping`. Read-only (works even if the add-on is disabled). Defaults
+`status` to `needed` when omitted — the phone ask is "what's on my list"; the HTTP route
+itself stays unfiltered-by-default. `category` narrows to one of `produce | protein | dairy
+| bakery | frozen | pantry | household | personal-care | other`. Renders items grouped by
+category, in aisle-walk order.
+
+#### `get_shopping_candidates([from], [to])`
+`GET /api/nutrition/shopping/candidates`. Read-only; **computes, never stores** (see
+`board/lib/shopping-candidates.ts`). Composes this week's meal-plan ingredients (not on
+hand, not already on the list) with the pantry's `expiredPantryItems` (a FACT) and
+`pantryLifecycle.likelyPastHorizon` (an INFERENCE, carrying the `(inferred — no printed
+date)` label verbatim) from `get_nutrition_status`. `from` defaults to today, `to` to
+`from` + 6 days. Renders the window, FACT rows, INFERRED rows, then a suppressed-counts
+line (`onList` / `inPantry` / `boughtInWindow`). An empty result renders "Nothing to
+suggest."
+
+### Shopping-list lifecycle (v16)
+
+#### `add_shopping_item(name, [category], [quantity], [unit], [note], [source], [sourceRef])`
+`POST /api/nutrition/shopping`. **Gated.** `name` **(required)** — food OR non-food (e.g.
+"AA batteries"). `source` defaults `manual`. `sourceRef` is a **soft** reference
+(`MEAL-<n>` / `PANTRY-<n>` / `M-<n>`) — never validated relationally. Returns the minted
+`SHOP-id`.
+
+#### `update_shopping_item(id, [name], [category], [quantity], [unit], [status], [source], [sourceRef], [note])`
+`PATCH /api/nutrition/shopping/{id}`. **Gated.** Pass only the fields to change. The
+**one-call tick-off**: `status: "bought"` stamps `boughtAt` in the same round trip; any
+other status clears it. `status: "dismissed"` keeps history (not deleted) and is **inert** — it does
+not stop `get_shopping_candidates` re-offering the item (add it as `needed`, buy it, or fix the pantry
+row to stop a re-offer).
+
+#### `remove_shopping_item(id)`
+`DELETE /api/nutrition/shopping/{id}`. **Gated.** Hard-removes the item (shopping items
+have no soft-archive); a dangling `sourceRef` pointing AT the removed row elsewhere is
+tolerated.
 
 ## Config
 

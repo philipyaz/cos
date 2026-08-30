@@ -243,9 +243,100 @@ agent rather than calling an LLM on the board. These reads/writes are **informat
 medical advice** — a low-HRV / poor-sleep "train easy" read is a conservative default, never a
 substitute for clinical judgement.
 
-A generated plan can be **materialized onto the calendar** via
-**`POST /api/fitness/push-plan-to-calendar`**, which mints `db.events` (gated on the fitness add-on,
-validated day-by-day inside `mutate()`) — the same opt-in calendar bridge nutrition uses for meals.
+A saved plan can be **materialized onto the calendar** via
+**`POST /api/fitness/push-plan-to-calendar`** (body `{ artifactId? | periodKey?, busyWindows? }` —
+exactly one of `artifactId`/`periodKey` required; gated on the fitness add-on) or the
+**`push_plan_to_calendar`** tool on the `fitness` MCP. This is a **reconciling** push, not a blind
+create, built on the shared placement engine — see **[Calendar placement](placement.md)** for the
+engine contract, the optional `busyWindows` input (the agent's own read of the real calendar, used
+once and never stored), and the `workingHours` preference that keeps a session out of the working
+day. In short: each session's calendar link is a receipt (`payload.days[i].eventId`) carried on the
+artifact itself, so re-running the push after the plan changes **creates** new sessions, **updates**
+ones that already exist, and **skips** the rest — never duplicating the week. Placement is
+**overlap-safe** (a session lands in a free slot within the day's candidate windows and is never
+placed on top of an existing timed event or inside working hours) and **rest / active-recovery days
+are always skipped**, never placed. A session time edited by hand — yours or Philip's — is **never
+moved back** by a re-push; only its title/description refresh. The response reports `{ results:
+[{date, action, reason?, eventId?}], created, updated, skipped, version }`; a `skipped` result
+carries a `reason` (`rest_day`, `no_free_slot`, `outside_working_hours`, or `past`) — when a skipped
+rest day still carries an `eventId`, the plan changed since that day was last pushed and a stale
+session remains on the calendar (a known limit: the board never deletes it — the agent offers
+removal via the calendar MCP).
+
+### Per-day outcomes and the close-out loop
+
+A training plan stops being **write-once** (cos-ops#19): two OPTIONAL keys on each
+`payload.days[i]` record what actually happened, without disturbing the rest of the plan.
+
+- **`status`** (`"planned" | "done" | "skipped" | "moved"`) — **absent ≡ `"planned"`**, so every
+  plan saved before this shipped is already valid; nothing backfills. An explicit `"planned"` is
+  a recorded REVERT (distinguishable in the raw payload from never-asked, though both render as
+  planned everywhere).
+- **`movedTo`** (`"YYYY-MM-DD"`) — present only while `status === "moved"`, the day it was
+  relocated to.
+
+These are **facts the user confirmed** (ADR 0017's stored-fact category, the same as
+`MealPlanEntry.status` on the nutrition side) — the board records them, it never infers one.
+
+**Save-time validation (`save_training_plan` / `POST /api/fitness/coaching`).** The board owns
+these keys, so it validates them on every save (400 otherwise): a present `status` must be one
+of the four outcomes (a stray `"Done"` is rejected — otherwise the push route and the
+reconciliation could disagree on what "resolved" means; both read through the one
+`effectivePlanDayStatus` reader), `movedTo` is required as `YYYY-MM-DD` exactly when `status` is
+`"moved"` and rejected otherwise, and **one entry per date** — every reader (the day route, the
+carry-forward, the calendar receipts, the push) addresses a day by its date, so a second entry
+on the same date would be unreachable by all of them. A `null` `status`/`movedTo` is **absent**,
+never an error: a model that serialises every optional key still saves, and the recorded
+outcome carries forward (below).
+
+**The targeted write — `PATCH /api/fitness/coaching/<id>/day`** (body `{ date, status,
+movedTo?, expectedVersion? }`) sets ONE day's outcome without re-saving the artifact; the
+agent's twin is the fitness MCP's **`set_plan_day_outcome`** tool — the same route, so a UI tap
+and an agent write are indistinguishable to the board. `movedTo` is required exactly when
+`status` is `"moved"` (400 either way); a rest/active-recovery day carries no outcome (400 —
+the day-type enum is open, so this is always a DENY-list check, never an allow-list on
+`"training"`).
+
+**The computed read — `reconciliation` on the artifact GET.** For a `training_plan`, `GET
+/api/fitness/coaching/<id>` (and `get_coaching_artifact`) also returns a `reconciliation`:
+`sessionDays` (how many session days the plan has), `outcomes` (a `{done,skipped,moved,planned}`
+tally over all session days), and `unresolvedDays` (session days dated before today that are
+still `planned` — each flagged `provenDone` when a same-date `healthEntries` workout entry
+already proves it happened, with the proving `healthEntryId`). This is **compute-on-read, never
+stored** (ADR 0017) — the engine
+([`board/lib/fitness-plan-status.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/fitness-plan-status.ts))
+is pure, clock-free, and matches proof at the DATE level only, never by sport (a fuzzy join
+would silently fail to prove a real workout).
+
+**Carry-forward, extended.**
+[`upsertCoachingArtifact`](https://github.com/philipyaz/cos/blob/main/board/lib/store.ts)'s
+existing calendar-receipt carry-forward (an incoming day with no `eventId` inherits the
+outgoing day's receipt) now also carries `status`/`movedTo` forward the same way, so
+regenerating a week (or re-saving it after a move) never silently wipes a recorded outcome. An
+incoming day that DOES carry its own `status` wins.
+
+**The calendar push is outcome-aware.** `push-plan-to-calendar` reports an already-resolved day
+(done/skipped/moved) directly as `{ action: "skipped", reason: "resolved" }`, beside the
+existing `rest_day` skip — never materializing a session that already happened, was declined,
+or now lives on another date.
+
+**Two close-out loops read `reconciliation` and write through the day route** — the weekly
+[`fitness-training-plan`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/fitness-training-plan/SKILL.md)
+skill's `### 0.5 CLOSE OUT last week` (before authoring the new week) and the daily
+[`fitness-pre-workout-brief`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/fitness-pre-workout-brief/SKILL.md)
+skill's `## STEP 1.5` (after the overnight ingest, so a `provenDone` proof reads a store that
+already has the day's workout). Both **auto-resolve the proven subset silently**, citing the
+proving entry, and **batch everything else into one question** — the board never infers an
+outcome; an unanswered day simply stays `planned`. The daily brief may also **propose**
+relocating a missed session into today (or pushing today's back), but **never without an
+explicit yes** — a `moved` session is re-planned via `save_training_plan` (never resending
+`status` / `movedTo` / `eventId`; the board carries them forward) and materialized through the
+same `push_plan_to_calendar` path described above, not a second code path.
+
+**The view.** `/fitness/training-plan` renders a small **Done** / **Skipped** tap on each
+session-day row, writing through the same `PATCH .../day` route the MCP tool uses; tapping the
+active state reverts to `planned`. A `moved` day renders a read-only chip — the move itself
+needs a destination and a calendar push, so it stays the agent's job.
 
 ### Correlations
 
@@ -314,9 +405,10 @@ A new route family follows the add-on contract exactly — **reads ungated, writ
 |---|---|---|
 | `GET /api/fitness/coaching?kind=&from=&to=&limit=` | list artifacts (newest-first; `from`/`to` against `createdAt`) | ungated |
 | `POST /api/fitness/coaching` | upsert one artifact by `(kind, periodKey)` | add-on gate |
-| `GET /api/fitness/coaching/<id>` | one artifact by id | ungated |
+| `GET /api/fitness/coaching/<id>` | one artifact by id — for a `training_plan`, also a computed [`reconciliation`](#per-day-outcomes-and-the-close-out-loop) | ungated |
 | `PATCH /api/fitness/coaching/<id>` | patch an artifact (payload / source / generatedAt) | add-on gate |
 | `DELETE /api/fitness/coaching/<id>` | delete an artifact | add-on gate |
+| `PATCH /api/fitness/coaching/<id>/day` | [record one planned day's outcome](#per-day-outcomes-and-the-close-out-loop) — a targeted write, no whole-artifact re-save | add-on gate |
 
 These coaching writes are **add-on-gated**: the add-on gate
 (`assertAddonEnabled(db, "fitness")`) runs **inside `mutate()`**, so a disabled add-on → `404`, while
@@ -339,14 +431,15 @@ off to the agent (which generates and `POST`s back); for correlations it trigger
 deterministic compute. The feed subscribes to SSE, so an agent `POST` lands on the page without a
 reload.
 
-### The seven new MCP tools
+### The coaching-artifact MCP tools
 
 The [fitness MCP server](https://github.com/philipyaz/cos/blob/main/mcp/fitness-server/server.mjs)
-gains seven thin wrappers over the new routes (total **14**) — four `save_*` writers (one per kind),
-plus list / get / delete — so an agent can persist and browse artifacts entirely through the MCP. The
+carries seven thin wrappers over the coaching-artifact routes — four `save_*` writers (one per
+kind), plus list / get / delete — so an agent can persist and browse artifacts entirely through
+the MCP (the server is **20 tools** in total; see
+[the MCP tool table below](#the-fitness-mcp-the-agents-read-verbs) for the full inventory). The
 four `save_*` tools and `delete_coaching_artifact` are **add-on-gated writes**;
-`list_coaching_artifacts` and `get_coaching_artifact` are ungated reads. See
-[the MCP tool table below](#the-fitness-mcp-the-agents-read-verbs).
+`list_coaching_artifacts` and `get_coaching_artifact` are ungated reads.
 
 ## The soft Nutrition dependency
 
@@ -383,13 +476,19 @@ LLM calls**, and — exactly like the nutrition MCP — attributes its **writes 
 | `get_health_trends` | `GET /trends` | per-day series over N days |
 | `delete_health_data` | `DELETE /data` | delete by ids/range; add-on-gated write |
 | `ingest_health_to_vault` | `GET /report` | fetch the Markdown report and forward it to the vault |
+| `get_athlete_profile` | `GET /profile` | read the training-profile singleton; ungated |
+| `set_athlete_profile` | `POST /profile` | create-or-replace the training-profile singleton; add-on-gated write |
+| `get_form_score` | `GET /form-score` | the deterministic daily [readiness score](#the-daily-form-score); ungated |
+| `get_correlations` | `GET /correlations` | the deterministic sleep/performance [correlation report](#correlations); ungated |
 | `save_training_plan` | `POST /coaching` | persist a `training_plan` artifact; add-on-gated write |
 | `save_weekly_review` | `POST /coaching` | persist a `weekly_review` artifact; add-on-gated write |
 | `save_pre_workout_brief` | `POST /coaching` | persist a `pre_workout_brief` artifact; add-on-gated write |
 | `save_correlation_report` | `POST /coaching` | persist a `correlations` artifact; add-on-gated write |
 | `list_coaching_artifacts` | `GET /coaching` | list artifacts by kind / range |
-| `get_coaching_artifact` | `GET /coaching/<id>` | one artifact by id |
+| `get_coaching_artifact` | `GET /coaching/<id>` | one artifact by id, plus a training plan's computed [`reconciliation`](#per-day-outcomes-and-the-close-out-loop) |
 | `delete_coaching_artifact` | `DELETE /coaching/<id>` | delete an artifact; add-on-gated write |
+| `push_plan_to_calendar` | `POST /push-plan-to-calendar` | [materialize a saved plan onto the calendar](#the-coaching-surfaces-are-stateful-artifacts-the-agent-generates-the-board-stores); add-on-gated write |
+| `set_plan_day_outcome` | `PATCH /coaching/<id>/day` | [record one planned day's outcome](#per-day-outcomes-and-the-close-out-loop); add-on-gated write |
 
 The four `save_*` tools let an agent (Claude Cowork) persist a generated plan / review / brief /
 report **without the board's Anthropic key** — the add-on gate is the only guard. A write on a

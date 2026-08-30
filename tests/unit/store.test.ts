@@ -51,12 +51,15 @@ import {
   removeReminder,
   removePriority,
   messagesForReminder,
+  upsertCoachingArtifact,
+  applyPlanDayOutcome,
 } from "../../board/lib/store.ts";
 import { _resetRetentionCache } from "../../board/lib/retention.ts";
 import { SCHEMA_VERSION } from "../../board/lib/types.ts";
 import type {
   CaseRecord,
   CalendarEvent,
+  CoachingArtifact,
   DBShape,
   MessageRecord,
   PriorityNote,
@@ -1049,6 +1052,215 @@ test("applyReminderUpdate: status→done preserves an EXISTING completedAt", () 
   const r = makeReminder({ id: "REM-1", status: "done", completedAt: prior });
   applyReminderUpdate(r, { status: "done" });
   assert.equal(r.completedAt, prior, "already-done reminder keeps its original completedAt");
+});
+
+// ── upsertCoachingArtifact: training_plan receipt carry-forward (cos-ops#17) ────
+// Regenerating a training plan REPLACES payload.days wholesale; without carry-forward the
+// calendar push would duplicate every session on the next push after a regenerate. A day
+// surviving into the new plan at the SAME date inherits the outgoing eventId; a moved/new
+// date has nothing to inherit.
+test("upsertCoachingArtifact: same-date days keep eventId; a moved date does not", () => {
+  const db = makeDB({
+    coachingArtifacts: [
+      {
+        id: "COACH-1",
+        kind: "training_plan",
+        periodKey: "2026-W30",
+        source: "agent",
+        payload: {
+          week: "2026-W30",
+          days: [
+            { date: "2026-07-20", type: "endurance", eventId: "EVT-1" },
+            { date: "2026-07-21", type: "rest" },
+          ],
+        },
+        generatedAt: ISO,
+        createdAt: ISO,
+        updatedAt: ISO,
+      },
+    ],
+  });
+
+  const { artifact, created } = upsertCoachingArtifact(db, {
+    kind: "training_plan",
+    periodKey: "2026-W30",
+    source: "agent",
+    payload: {
+      week: "2026-W30",
+      days: [
+        { date: "2026-07-20", type: "endurance" }, // same date as before -> inherits EVT-1
+        { date: "2026-07-22", type: "strength" }, // a moved/new date -> nothing to inherit
+      ],
+    },
+    generatedAt: ISO,
+  });
+
+  assert.equal(created, false, "an existing (kind, periodKey) upserts in place");
+  const days = artifact.payload.days as { date: string; eventId?: string }[];
+  assert.equal(days.find((d) => d.date === "2026-07-20")?.eventId, "EVT-1", "same date carries the receipt forward");
+  assert.equal(days.find((d) => d.date === "2026-07-22")?.eventId, undefined, "no receipt exists for a new/moved date");
+});
+
+test("upsertCoachingArtifact: carry-forward never clobbers an eventId already present on the incoming day", () => {
+  const db = makeDB({
+    coachingArtifacts: [
+      {
+        id: "COACH-1", kind: "training_plan", periodKey: "2026-W30", source: "agent",
+        payload: { week: "2026-W30", days: [{ date: "2026-07-20", eventId: "EVT-OLD" }] },
+        generatedAt: ISO, createdAt: ISO, updatedAt: ISO,
+      },
+    ],
+  });
+  const { artifact } = upsertCoachingArtifact(db, {
+    kind: "training_plan", periodKey: "2026-W30", source: "agent",
+    payload: { week: "2026-W30", days: [{ date: "2026-07-20", eventId: "EVT-ALREADY-SET" }] },
+    generatedAt: ISO,
+  });
+  const days = artifact.payload.days as { date: string; eventId?: string }[];
+  assert.equal(days[0].eventId, "EVT-ALREADY-SET", "an incoming day's own eventId is never overwritten by carry-forward");
+});
+
+test("upsertCoachingArtifact: an incoming day with status:null is ABSENT — the recorded outcome carries forward (cos#94 review F1)", () => {
+  const db = makeDB({});
+  const days = [
+    { date: "2026-01-05", type: "training", status: "done" },
+    { date: "2026-01-06", type: "training", status: "moved", movedTo: "2026-01-08" },
+    { date: "2026-01-07", type: "training" },
+  ];
+  upsertCoachingArtifact(db, { kind: "training_plan", periodKey: "2026-W02", source: "agent", payload: { week: "2026-W02", days }, generatedAt: ISO });
+  // A model that serialises every optional key: status:null, movedTo:null on every day.
+  const regen = [
+    { date: "2026-01-05", type: "training", status: null, movedTo: null },
+    { date: "2026-01-06", type: "training", status: null, movedTo: null },
+    { date: "2026-01-07", type: "training", status: null, movedTo: null },
+  ];
+  const { artifact } = upsertCoachingArtifact(db, { kind: "training_plan", periodKey: "2026-W02", source: "agent", payload: { week: "2026-W02", days: regen }, generatedAt: ISO });
+  const out = artifact.payload.days as Record<string, unknown>[];
+  assert.equal(out[0].status, "done", "done carried forward over status:null");
+  assert.equal(out[1].status, "moved", "moved carried forward over status:null");
+  assert.equal(out[1].movedTo, "2026-01-08", "movedTo carried with the moved status");
+  assert.equal("status" in out[2], false, "a day that never had an outcome does not gain a null one");
+  assert.equal("movedTo" in out[2], false, "no stray movedTo either");
+});
+
+test("upsertCoachingArtifact: carry-forward is training_plan ONLY — other kinds replace payload untouched", () => {
+  const db = makeDB({
+    coachingArtifacts: [
+      {
+        id: "COACH-1", kind: "weekly_review", periodKey: "2026-W30", source: "agent",
+        payload: { week: "2026-W30", overall_score: 80, days: [{ date: "2026-07-20", eventId: "EVT-1" }] },
+        generatedAt: ISO, createdAt: ISO, updatedAt: ISO,
+      },
+    ],
+  });
+  const { artifact } = upsertCoachingArtifact(db, {
+    kind: "weekly_review", periodKey: "2026-W30", source: "agent",
+    payload: { week: "2026-W30", overall_score: 90, days: [{ date: "2026-07-20" }] },
+    generatedAt: ISO,
+  });
+  const days = artifact.payload.days as { date: string; eventId?: string }[];
+  assert.equal(days[0].eventId, undefined, "non-training_plan kinds get no carry-forward");
+});
+
+test("upsertCoachingArtifact: a brand-new (kind, periodKey) mints fresh — nothing to carry forward", () => {
+  const db = makeDB({});
+  const { artifact, created } = upsertCoachingArtifact(db, {
+    kind: "training_plan", periodKey: "2026-W31", source: "agent",
+    payload: { week: "2026-W31", days: [{ date: "2026-07-27" }] },
+    generatedAt: ISO,
+  });
+  assert.equal(created, true);
+  assert.equal(artifact.id, "COACH-1");
+});
+
+// ── upsertCoachingArtifact: OUTCOME carry-forward (cos-ops#19) ──────────────────
+// The receipt carry-forward above gained a second concern: a day with no incoming `status`
+// KEY inherits the outgoing day's status (+ movedTo, for "moved") the same way an eventId-less
+// day inherits its receipt. Without this, a weekly regenerate (or the Phase-B move flow) would
+// silently wipe every recorded outcome.
+test("upsertCoachingArtifact: same-date days inherit status + movedTo; an incoming explicit status wins; a dropped date drops its outcome", () => {
+  const db = makeDB({
+    coachingArtifacts: [
+      {
+        id: "COACH-1",
+        kind: "training_plan",
+        periodKey: "2026-W30",
+        source: "agent",
+        payload: {
+          week: "2026-W30",
+          days: [
+            { date: "2026-07-20", type: "endurance", eventId: "EVT-1", status: "moved", movedTo: "2026-07-25" },
+            { date: "2026-07-21", type: "rest", status: "skipped" }, // no eventId to carry
+            { date: "2026-07-22", type: "strength", status: "done" }, // dropped in the new plan
+          ],
+        },
+        generatedAt: ISO,
+        createdAt: ISO,
+        updatedAt: ISO,
+      },
+    ],
+  });
+
+  const { artifact } = upsertCoachingArtifact(db, {
+    kind: "training_plan",
+    periodKey: "2026-W30",
+    source: "agent",
+    payload: {
+      week: "2026-W30",
+      days: [
+        { date: "2026-07-20", type: "endurance" }, // no incoming status -> inherits "moved" + movedTo
+        { date: "2026-07-21", type: "rest", status: "planned" }, // incoming EXPLICIT status wins over "skipped"
+        // 2026-07-22 is dropped entirely — its "done" outcome simply disappears, no error.
+      ],
+    },
+    generatedAt: ISO,
+  });
+
+  const days = artifact.payload.days as { date: string; eventId?: string; status?: string; movedTo?: string }[];
+  const d20 = days.find((d) => d.date === "2026-07-20")!;
+  assert.equal(d20.status, "moved", "no incoming status -> inherits the outgoing status");
+  assert.equal(d20.movedTo, "2026-07-25", "a 'moved' status carries its movedTo forward too");
+  assert.equal(d20.eventId, "EVT-1", "eventId carry-forward is unaffected by the new outcome carry-forward");
+
+  const d21 = days.find((d) => d.date === "2026-07-21")!;
+  assert.equal(d21.status, "planned", "an incoming EXPLICIT status always wins over carry-forward");
+
+  assert.equal(
+    days.find((d) => d.date === "2026-07-22"),
+    undefined,
+    "a dropped date's outcome disappears with it — no error",
+  );
+});
+
+// ── applyPlanDayOutcome (cos-ops#19) ─────────────────────────────────────────────
+test("applyPlanDayOutcome: sets status; movedTo kept only on 'moved', cleared otherwise; bumps updatedAt", () => {
+  const rec = {
+    id: "COACH-1",
+    kind: "training_plan",
+    periodKey: "2026-W30",
+    source: "agent",
+    payload: { week: "2026-W30", days: [{ date: "2026-07-20", type: "endurance", movedTo: "2026-07-19" }] },
+    generatedAt: ISO,
+    createdAt: ISO,
+    updatedAt: ISO,
+  } as CoachingArtifact;
+
+  const before = Date.now();
+  const day1 = applyPlanDayOutcome(rec, { date: "2026-07-20", status: "moved", movedTo: "2026-07-25" });
+  assert.equal(day1.status, "moved");
+  assert.equal(day1.movedTo, "2026-07-25");
+  assertRecentISO(rec.updatedAt, before);
+
+  const day2 = applyPlanDayOutcome(rec, { date: "2026-07-20", status: "done" });
+  assert.equal(day2.status, "done");
+  assert.equal(day2.movedTo, undefined, "movedTo is cleared on any non-moved status, even a stale one from before");
+
+  const day3 = applyPlanDayOutcome(rec, { date: "2026-07-20", status: "skipped" });
+  assert.equal(day3.movedTo, undefined);
+
+  const day4 = applyPlanDayOutcome(rec, { date: "2026-07-20", status: "planned" });
+  assert.equal(day4.status, "planned", "an explicit 'planned' is a recorded revert");
+  assert.equal(day4.movedTo, undefined);
 });
 
 // ── mutate / readDB / writeDB (DISK path; isolated tmp COS_DATA_DIR) ───────────

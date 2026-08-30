@@ -187,9 +187,30 @@ async function main() {
   const orphansB2 = fs.readdirSync(path.join(repoB, "orphan")).filter((f) => f.startsWith("device-b-"));
   check(orphansB2.length === 1, "no re-orphaning on subsequent runs (still exactly one quarantine)");
 
-  // ── [3] the HANDOVER: A's lease goes stale (>26h), B claims it (epoch bump) ──
+  // ── [2c] --claim FORCE-takes A's still-FRESH lease (the hub-handover takeover) ─
+  // Without --claim, B is refused while A's lease is fresh (exit 4, proven above).
+  // WITH --claim, B force-takes the FRESH lease (epoch bump) and produces — the exact
+  // cutover step hub-handover prescribes. Self-contained: it hands the lease back to A
+  // afterwards so the [3] natural-stale-takeover baseline (A holds it) is preserved.
+  const aEpoch = JSON.parse(fs.readFileSync(path.join(repoB, "HUB.json"), "utf8")).epoch;
+  r = await runScript(BACKUP_MJS, { ...devB, argv: ["--claim"] });
+  check(r.code === 0, `device B --claim force-takes the FRESH lease and produces (exit ${r.code})`);
+  check(/FORCED takeover \(--claim\)/.test(r.out), "the forced takeover is logged");
+  const forced = JSON.parse(fs.readFileSync(path.join(repoB, "HUB.json"), "utf8"));
+  check(forced.deviceId === "device-b" && forced.epoch === aEpoch + 1, `lease now held by device-b, epoch bumped (${aEpoch}→${forced.epoch})`);
+  // The old hub A, run once now, sees B's fresh lease → exit 4 (the digest-discipline
+  // safety net is reachable ONLY because B actually holds the lease — the review's point).
+  r = await runScript(BACKUP_MJS, devA);
+  check(r.code === 4, `the old hub A stands down (exit ${r.code}) — exit-4 safety net reachable post-claim`);
+  // Hand the lease back to A (--claim from A's clone) so [3] starts from "A holds it".
+  r = await runScript(BACKUP_MJS, { ...devA, argv: ["--claim"] });
+  check(r.code === 0, "A reclaims the lease to restore the [3] baseline");
+  await runScript(BACKUP_MJS, { ...devB }); // B converges (sees A's fresh lease → exit 4), leaving repoB current
+
+  // ── [3] the NATURAL HANDOVER: A's lease goes stale (>26h), B claims it (no --claim) ──
   // Stale-ify by rewriting HUB.json's renewedAt 30h into the past and pushing.
-  const staleLease = { ...JSON.parse(fs.readFileSync(path.join(repoB, "HUB.json"), "utf8")), renewedAt: new Date(Date.now() - 30 * 3600_000).toISOString() };
+  const staleBase = JSON.parse(fs.readFileSync(path.join(repoB, "HUB.json"), "utf8"));
+  const staleLease = { ...staleBase, renewedAt: new Date(Date.now() - 30 * 3600_000).toISOString() };
   fs.writeFileSync(path.join(repoB, "HUB.json"), JSON.stringify(staleLease, null, 2) + "\n");
   git(repoB, "add", "HUB.json");
   git(repoB, "commit", "-q", "-m", "test: stale-ify the lease");
@@ -197,9 +218,9 @@ async function main() {
 
   r = await runScript(BACKUP_MJS, devB);
   check(r.code === 0, `device B claims the STALE lease and produces (exit ${r.code})`);
-  check(/taking over a STALE lease/.test(r.out), "the takeover is logged");
+  check(/taking over a STALE lease/.test(r.out), "the natural (non-forced) takeover is logged");
   const lease2 = JSON.parse(fs.readFileSync(path.join(repoB, "HUB.json"), "utf8"));
-  check(lease2.deviceId === "device-b" && lease2.epoch === 2, `lease now held by device-b at epoch 2 (got ${lease2.deviceId}/${lease2.epoch})`);
+  check(lease2.deviceId === "device-b" && lease2.epoch === staleBase.epoch + 1, `lease now held by device-b, epoch bumped (${staleBase.epoch}→${lease2.epoch})`);
   check(!fs.existsSync(path.join(repoB, ".backup.orphaned")), "the orphaned marker cleared on re-admission as hub");
   check(fs.existsSync(path.join(repoB, "manifests", "device-b.json")), "manifests/device-b.json written by the new hub");
 
@@ -207,7 +228,9 @@ async function main() {
   r = await runScript(BACKUP_MJS, devA);
   check(r.code === 4, `the demoted old hub exits 4 (got ${r.code})`);
   const orphansA = fs.existsSync(path.join(repoA, "orphan")) ? fs.readdirSync(path.join(repoA, "orphan")).filter((f) => f.startsWith("device-a-")) : [];
-  check(orphansA.length === 1, "the old hub quarantined its stray state once");
+  // >= 1 (not == 1): [2c] already exercised one A demotion cycle, so A has orphaned
+  // once per stand-down. The point here is that a demoted hub quarantines its state.
+  check(orphansA.length >= 1, `the old hub quarantined its stray state (${orphansA.length} orphan(s))`);
   check(fs.existsSync(path.join(repoA, "manifests", "device-b.json")), "A's clone converged with the remote (gained B's manifest) before deciding");
 
   // ── [5] WRONG key: producer admission refuses before the archive splits ─────

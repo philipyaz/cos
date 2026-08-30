@@ -27,9 +27,13 @@
 //   createdAt / updatedAt          ISO
 //
 // Scope: the food-log vertical (FOOD-<n>) PLUS the pantry vertical (PantryItem,
-// PANTRY-<n>, /api/nutrition/pantry) and the meal-plan vertical (MealPlanEntry,
-// MEAL-<n>, /api/nutrition/plan) AND the weight-loss vertical below. All mirror the
-// same tool shape + gate model.
+// PANTRY-<n>, /api/nutrition/pantry), the meal-plan vertical (MealPlanEntry,
+// MEAL-<n>, /api/nutrition/plan), the weight-loss vertical below, AND the v16 shopping-list
+// vertical (ShoppingItem, SHOP-<n>, /api/nutrition/shopping — cos-ops#37): a persistent list
+// (list_shopping / add_shopping_item / update_shopping_item / remove_shopping_item) plus a
+// COMPUTED, never-stored suggestion read (get_shopping_candidates, board/lib/shopping-
+// candidates.ts) composing this week's meal plan against the pantry. All mirror the same
+// tool shape + gate model.
 //
 // Weight-loss vertical (board/lib/types.ts → WeightEntry / NutritionGoal, engine in
 // board/lib/nutrition-targets.ts). It adds three things the agent can drive:
@@ -83,6 +87,11 @@ const MEAL_PLAN_STATUS = ["planned", "cooked", "skipped"];
 const ACTIVITY_LEVEL = ["sedentary", "light", "moderate", "very_active", "extra_active"];
 const BIOLOGICAL_SEX = ["male", "female"];
 const WEIGHT_UNIT = ["kg", "lb"];
+// In lockstep with VALID_SHOPPING_CATEGORY / VALID_SHOPPING_STATUS / VALID_SHOPPING_SOURCE in
+// board/lib/types.ts (the v16 shopping-list vertical, cos-ops#37).
+const SHOPPING_CATEGORY = ["produce", "protein", "dairy", "bakery", "frozen", "pantry", "household", "personal-care", "other"];
+const SHOPPING_STATUS = ["needed", "bought", "dismissed"];
+const SHOPPING_SOURCE = ["manual", "plan", "pantry", "channel"];
 // Pounds → kilograms. The ROUTE does the canonical lb→kg conversion for the wire payload (we
 // forward the caller's raw input unit); LB_TO_KG is mirrored here ONLY for the kg→lb DISPLAY
 // twin in the weigh-in (list/log) + goal renders. `kgToLb` is that one-line display helper.
@@ -302,6 +311,41 @@ const REMOVE_PANTRY_ITEM_TOOL = {
   },
 };
 
+const RECONCILE_PANTRY_TOOL = {
+  name: "reconcile_pantry",
+  description:
+    "Apply a WHOLE shop or photo extraction as ONE gated write — `POST /api/nutrition/pantry/reconcile`. " +
+    ADDON_GUARDRAIL +
+    " `items` upsert by a NORMALISED name (trim/casefold/accent-strip/trailing-plural) so a re-shop " +
+    "UPDATES the existing row instead of minting a duplicate — this is the mechanical half of dedup, " +
+    "moved to where it can't be forgotten. NEVER removes anything (use `remove_pantry_item` for that); " +
+    "rejects the WHOLE batch, writing nothing, if any item is malformed. Semantic aliases — the same " +
+    "food in another language, or at a different pack size — are NOT resolved here: merge those " +
+    "YOURSELF before submitting (call `read_pantry` first). Returns a diff of { added, updated, skipped }.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      items: {
+        type: "array",
+        description: "The items to reconcile — a whole shop or a whole extracted receipt/shelf.",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "What the item is, e.g. 'Greek yoghurt'." },
+            quantity: { type: "number", description: "Optional amount on hand, e.g. 2." },
+            unit: { type: "string", description: "Optional unit, e.g. 'g', 'cans', 'bunch'." },
+            category: { type: "string", enum: PANTRY_CATEGORY, description: "Optional food category." },
+            location: { type: "string", enum: PANTRY_LOCATION, description: "Optional storage location: fridge | freezer | pantry." },
+            expiresAt: { type: "string", description: "Optional expiry day, 'YYYY-MM-DD'." },
+          },
+          required: ["name"],
+        },
+      },
+    },
+    required: ["items"],
+  },
+};
+
 // ── Meal-plan tool definitions (OUR meal-plan model field names exactly) ───────
 
 const PLAN_MEAL_TOOL = {
@@ -425,6 +469,22 @@ const REMOVE_MEAL_PLAN_TOOL = {
   },
 };
 
+const GET_NUTRITION_STATUS_TOOL = {
+  name: "get_nutrition_status",
+  description:
+    "The deterministic RECONCILIATION status — `GET /api/nutrition/status`. Read-only, UNGATED " +
+    "(works even if the add-on is disabled). This is the read `/nutrition-chef` runs FIRST, on " +
+    "every invocation, before any planning: `stalePlannedMeals` (past-dated 'planned' meal-plan " +
+    "entries — count/oldest/ids), `provablyCooked` (the subset with a same-date+slot food-log " +
+    "entry naming their MEAL-<n> id — the auto-closeable set), `daysSinceLastFoodLog`, " +
+    "`daysSinceLastPantryWrite`, `expiredPantryItems`, `pantryLifecycle` (fresh/staple/spice " +
+    "scoping for routine reconciliation — spices and shelf-stable staples are OUT of the routine " +
+    "sweep by default — plus fresh items likely past a computed, never-stored freshness horizon), " +
+    "and `hasNutritionTargets` + `daysSinceLastTargets`. Everything is computed fresh from " +
+    "existing records on every call — nothing is stored here.",
+  inputSchema: { type: "object", properties: {} },
+};
+
 const GET_NUTRITION_TARGETS_TOOL = {
   name: "get_nutrition_targets",
   description:
@@ -509,8 +569,172 @@ const LIST_NUTRITION_TARGETS_TOOL = {
   },
 };
 
+// ── Calendar placement (v15) ──────────────────────────────────────────────────
+// The meal-plan twin of the fitness training-plan push — materializes PLANNED meal-plan
+// entries onto the calendar via the placement engine (board/lib/placement.ts).
+
+const PUSH_MEAL_PLAN_TO_CALENDAR_TOOL = {
+  name: "push_meal_plan_to_calendar",
+  description:
+    "Materialize PLANNED meal-plan entries onto the calendar (db.events) for a day window — " +
+    "POST /api/nutrition/push-plan-to-calendar. " +
+    ADDON_GUARDRAIL +
+    " IDEMPOTENT: each entry's calendar link is a receipt (entry.eventId), so re-running " +
+    "RECONCILES the window (creates new links, refreshes changed ones) rather than " +
+    "duplicating. OVERLAP-SAFE: a meal is placed in a free slot within its slot's candidate " +
+    "window and never on top of an existing timed event; when no slot fits, that entry is " +
+    "reported skipped with a reason instead of double-booking. `cooked`/`skipped` entries in " +
+    "the window are reported skipped/not_planned and left untouched. `from`/`to` are ISO days, " +
+    "half-open [from, to) — default today through the next 7 days. A weekday breakfast/lunch/" +
+    "snack is also kept out of the user's WORKING HOURS (Mon-Fri 09:00-18:00 by default, or " +
+    "the board's stored preference) automatically — you don't need to pass anything for that " +
+    "(dinner sits outside working hours by construction). Optionally pass 'busy_windows': read " +
+    "the user's REAL calendar (your own connector, e.g. Google Calendar) for this window and " +
+    "pass ONLY {date,start,end} busy times — never titles or attendees. Cos uses these for this " +
+    "one call and NEVER stores them. Returns { results: [{date, action, reason?, eventId?}], " +
+    "created, updated, skipped, version }.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      from: { type: "string", description: "Window start (inclusive), 'YYYY-MM-DD'. Defaults to today." },
+      to: { type: "string", description: "Window end (exclusive), 'YYYY-MM-DD'. Defaults to 7 days after 'from'." },
+      busy_windows: {
+        type: "array",
+        description:
+          "Optional busy times from the user's REAL calendar, read by you before calling this tool. " +
+          "Each entry is {date, start, end} ONLY — no titles, no attendees, no other content. Used for " +
+          "this call and discarded; Cos never stores or syncs the external calendar.",
+        items: {
+          type: "object",
+          properties: {
+            date: { type: "string", description: "YYYY-MM-DD." },
+            start: { type: "string", description: "HH:MM (24h) busy-window start." },
+            end: { type: "string", description: "HH:MM (24h) busy-window end." },
+          },
+          required: ["date", "start", "end"],
+        },
+      },
+    },
+  },
+};
+
+// ── Shopping-list tool definitions (v16; the persistent shopping list, cos-ops#37) ─────────
+// db.shoppingItems (ShoppingItem) — the state half; `get_shopping_candidates` is the computed
+// half (never stored — see board/lib/shopping-candidates.ts). `category` deliberately
+// includes non-food (household/personal-care) — the brief's "not only about nutrition".
+
+const LIST_SHOPPING_TOOL = {
+  name: "list_shopping",
+  description:
+    "Read the shopping list — `GET /api/nutrition/shopping`. Read-only (works even if the add-on " +
+    "is disabled). Defaults `status` to 'needed' when omitted (the phone ask is \"what's on my " +
+    "list\" — the HTTP GET itself stays unfiltered-by-default; this tool narrows for you). Filter " +
+    "by `category` (produce|protein|dairy|bakery|frozen|pantry|household|personal-care|other). " +
+    "Renders items grouped by category, in aisle-walk order.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: SHOPPING_STATUS, description: "Defaults to 'needed' when omitted." },
+      category: { type: "string", enum: SHOPPING_CATEGORY, description: "Only items in this category." },
+    },
+  },
+};
+
+const ADD_SHOPPING_ITEM_TOOL = {
+  name: "add_shopping_item",
+  description:
+    "Add an item to the shopping list — `POST /api/nutrition/shopping`. " +
+    ADDON_GUARDRAIL +
+    " `name` is required (what to buy — food OR non-food, e.g. 'AA batteries'). Optionally " +
+    "provide `category` (produce|protein|dairy|bakery|frozen|pantry|household|personal-care|" +
+    "other), `quantity`, `unit`, a `note`, `source` (manual|plan|pantry|channel — defaults " +
+    "'manual'), and `sourceRef` (a soft MEAL-<n>/PANTRY-<n>/M-<n> reference — never validated). " +
+    "Returns the minted SHOP-id.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "What to buy, e.g. 'AA batteries' or 'Greek yoghurt'." },
+      category: { type: "string", enum: SHOPPING_CATEGORY, description: "Optional aisle category." },
+      quantity: { type: "number", description: "Optional amount to buy, e.g. 2." },
+      unit: { type: "string", description: "Optional unit, e.g. 'g', 'cans', 'bunch'." },
+      note: { type: "string", description: "Optional freeform note." },
+      source: { type: "string", enum: SHOPPING_SOURCE, description: "Where this came from. Defaults 'manual'." },
+      sourceRef: { type: "string", description: "Optional soft reference, e.g. 'MEAL-12' or 'PANTRY-4'." },
+    },
+    required: ["name"],
+  },
+};
+
+const UPDATE_SHOPPING_ITEM_TOOL = {
+  name: "update_shopping_item",
+  description:
+    "Update a shopping item's fields — `PATCH /api/nutrition/shopping/{id}`. " +
+    ADDON_GUARDRAIL +
+    " Pass only the fields you want to change (any of: name, category, quantity, unit, status, " +
+    "source, sourceRef, note). THE ONE-CALL TICK-OFF: `update_shopping_item(id, {status: " +
+    "\"bought\"})` flips the item in a single round trip and stamps `boughtAt` automatically — " +
+    "setting any other status clears it. `status: \"dismissed\"` keeps history (not deleted) and is " +
+    "INERT — it does NOT stop future suggestions (a re-offer is expected; to stop one, add the item as " +
+    "needed, buy it, or fix the pantry row); use `remove_shopping_item` only for an explicit hard delete.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Shopping item id, e.g. 'SHOP-1'." },
+      name: { type: "string", description: "New name (non-empty)." },
+      category: { type: "string", enum: SHOPPING_CATEGORY, description: "New aisle category." },
+      quantity: { type: "number", description: "New amount to buy." },
+      unit: { type: "string", description: "New unit, e.g. 'g', 'cans', 'bunch'." },
+      status: { type: "string", enum: SHOPPING_STATUS, description: "needed | bought | dismissed. 'bought' stamps boughtAt; any other clears it." },
+      source: { type: "string", enum: SHOPPING_SOURCE, description: "manual | plan | pantry | channel." },
+      sourceRef: { type: "string", description: "New soft reference, e.g. 'MEAL-12' or 'PANTRY-4'." },
+      note: { type: "string", description: "New freeform note." },
+    },
+    required: ["id"],
+  },
+};
+
+const REMOVE_SHOPPING_ITEM_TOOL = {
+  name: "remove_shopping_item",
+  description:
+    "Remove a shopping item by id (e.g. 'SHOP-1') — `DELETE /api/nutrition/shopping/{id}`. " +
+    ADDON_GUARDRAIL +
+    " HARD delete — only for an explicit \"remove this\" ask. For \"I don't need it\" or \"skip " +
+    "it\", prefer `update_shopping_item(id, {status: \"dismissed\"})`, which keeps history. " +
+    "Shopping items have no soft-archive; a dangling `sourceRef` pointing AT the removed row " +
+    "elsewhere is tolerated.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Shopping item id, e.g. 'SHOP-1'." },
+    },
+    required: ["id"],
+  },
+};
+
+const GET_SHOPPING_CANDIDATES_TOOL = {
+  name: "get_shopping_candidates",
+  description:
+    "Read the COMPUTED shopping suggestions — `GET /api/nutrition/shopping/candidates`. Read-only " +
+    "(works even if the add-on is disabled); NEVER writes anything, purely a suggestion read. " +
+    "Composes this week's meal plan (an ingredient no pantry row and no live list row already " +
+    "covers) with the pantry's expired + likely-past-freshness-horizon signals (see " +
+    "get_nutrition_status) — already-listed or bought-this-window items are suppressed. `from`/" +
+    "`to` are ISO days (default: today through +6 days). Renders the window, then FACT rows " +
+    "(expired — a printed date), then INFERRED rows (no printed date — carries the " +
+    "\"(inferred — no printed date)\" label VERBATIM, never paraphrased), then one line of " +
+    "suppressed counts. An empty result means nothing to suggest.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      from: { type: "string", description: "Window start, 'YYYY-MM-DD'. Defaults to today." },
+      to: { type: "string", description: "Window end (inclusive), 'YYYY-MM-DD'. Defaults to 6 days after 'from'." },
+    },
+  },
+};
+
 const TOOLS = [
   // reads
+  GET_NUTRITION_STATUS_TOOL,
   LIST_FOOD_LOG_TOOL,
   GET_FOOD_LOG_TOOL,
   READ_PANTRY_TOOL,
@@ -527,13 +751,22 @@ const TOOLS = [
   ADD_PANTRY_ITEM_TOOL,
   UPDATE_PANTRY_ITEM_TOOL,
   REMOVE_PANTRY_ITEM_TOOL,
+  RECONCILE_PANTRY_TOOL,
   // meal-plan lifecycle
   PLAN_MEAL_TOOL,
   UPDATE_MEAL_PLAN_TOOL,
   REMOVE_MEAL_PLAN_TOOL,
+  PUSH_MEAL_PLAN_TO_CALENDAR_TOOL,
   // v14 dietary profile + agent-authored targets
   SET_DIET_PROFILE_TOOL,
   SAVE_NUTRITION_TARGETS_TOOL,
+  // v16 shopping list (cos-ops#37) — list_shopping + get_shopping_candidates are reads
+  LIST_SHOPPING_TOOL,
+  GET_SHOPPING_CANDIDATES_TOOL,
+  // v16 shopping-list lifecycle
+  ADD_SHOPPING_ITEM_TOOL,
+  UPDATE_SHOPPING_ITEM_TOOL,
+  REMOVE_SHOPPING_ITEM_TOOL,
 ];
 
 const server = new Server(
@@ -671,6 +904,66 @@ async function handleGetFoodLog(args) {
   if (e.health) lines.push(`Health: ${e.health}`);
   lines.push(`Estimated: ${e.estimated ? "yes (the calorie count is a guess)" : "no (measured)"}`);
   if (e.note) lines.push(`Note: ${e.note}`);
+  return text(lines.join("\n"));
+}
+
+async function handleGetNutritionStatus() {
+  const { data, errorResult } = await api("GET", "/api/nutrition/status");
+  if (errorResult) return errorResult;
+  const s = data;
+  const lines = ["Nutrition status:"];
+
+  const stale = s.stalePlannedMeals ?? { count: 0, ids: [] };
+  if (stale.count === 0) {
+    lines.push("Meal plan: clean — no stale planned meals.");
+  } else {
+    const age = stale.oldestAgeDays;
+    lines.push(
+      `Stale planned meals: ${stale.count} (oldest ${stale.oldestDate}, ${age} day${age === 1 ? "" : "s"} ago) — ${stale.ids.join(", ")}`,
+    );
+  }
+
+  const proven = s.provablyCooked ?? { count: 0, matches: [] };
+  if (proven.count > 0) {
+    lines.push(`Provably cooked (a matching food log proves these): ${proven.count}`);
+    for (const m of proven.matches) lines.push(`  - ${m.mealId} ← ${m.foodLogId}`);
+  }
+
+  lines.push(`Days since last food log: ${s.daysSinceLastFoodLog ?? "never"}`);
+  lines.push(`Days since last pantry write: ${s.daysSinceLastPantryWrite ?? "never"}`);
+
+  const expired = s.expiredPantryItems ?? { count: 0, ids: [] };
+  lines.push(`Expired pantry items: ${expired.count}${expired.count ? ` — ${expired.ids.join(", ")}` : ""}`);
+
+  const lifecycle = s.pantryLifecycle ?? {
+    fresh: { count: 0, ids: [] },
+    likelyPastHorizon: { count: 0, items: [] },
+    excluded: { spices: 0, staples: 0 },
+  };
+  lines.push(
+    `Pantry lifecycle: ${lifecycle.fresh.count} fresh row${lifecycle.fresh.count === 1 ? "" : "s"} in the ` +
+      `routine reconciliation scope (${lifecycle.excluded.spices} spices + ${lifecycle.excluded.staples} ` +
+      `staples excluded).`,
+  );
+  if (lifecycle.likelyPastHorizon.count > 0) {
+    lines.push(`Likely past their freshness horizon (inferred — not printed dates):`);
+    const sorted = [...lifecycle.likelyPastHorizon.items].sort((a, b) => b.ageDays - a.ageDays);
+    const shown = sorted.slice(0, 5);
+    for (const it of shown) {
+      lines.push(
+        `  - ${it.id} — unverified ${it.ageDays} days, typical shelf life ${it.horizonDays} (inferred — no printed date)`,
+      );
+    }
+    const remaining = lifecycle.likelyPastHorizon.count - shown.length;
+    if (remaining > 0) lines.push(`  … and ${remaining} more`);
+  }
+
+  if (!s.hasNutritionTargets) {
+    lines.push("No nutrition targets have EVER been set — author them via save_nutrition_targets.");
+  } else {
+    lines.push(`Days since last nutrition targets: ${s.daysSinceLastTargets}`);
+  }
+
   return text(lines.join("\n"));
 }
 
@@ -912,6 +1205,32 @@ async function handleRemovePantryItem(args) {
   return text(`Removed ${id} from the pantry (no soft-archive; hard-removed).`);
 }
 
+async function handleReconcilePantry(args) {
+  if (!Array.isArray(args.items) || args.items.length === 0) {
+    return err("'items' must be a non-empty array.");
+  }
+  for (const it of args.items) {
+    if (!it || typeof it.name !== "string" || it.name.trim() === "") {
+      return err("Every item needs a non-empty 'name' — the board validates the rest.");
+    }
+  }
+
+  // Light local check only — the route owns the real validation (category/location enums,
+  // expiresAt shape, quantity type) and fails the WHOLE batch closed on any bad item.
+  const { data, errorResult } = await api("POST", "/api/nutrition/pantry/reconcile", { items: args.items });
+  if (errorResult) return errorResult;
+
+  const added = data.added ?? [];
+  const updated = data.updated ?? [];
+  const skipped = data.skipped ?? [];
+  const parts = [
+    `+${added.length} added${added.length ? ` (${added.map((x) => x.name).join(", ")})` : ""}`,
+    `~${updated.length} updated${updated.length ? ` (${updated.map((x) => x.name).join(", ")})` : ""}`,
+    `${skipped.length} skipped${skipped.length ? ` (${skipped.map((s) => `${s.name} — ${s.reason}`).join(", ")})` : ""}`,
+  ];
+  return text(`${parts.join(" · ")} · one write, version ${data.version}`);
+}
+
 // ── Meal-plan tools ────────────────────────────────────────────────────────────
 
 async function handlePlanMeal(args) {
@@ -1080,6 +1399,20 @@ async function handleRemoveMealPlan(args) {
   return text(`Removed ${id} from the meal plan (no soft-archive; hard-removed).`);
 }
 
+// ── Calendar placement handler (v15) ──────────────────────────────────────────
+
+async function handlePushMealPlanToCalendar(args) {
+  const body = {};
+  const from = str(args.from);
+  const to = str(args.to);
+  if (from) body.from = from;
+  if (to) body.to = to;
+  if (Array.isArray(args.busy_windows)) body.busyWindows = args.busy_windows;
+  const { data, errorResult } = await api("POST", "/api/nutrition/push-plan-to-calendar", body);
+  if (errorResult) return errorResult;
+  return text(JSON.stringify(data, null, 2));
+}
+
 // Render one target artifact's macros compactly (P.. F.. C..).
 function targetMacros(p) {
   return ["protein_g", "fat_g", "carbs_g"]
@@ -1190,12 +1523,194 @@ async function handleSaveNutritionTargets(args) {
   return text(lines.join("\n"));
 }
 
+// ── Shopping-list tools (v16; the persistent shopping list, cos-ops#37) ─────────────────────
+
+// One-line render of a shopping item: qty/unit, non-manual source, the bought/dismissed stamp,
+// and the note. Mirrors pantryLine's shape.
+function shoppingLine(it) {
+  const qty =
+    typeof it.quantity === "number"
+      ? ` ${it.quantity}${it.unit ? ` ${it.unit}` : ""}`
+      : it.unit
+        ? ` (${it.unit})`
+        : "";
+  const flags = [];
+  if (it.status === "bought" && it.boughtAt) flags.push(`bought ${it.boughtAt.slice(0, 10)}`);
+  if (it.status === "dismissed") flags.push("dismissed");
+  if (it.source && it.source !== "manual") flags.push(it.source);
+  const note = it.note ? `  — ${it.note}` : "";
+  return `  - ${it.id}  ${it.name}${qty}${flags.length ? `  [${flags.join(", ")}]` : ""}${note}`;
+}
+
+async function handleListShopping(args) {
+  const sp = new URLSearchParams();
+  // Defaults `status` to "needed" when omitted — the phone ask is "what's on my list"; the
+  // HTTP GET itself stays unfiltered-by-default (this asymmetry is deliberate).
+  const status = typeof args.status === "string" && SHOPPING_STATUS.includes(args.status) ? args.status : "needed";
+  sp.set("status", status);
+  if (typeof args.category === "string" && SHOPPING_CATEGORY.includes(args.category)) sp.set("category", args.category);
+  const qs = sp.toString();
+
+  const { data, errorResult } = await api("GET", `/api/nutrition/shopping${qs ? `?${qs}` : ""}`);
+  if (errorResult) return errorResult;
+
+  const items = data.items ?? [];
+  const filters = qs ? ` (${qs.replace(/&/g, ", ")})` : "";
+  if (!items.length) return text(`No shopping items${filters}.`);
+
+  // Group by category (in the canonical SHOPPING_CATEGORY order, then any unknowns last) —
+  // the aisle walk; clones handleReadPantry's byCat idiom.
+  const catRank = (c) => {
+    const i = SHOPPING_CATEGORY.indexOf(c);
+    return i === -1 ? SHOPPING_CATEGORY.length : i;
+  };
+  const byCat = new Map();
+  for (const it of items) {
+    const key = it.category ?? "uncategorised";
+    if (!byCat.has(key)) byCat.set(key, []);
+    byCat.get(key).push(it);
+  }
+  const cats = [...byCat.keys()].sort((a, b) => catRank(a) - catRank(b) || a.localeCompare(b));
+
+  const lines = [`Shopping list (${items.length})${filters}:`];
+  for (const cat of cats) {
+    const catItems = byCat
+      .get(cat)
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    lines.push(`${cat} — ${catItems.length} item${catItems.length === 1 ? "" : "s"}`);
+    for (const it of catItems) lines.push(shoppingLine(it));
+  }
+  return text(lines.join("\n"));
+}
+
+async function handleAddShoppingItem(args) {
+  if (typeof args.name !== "string" || args.name.trim() === "") {
+    return err("'name' is required.");
+  }
+  if (args.quantity !== undefined && typeof args.quantity !== "number") {
+    return err("'quantity' must be a number.");
+  }
+  if (args.category !== undefined && !SHOPPING_CATEGORY.includes(args.category)) {
+    return err(`'category' must be one of: ${SHOPPING_CATEGORY.join(", ")}.`);
+  }
+  if (args.source !== undefined && !SHOPPING_SOURCE.includes(args.source)) {
+    return err(`'source' must be one of: ${SHOPPING_SOURCE.join(", ")}.`);
+  }
+
+  const payload = { name: args.name };
+  if (typeof args.quantity === "number") payload.quantity = args.quantity;
+  for (const k of ["unit", "category", "note", "source", "sourceRef"]) {
+    if (typeof args[k] === "string" && args[k] !== "") payload[k] = args[k];
+  }
+
+  const { data, errorResult } = await api("POST", "/api/nutrition/shopping", payload);
+  if (errorResult) return errorResult;
+
+  const it = data.item;
+  const qty = typeof it.quantity === "number" ? `  ${it.quantity}${it.unit ? ` ${it.unit}` : ""}` : "";
+  return text(
+    `Added ${it.id} — "${it.name}"${qty}\n` +
+      (it.category ? `Category: ${it.category}  ` : "") +
+      `Source: ${it.source}` +
+      `\nAdded to the shopping list.`
+  );
+}
+
+async function handleUpdateShoppingItem(args) {
+  const id = str(args.id);
+  if (!id) return err("'id' is required, e.g. 'SHOP-1'.");
+  if (args.name !== undefined && (typeof args.name !== "string" || args.name.trim() === "")) {
+    return err("'name' must be a non-empty string.");
+  }
+  if (args.quantity !== undefined && typeof args.quantity !== "number") {
+    return err("'quantity' must be a number.");
+  }
+  if (args.category !== undefined && !SHOPPING_CATEGORY.includes(args.category)) {
+    return err(`'category' must be one of: ${SHOPPING_CATEGORY.join(", ")}.`);
+  }
+  if (args.status !== undefined && !SHOPPING_STATUS.includes(args.status)) {
+    return err(`'status' must be one of: ${SHOPPING_STATUS.join(", ")}.`);
+  }
+  if (args.source !== undefined && !SHOPPING_SOURCE.includes(args.source)) {
+    return err(`'source' must be one of: ${SHOPPING_SOURCE.join(", ")}.`);
+  }
+
+  const payload = {};
+  for (const k of ["name", "unit", "category", "status", "source", "sourceRef", "note"]) {
+    if (typeof args[k] === "string") payload[k] = args[k];
+  }
+  if (typeof args.quantity === "number") payload.quantity = args.quantity;
+  if (Object.keys(payload).length === 0) {
+    return err("Nothing to update — pass at least one field besides 'id'.");
+  }
+
+  const { data, errorResult } = await api("PATCH", `/api/nutrition/shopping/${encodeURIComponent(id)}`, payload);
+  if (errorResult) return errorResult;
+
+  const it = data.item;
+  const changed = Object.keys(payload).join(", ");
+  const qty = typeof it.quantity === "number" ? `  ${it.quantity}${it.unit ? ` ${it.unit}` : ""}` : "";
+  return text(
+    `Updated ${it.id} (${changed})\n` +
+      `"${it.name}"${qty}  [${it.status}]${it.boughtAt ? `  bought ${it.boughtAt.slice(0, 10)}` : ""}`
+  );
+}
+
+async function handleRemoveShoppingItem(args) {
+  const id = str(args.id);
+  if (!id) return err("'id' is required, e.g. 'SHOP-1'.");
+
+  const { errorResult } = await api("DELETE", `/api/nutrition/shopping/${encodeURIComponent(id)}`);
+  if (errorResult) return errorResult;
+
+  return text(`Removed ${id} from the shopping list (no soft-archive; hard-removed).`);
+}
+
+async function handleGetShoppingCandidates(args) {
+  const sp = new URLSearchParams();
+  const from = str(args.from);
+  const to = str(args.to);
+  if (from) sp.set("from", from);
+  if (to) sp.set("to", to);
+  const qs = sp.toString();
+
+  const { data, errorResult } = await api("GET", `/api/nutrition/shopping/candidates${qs ? `?${qs}` : ""}`);
+  if (errorResult) return errorResult;
+
+  const candidates = data.candidates ?? [];
+  const suppressed = data.suppressed ?? { onList: 0, inPantry: 0, boughtInWindow: 0 };
+  if (!candidates.length) return text("Nothing to suggest.");
+
+  // FACT rows (source "plan" + pantry "expired", inferred:false) before INFERRED rows
+  // (pantry freshness-horizon, inferred:true) — the engine's own order is preserved within
+  // each group. The "(inferred — no printed date)" label rides through `c.reason` VERBATIM
+  // (ADR 0025 condition 4 — never paraphrase it here).
+  const facts = candidates.filter((c) => !c.inferred);
+  const inferred = candidates.filter((c) => c.inferred);
+  const lines = [`Shopping candidates for ${data.window.from} → ${data.window.to}:`];
+  if (facts.length) {
+    lines.push("Facts:");
+    for (const c of facts) lines.push(`  - ${c.name}  (${c.reason})`);
+  }
+  if (inferred.length) {
+    lines.push("Inferred:");
+    for (const c of inferred) lines.push(`  - ${c.name}  (${c.reason})`);
+  }
+  lines.push(
+    `Suppressed: ${suppressed.onList} already listed, ${suppressed.inPantry} in pantry, ` +
+      `${suppressed.boughtInWindow} bought this window.`,
+  );
+  return text(lines.join("\n"));
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const args = request.params.arguments ?? {};
   switch (request.params.name) {
     // reads
+    case "get_nutrition_status":
+      return handleGetNutritionStatus(args);
     case "list_food_log":
       return handleListFoodLog(args);
     case "get_food_log":
@@ -1212,6 +1727,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleListNutritionTargets(args);
     case "get_diet_profile":
       return handleGetDietProfile(args);
+    // v16 shopping-list reads
+    case "list_shopping":
+      return handleListShopping(args);
+    case "get_shopping_candidates":
+      return handleGetShoppingCandidates(args);
     // food-log lifecycle
     case "log_food":
       return handleLogFood(args);
@@ -1226,6 +1746,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleUpdatePantryItem(args);
     case "remove_pantry_item":
       return handleRemovePantryItem(args);
+    case "reconcile_pantry":
+      return handleReconcilePantry(args);
     // meal-plan lifecycle
     case "plan_meal":
       return handlePlanMeal(args);
@@ -1233,6 +1755,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleUpdateMealPlan(args);
     case "remove_meal_plan":
       return handleRemoveMealPlan(args);
+    case "push_meal_plan_to_calendar":
+      return handlePushMealPlanToCalendar(args);
+    // v16 shopping-list lifecycle
+    case "add_shopping_item":
+      return handleAddShoppingItem(args);
+    case "update_shopping_item":
+      return handleUpdateShoppingItem(args);
+    case "remove_shopping_item":
+      return handleRemoveShoppingItem(args);
     // weight-loss lifecycle
     case "set_diet_profile":
       return handleSetDietProfile(args);

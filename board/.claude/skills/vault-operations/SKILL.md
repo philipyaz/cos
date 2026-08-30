@@ -1,6 +1,6 @@
 ---
 name: vault-operations
-description: Drive the `vault` MCP — `ingest` is async (submit, then poll `ingest_status` to a terminal state; never re-submit an in-flight job); `query` is synchronous. Use for any vault ingest or query.
+description: Drive the `vault` MCP — `ingest` is async (submit, then poll `ingest_status` to a terminal state; never re-submit an in-flight job); `query` is synchronous, and a query answer is knowledge-as-recorded — verify any board claim in it against the `board` MCP before repeating or acting on it. Use for any vault ingest or query, e.g. "ingest this into my vault", "save this to my knowledge base", or "ask my vault about X", and when reading a vault answer that mentions board cases.
 ---
 
 # Vault operations — the submit-then-poll lifecycle
@@ -14,6 +14,19 @@ them behave very differently, and getting the difference right is the whole poin
 result. **Do not poll it.** It declines purely-open-work questions ("what's overdue?") with a board
 pointer — that's expected.
 
+## Reading a query answer — board claims are not facts
+
+A `query` answer is **knowledge as recorded, not board state**. The vault writes board
+case ids by reference at ingest and cannot verify, refresh, or follow them — so an answer
+can only tell you what a page recorded, as-of that page's `updated:` date.
+
+- Any claim an answer makes about what the board contains — **especially an absence**
+  ("no case for X") — must be **verified against the `board` MCP** (`get_case`, `search`)
+  before it is repeated to the user or acted on.
+- `cases:` ids in an answer are pointers as-of the page's `updated:` date. Resolve the
+  ones that matter with `get_case`, and never restate them as current:
+  the board is authoritative for current state.
+
 ## ingest is ASYNCHRONOUS — submit, then poll to a terminal state
 
 `ingest` does NOT do the work before it returns. It validates the input, enqueues a background job,
@@ -23,14 +36,18 @@ not "done."**
 
 The loop you MUST follow:
 
-1. Call `ingest` with `content` (and/or `files`, `domain`, `cases`). Read `job_id` and
+1. Call `ingest` with `content` (and/or `files`). `domain` is optional — omit it and the vault
+   classifies each input from its content. Pass `cases` (board case ids) to link the ingest to the
+   board work that produced it; they are recorded by reference only. Read `job_id` and
    `poll_interval_ms` from the result's `structuredContent`.
 2. Call `ingest_status({ job_id })`. Repeat every `poll_interval_ms` while `status` is `working` or
    `running`.
 3. Stop only when `status` is **terminal**: `completed`, `failed`, `cancelled`, or `interrupted`.
 4. Then report to the user:
    - `completed` → `structuredContent.result` holds the ingest summary (pages synthesized, sources
-     created). Report what landed.
+     created). If the `ingest` call passed `cases`, immediately stamp the board-side receipt — call
+     the `board` MCP's `mark_vault_ingested({ ids })` with those same case ids — then report what
+     landed.
    - `failed` → `structuredContent.error.message` says why. If `error.retryable` is true, you may
      re-submit.
    - `cancelled` → the job was cancelled; already-written pages stayed (no rollback).
@@ -47,6 +64,16 @@ flight, you get back the **same `job_id`** (with `dedup: true`), and no second a
 the signal to **poll**, not to retry. Re-submitting identical content burns a turn and tells you
 nothing new — call `ingest_status` instead.
 
+## The board-side receipt
+
+The receipt is what lets the board answer *"what has the vault never been told?"* (`get_vault_coverage`
+on the `board` MCP) — stamp the receipt only on `completed`; a `failed`, `cancelled`, or `interrupted`
+job leaves it unset, because the field means *landed*, never *attempted*. Skip the call when the
+ingest named no `cases`.
+
+No separate approval is needed — the receipt records the completion of an ingest that was already
+confirmed, not a new judgment.
+
 ## Cancelling
 
 `ingest_cancel({ job_id })` requests a cooperative stop: the job halts at its next checkpoint and any
@@ -60,5 +87,5 @@ reaches `cancelled`.
   no longer bounded by the client's tool-call timeout (Cowork's ~4-min cap). Submit it and poll.
 - **One unknown/expired `job_id`** from `ingest_status` means the job aged out of its retention
   window (default ~60 min) — re-submit the material rather than treating it as a hard failure.
-- **The vault is knowledge-only.** It never writes the board; a board case id you pass to `ingest` is
-  recorded by reference only. Open-to-do questions belong on the board, not in a `query`.
+- **The vault is knowledge-only.** It never writes the board. Open-to-do questions belong on the
+  board, not in a `query`.

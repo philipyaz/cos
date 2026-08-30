@@ -57,9 +57,12 @@ for free:
   stamped with a stale version raises `VersionConflictError`, which the shared route helper maps
   to **HTTP 409** — the UI can refetch and retry rather than clobber an intervening change.
 
-!!! note "Live data never leaves the machine"
+!!! note "Your board is never committed to git"
     `cases.json` and its snapshots are gitignored and never committed — the local-first,
-    private-by-default tenet. The committed store is empty; your board is yours.
+    private-by-default tenet. The committed store is empty; your board is yours. (What *does*
+    leave the machine, only if you opt in: the **encrypted** off-site backup blob, and — under
+    [multi-device](multi-device.md) — your board traffic to the hub over your private,
+    WireGuard-encrypted Tailscale network, never the public internet.)
 
 ### SSE live-refresh keeps every surface honest
 
@@ -124,6 +127,7 @@ maps `BadRequestError → 400`, `NotFoundError → 404`, `VersionConflictError �
 | **Notes** | `/api/cases/{id}/notes` | Freeform context attributed to its author actor — the agent's channel for observations that aren't a task or a message. |
 | **Messages** | `/api/cases/{id}/messages`, `/api/messages/{id}` | Linked emails/chats (id `M-<n>`). A `url` deep-link back to the original is **validated as an absolute http(s) URL** or dropped. Linking an *outbound* message deterministically auto-derives genuine two-way correspondents as `trusted` in the [Guard](../security/guard.md) whitelist (server-side, fail-open). |
 | **Reminders** | `/api/reminders`, `/api/reminders/{id}` | Lightweight nudges (id `REM-<n>`) — richer than a note (catalog labels, a short checklist, linked emails) but lighter than a case (no lanes, no hierarchy). Optionally point at **one** board node of any tier via `caseId`, the single source of truth for that link. Board-native — **no new server, port, or bridge**. |
+| **Triage decisions** | `/api/triage-decisions`, `/api/triage-decisions/{id}` | The mail-triage editorial-drop decision record (id `TD-<n>`) — one row per `(sender, source, reason)`, deliberately not a log of dropped emails; a repeat drop is a count-bumping upsert. Reversing a row closes the drop path fail-closed: a further drop for that sender+source is refused (**403** `code: "sender-reversed"`). The dropped:promoted ratio and the first-time-dropped set are **computed on read, never persisted**. Board-native — **no new server, port, or bridge**. See [Triage skills](triage-skills.md). |
 | **Priorities** | `/api/priorities`, plus `starred` on cases | "What matters most right now," read back to ground a sweep. Two mechanisms: free-text priority notes (id `PRI-<n>`) and a `starred` pin on any node. Also board-native. |
 | **Labels & bundles** | `/api/labels`, `/api/labels/bundles` | The catalog-backed taxonomy. A case write with an **unknown label id is rejected** — callers must read `list_labels` first. Bundles are themed installable packs; install is idempotent, uninstall scrubs dangling references by default. The catalog is documented in the generated [labels reference](../reference/labels.md). |
 | **Calendar events** | `/api/events`, `/api/events/{id}` | Board-stored events, linkable to cases. Surfaced to the agent through the separate [`calendar` MCP](mcp-servers.md). |

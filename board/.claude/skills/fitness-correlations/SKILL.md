@@ -5,16 +5,15 @@ description: >
   computes from the logged Apple-Watch + workout data — the deterministic stats
   twin of the Fitness add-on. The board computes (and persists) the Pearson r and
   the linear regression deterministically; YOU (the agent) trigger that compute via
-  the `fitness` MCP and then read the numbers back to the user in plain language —
-  strength + direction of the correlation, what the regression slope implies, and
-  ACTIONABLE training guidance (e.g. "your deep-sleep correlation is strong → protect
-  deep sleep before key sessions"), honest about small samples / weak links. You do
-  NOT recompute Pearson yourself; the board owns the math. Use when the user says
+  the `fitness` MCP and then read the numbers back in plain language — strength +
+  direction of the correlation, what the regression slope implies, and ACTIONABLE
+  training guidance (e.g. "your deep-sleep correlation is strong → protect deep sleep
+  before key sessions"), honest about small samples. You do NOT recompute Pearson
+  yourself; the board owns the math. Use when the user says
   "how does my sleep affect my performance", "sleep vs performance", "correlate my
   sleep and training", "what affects my training", "does deep sleep help my workouts",
-  "is my sleep linked to my training", "show me my sleep-performance correlation", or
-  otherwise asks to relate their sleep to how they train. NOT a causal claim, NOT
-  medical advice.
+  "show me my sleep-performance correlation", or otherwise asks to relate their sleep
+  to how they train. NOT a causal claim, NOT medical advice.
 ---
 
 # Fitness correlations (the sleep ↔ performance interpreter)

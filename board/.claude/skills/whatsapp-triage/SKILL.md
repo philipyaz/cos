@@ -28,10 +28,10 @@ MCP — `search_contacts`, `get_contact`, `list_chats`, `get_chat`, `list_messag
 `get_contact_chats`, `download_media`. It **never** calls `send_message`,
 `send_file`, or `send_audio_message`; it never sends or drafts a WhatsApp message,
 ever. It owns the **board side** only: the **knowledge** in a message (a fact, a
-decision, new context about a sender) is delegated to **`/second-brain-ingest`**,
-which re-synthesizes the vault. This skill reconciles cases; the router synthesizes
-knowledge. (The vault is knowledge-only — never write task checkboxes into wiki
-pages; open work lives on the board.)
+decision, new context about a sender) is submitted to the vault through the `vault`
+MCP's async `ingest`, driven per **`/vault-operations`**; the vault synthesizes
+knowledge, this skill reconciles cases. (The vault is knowledge-only — never write
+task checkboxes into wiki pages; open work lives on the board.)
 
 > **The headline guardrail.** The board is a *shared* surface: the human edits it by
 > hand in the UI, the agent edits it via this skill. A message can make the agent
@@ -467,7 +467,8 @@ tools — never `bash`/`curl`):
   `list_labels`-first), `link_reminder` (file under a node), `link_reminder_message`
   (attach a WhatsApp message — same field shape as `link_message`).
 - **`dueAt`** (ISO sortable) vs **`eta`** (free text). **`vaultLinks`** — the resolved
-  entity titles (delegate the vault write to `/second-brain-ingest`). **`snoozeUntil`**.
+  entity titles (the knowledge payload reaches the vault via `/vault-operations` —
+  Step 7). **`snoozeUntil`**.
 - **Hierarchy (NOT this skill's job).** Initiative ▸ Workstream ▸ Case grouping is
   owned by the dedicated **`/board-organize`** sweep — create your cases **flat**
   (Step 2) and let it file them. Don't `create_initiative` / `create_workstream` /
@@ -526,20 +527,31 @@ may use for the *same* person in different chats.
   `get_direct_chat_by_contact(phone)` help cross-link the two. The board card and
   `vaultLinks` point at the **one** person, never two.
 - **Heuristic first, then the alias map.** Resolve by name / known number / existing
-  wiki entity pages first; fall back to the vault **alias map**
-  (`wiki/entities/Aliases.md` if present) for nicknames, secondary numbers, and the
-  phone↔`@lid` pairing the heuristic can't catch. The resolved entity is a
-  **`vaultLinks`** target, so a phone number, a `@lid`, a spoken name, and a board
-  entity all collapse to the same page.
+  wiki entity pages first; fall back to the vault **alias map** (**`aliases.md`** at
+  the vault root) for nicknames, secondary numbers, and the phone↔`@lid` pairing the
+  heuristic can't catch. The resolved entity is a **`vaultLinks`** target, so a phone
+  number, a `@lid`, a spoken name, and a board entity all collapse to the same page.
 - **Group participants** resolve the same way — a group message's *sender* (a
   participant phone/JID), not the group JID, is the person you resolve and trust.
-- Hand the **knowledge** in the message to **`/second-brain-ingest`** for the vault
-  re-synthesis; this skill owns the **board** reconciliation.
+- At the end of the sweep, compose **one consolidated knowledge payload** for the
+  run — the facts, decisions, and new sender-context worth keeping, with resolved
+  entity names and the ids of the cases the payload actually carries knowledge
+  about — and submit it to the vault MCP: `ingest({ content, cases })` (omit
+  `domain`; the vault classifies each input from its content). A case only
+  lane-moved, watermarked, or task-ticked this run — with nothing about it in the
+  payload — stays OUT of `cases`: `/vault-operations` stamps a receipt on every id in
+  `cases` once the ingest completes, so over-including one here marks it "covered"
+  when the vault heard nothing about it. Drive the job to a terminal state per
+  **`/vault-operations`** — don't restate the poll loop here, the skill name is the
+  delegation. One job per run, not per chat: N jobs would mint N poll loops and N
+  vault sessions for no benefit. If the run surfaced nothing worth keeping, skip the
+  submission and say so in the report. In approval mode (Step 0), the composed
+  payload is shown for confirmation like any other write.
 
 ## STEP 8 — Action log (auto mode) + report
 
 When `autoSync` is **on**, append **every** board write to the matching domain log,
-`work/log.md` or `life/log.md` (the same shape `/second-brain-ingest` uses):
+`work/log.md` or `life/log.md` (the same shape the vault's domain log uses):
 
     ## [YYYY-MM-DD] whatsapp | <chat one-liner>
     Board: updated CASE-12 (→ waiting_for_input, work) for [[Marco Rivera]] · completed T2 · linked M-9.
@@ -559,6 +571,19 @@ Then **report**, per chat:
   url) for the `@g.us` group …".
 - The **board URL** for anything actionable: `<BOARD_URL>/my-issues`.
 
+And once, for the run:
+- **Vault ingest** — the job's terminal status (`completed` / `failed` /
+  `interrupted` / `cancelled`) and what landed, or "no knowledge worth ingesting
+  this run".
+- **Vault coverage backlog** — once the vault job settles, call the `board` MCP's
+  `get_vault_coverage` and report the count as *"N matters the vault has not been
+  told about"* (one clean line at zero). Key the escalation on **growth**, not an
+  absolute number: if this run's N is higher than the last reported count (check the
+  domain log's last "matters the vault has not been told about" line), lead the
+  WHOLE report with it (⚠) instead of burying it — a climbing number means capture
+  is losing ground. A large-but-shrinking N is the standing backlog draining, and
+  stays in the ordinary line.
+
 ---
 
 ## Conventions (guardrails recap)
@@ -566,7 +591,8 @@ Then **report**, per chat:
 - **BOARD-ONLY, READ-ONLY on WhatsApp.** This skill uses only the `whatsapp` MCP's
   **read** tools and **never** `send_message` / `send_file` / `send_audio_message`. It
   writes only to the **board** (via the `board` MCP, and the `calendar` MCP for
-  confirmed appointments) and delegates knowledge to `/second-brain-ingest`.
+  confirmed appointments) and submits the run's knowledge to the vault per
+  `/vault-operations`.
 - **Scan before you load (Step 1.2).** Every message through the `guard` MCP via
   **`scan_email`** with the WhatsApp mapping (`from`=sender phone/JID,
   `subject`=chat name or "WhatsApp DM", `body`=text, `receivedAt`=ts, **`threadId`=chat_jid**,
@@ -634,8 +660,8 @@ Then **report**, per chat:
   board write lands; a **dropped** message still advances the cursor so it can't loop.
 - **Convergent idempotency.** Set the case to the chat head's implied state; re-runs
   converge and never thrash.
-- **Vault is knowledge-only.** Delegate the knowledge / vault re-synthesis to
-  `/second-brain-ingest`; never write `- [ ]` task checkboxes into wiki pages.
+- **Vault is knowledge-only.** Submit the run's knowledge to the vault per
+  `/vault-operations`; never write `- [ ]` task checkboxes into wiki pages.
 
 ## Worked examples
 
@@ -741,11 +767,13 @@ Then **report**, per chat:
 ## What's Next
 
 After a sweep, the user can:
-- **Ask "what's open / what am I waiting on"** → `/second-brain-query` (answers from the
-  **board** by domain and lane).
-- **Process the knowledge too** — `/second-brain-ingest` re-synthesizes the vault for
-  the senders / topics this sweep touched and writes the `vaultLinks` ↔ `cases:`
-  cross-links.
+- **Ask "what's open / what am I waiting on"** → the **board** (board MCP `search`, or
+  the board UI) — open-work questions live there, not in the vault.
+- **Ask "what do I know about this person / company / matter"** → the vault MCP's
+  **`query`** (synchronous — see **`/vault-operations`**).
 - **Re-run the sweep** — it's idempotent (per-chat cursors), so extra cycles that find no
   message past any cursor simply no-op (or let the scheduled WhatsApp recipe hand it the
   next batch of chats).
+
+The run's knowledge is already in flight (Step 7) — the report (Step 8) carries the
+ingest job's status and the vault coverage backlog.

@@ -2,59 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import {
-  fetchUnreadCount,
-  fetchEnabledAddonGroups,
-  subscribeToBoard,
-  type AddonNavGroup,
-} from "@/lib/board-client";
-import {
-  IconSearch,
-  IconInbox,
-  IconCircleUser,
-  IconActivity,
-  IconCalendar,
-  IconBell,
-  IconShield,
-  IconArchive,
-  IconBook,
-  IconHeart,
-  IconStar,
-  IconTrash,
-  IconChef,
-  IconFridge,
-  IconMealPlan,
-  IconBolt,
-  IconBrand,
-  IconChevronRight,
-  IconRunner,
-  IconTrend,
-  IconSpark,
-  IconScale,
-} from "@/components/icons";
-import type { ComponentType, ReactNode, SVGProps } from "react";
-
-// Add-on nav icons are stored as STRING keys in the manifest (AddonManifest.icon /
-// navItems[].icon — see lib/addons.ts), so the sidebar resolves them to the actual
-// glyph here. An unknown key falls back to the neutral IconBolt so a future add-on
-// whose icon isn't yet mapped still renders a sensible nav row.
-const ADDON_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
-  IconChef,
-  IconFridge,
-  IconMealPlan,
-  IconHeart,
-  IconRunner,
-  IconCalendar,
-  IconTrend,
-  IconBolt,
-  IconSpark,
-  IconScale,
-};
-function addonIcon(key: string): ReactNode {
-  const Glyph = ADDON_ICONS[key] ?? IconBolt;
-  return <Glyph />;
-}
+import { useEffect, useState } from "react";
+import { type AddonNavGroup } from "@/lib/board-client";
+import { DAILY_NAV, SYSTEM_NAV, ADDONS_HREF } from "@/lib/nav";
+import { navIcon } from "@/components/nav-icons";
+import { useNavLive } from "@/lib/nav-live";
+import { IconSearch, IconBrand, IconChevronRight } from "@/components/icons";
+import type { ReactNode } from "react";
 
 type Item = {
   href: string;
@@ -67,9 +21,10 @@ type Item = {
 // `unreadCount` is the real inbox unread number, computed server-side in
 // layout.tsx and threaded down as the SSR seed (correct first paint, no flash).
 // The Inbox view still owns the authoritative read/unread state — this is just
-// the at-a-glance badge. We keep it LIVE off the SSE stream: the layout that
-// computes the seed only re-runs on a full reload, so without this the badge
-// goes stale the instant the Inbox (or the agent) flips a message's read-state.
+// the at-a-glance badge. We keep it LIVE off the SSE stream (via useNavLive):
+// the layout that computes the seed only re-runs on a full reload, so without
+// this the badge goes stale the instant the Inbox (or the agent) flips a
+// message's read-state.
 export function Sidebar({
   unreadCount,
   addonGroups,
@@ -83,29 +38,9 @@ export function Sidebar({
 }) {
   const path = usePathname() ?? "/";
 
-  // Seed from SSR, then mirror the app-wide live-update pattern: on each board
-  // change (newer version), refetch the cheap unread count AND the enabled add-on
-  // groups. `lastVersion` starts at 0 so the SSE `hello` on connect triggers one
-  // reconciling fetch on mount — self-correcting even if a seed was already stale. A
-  // failed fetch keeps the last value; the next change event retries.
-  const [unread, setUnread] = useState(unreadCount ?? 0);
-  const [addons, setAddons] = useState<AddonNavGroup[]>(addonGroups ?? []);
-  const lastVersion = useRef(0);
-  useEffect(() => {
-    const unsub = subscribeToBoard((v) => {
-      if (v <= lastVersion.current) return;
-      lastVersion.current = v;
-      fetchUnreadCount()
-        .then((r) => setUnread(r.unread))
-        .catch(() => {});
-      // fetchEnabledAddonGroups never throws (it resolves to [] on failure), so a
-      // hiccup simply leaves the last-known sections in place until the next change.
-      fetchEnabledAddonGroups()
-        .then(setAddons)
-        .catch(() => {});
-    });
-    return unsub;
-  }, []);
+  // MobileNav (below `md`) shares this exact same seed + live behaviour — see
+  // lib/nav-live.ts.
+  const { unread, addons } = useNavLive({ unreadCount, addonGroups });
 
   // Per-device collapse state for each add-on section, persisted in localStorage (it's
   // viewport chrome, not board data — so it stays off the store and out of SSE). The
@@ -127,33 +62,21 @@ export function Sidebar({
     });
   };
 
-  // Two sections, ordered by how often you reach for them. Group A is the daily
-  // driver (the things you live in); Group B is review/system surfaces you visit
-  // less often. The active-state contract (path.startsWith) is unchanged.
-  const daily: Item[] = [
-    { href: "/my-issues", label: "My Issues", icon: <IconCircleUser /> },
-    {
-      href: "/inbox",
-      label: "Inbox",
-      icon: <IconInbox />,
-      ...(unread > 0 ? { badge: unread } : {}),
-    },
-    { href: "/priorities", label: "Priorities", icon: <IconStar /> },
-    { href: "/reminders", label: "Reminders", icon: <IconBell /> },
-    { href: "/calendar", label: "Calendar", icon: <IconCalendar /> },
-    // The vault is the KNOWLEDGE half of the product (board = action, vault = knowledge) —
-    // a primary content surface you reach for, not a system/maintenance screen. So it lives
-    // with the daily drivers (next to Priorities, itself a knowledge dashboard), not in the
-    // Review group beside Trash/Backups, even though its page shares their status-card shape.
-    { href: "/vault", label: "Vault", icon: <IconBook /> },
-  ];
+  // The nav model itself (hrefs/labels/icon keys) lives in lib/nav.ts, shared with
+  // MobileNav below `md` — decorate it into render-ready Items here: resolve each
+  // icon key to a glyph, and attach the live unread badge to Inbox.
+  const daily: Item[] = DAILY_NAV.map((it) => ({
+    href: it.href,
+    label: it.label,
+    icon: navIcon(it.icon),
+    ...(it.href === "/inbox" && unread > 0 ? { badge: unread } : {}),
+  }));
 
-  const system: Item[] = [
-    { href: "/activity", label: "Activity", icon: <IconActivity /> },
-    { href: "/trash", label: "Trash", icon: <IconTrash /> },
-    { href: "/security", label: "Security", icon: <IconShield /> },
-    { href: "/backups", label: "Backups", icon: <IconArchive /> },
-  ];
+  const system: Item[] = SYSTEM_NAV.map((it) => ({
+    href: it.href,
+    label: it.label,
+    icon: navIcon(it.icon),
+  }));
 
   return (
     <aside className="hidden md:flex w-[240px] shrink-0 flex-col bg-ink-50 text-ink-700">
@@ -195,59 +118,64 @@ export function Sidebar({
         </button>
       </div>
 
-      <nav className="px-3 mt-2 space-y-0.5">
-        {daily.map((it) => (
-          <NavItem key={it.label} item={it} active={path.startsWith(it.href)} />
-        ))}
-      </nav>
-
-      {/* Thin divider + caption separate the daily drivers above from the
-          review/system surfaces below. Caption matches the faint uppercase
-          tracking-wide ink-400 idiom used elsewhere in the app. */}
-      <div className="px-3 mt-4">
-        <div className="border-t border-ink-100" />
-        <p className="px-2 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wider text-ink-400">
-          Review
-        </p>
-      </div>
-      <nav className="px-3 space-y-0.5">
-        {system.map((it) => (
-          <NavItem key={it.label} item={it} active={path.startsWith(it.href)} />
-        ))}
-      </nav>
-
-      {/* The third group — Add-ons. The caption is ALWAYS shown and links to the /addons
-          catalog (where add-ons are turned on/off) — so a fresh board with nothing enabled
-          can still DISCOVER and enable its first add-on (the group would otherwise be a
-          chicken-and-egg: hidden until something is on, but you turn things on from here).
-          Each enabled add-on renders beneath it as its own COLLAPSIBLE section (header +
-          nested nav items), only when at least one is on. Same divider+caption idiom as
-          "Review". */}
-      <div className="px-3 mt-4">
-        <div className="border-t border-ink-100" />
-        <Link
-          href="/addons"
-          className={`flex items-center gap-1 px-2 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wider transition ${
-            path.startsWith("/addons") ? "text-ink-700" : "text-ink-400 hover:text-ink-700"
-          }`}
-          title="Manage add-ons"
-        >
-          Add-ons
-        </Link>
-      </div>
-      {addons.length > 0 && (
-        <nav className="px-3 space-y-0.5">
-          {addons.map((group) => (
-            <AddonGroup
-              key={group.id}
-              group={group}
-              collapsed={collapsed.has(group.id)}
-              onToggle={() => toggleCollapse(group.id)}
-              activePath={path}
-            />
+      {/* Everything below the pinned brand + search block scrolls its own overflow —
+          at 852×393 landscape (or any desktop window shorter than ~930px) all 26 rows
+          across daily/system/add-ons are reachable by scrolling instead of clipping. */}
+      <div className="flex-1 min-h-0 overflow-y-auto pb-3">
+        <nav className="px-3 mt-2 space-y-0.5">
+          {daily.map((it) => (
+            <NavItem key={it.label} item={it} active={path.startsWith(it.href)} />
           ))}
         </nav>
-      )}
+
+        {/* Thin divider + caption separate the daily drivers above from the
+            review/system surfaces below. Caption matches the faint uppercase
+            tracking-wide ink-400 idiom used elsewhere in the app. */}
+        <div className="px-3 mt-4">
+          <div className="border-t border-ink-100" />
+          <p className="px-2 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wider text-ink-400">
+            Review
+          </p>
+        </div>
+        <nav className="px-3 space-y-0.5">
+          {system.map((it) => (
+            <NavItem key={it.label} item={it} active={path.startsWith(it.href)} />
+          ))}
+        </nav>
+
+        {/* The third group — Add-ons. The caption is ALWAYS shown and links to the /addons
+            catalog (where add-ons are turned on/off) — so a fresh board with nothing enabled
+            can still DISCOVER and enable its first add-on (the group would otherwise be a
+            chicken-and-egg: hidden until something is on, but you turn things on from here).
+            Each enabled add-on renders beneath it as its own COLLAPSIBLE section (header +
+            nested nav items), only when at least one is on. Same divider+caption idiom as
+            "Review". */}
+        <div className="px-3 mt-4">
+          <div className="border-t border-ink-100" />
+          <Link
+            href={ADDONS_HREF}
+            className={`flex items-center gap-1 px-2 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wider transition ${
+              path.startsWith(ADDONS_HREF) ? "text-ink-700" : "text-ink-400 hover:text-ink-700"
+            }`}
+            title="Manage add-ons"
+          >
+            Add-ons
+          </Link>
+        </div>
+        {addons.length > 0 && (
+          <nav className="px-3 space-y-0.5">
+            {addons.map((group) => (
+              <AddonGroup
+                key={group.id}
+                group={group}
+                collapsed={collapsed.has(group.id)}
+                onToggle={() => toggleCollapse(group.id)}
+                activePath={path}
+              />
+            ))}
+          </nav>
+        )}
+      </div>
     </aside>
   );
 }
@@ -289,7 +217,7 @@ function AddonGroup({
           <IconChevronRight />
         </span>
         <span className={`w-4 h-4 shrink-0 ${hasActive ? "text-ink-900" : "text-ink-500"}`}>
-          {addonIcon(group.icon)}
+          {navIcon(group.icon)}
         </span>
         <span className="flex-1 text-left">{group.title}</span>
       </button>
@@ -298,7 +226,7 @@ function AddonGroup({
           {group.navItems.map((it) => (
             <NavItem
               key={it.href}
-              item={{ href: it.href, label: it.label, icon: addonIcon(it.icon) }}
+              item={{ href: it.href, label: it.label, icon: navIcon(it.icon) }}
               active={activePath.startsWith(it.href)}
             />
           ))}

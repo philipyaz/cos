@@ -129,7 +129,7 @@ on every success body.
 | route | does |
 |---|---|
 | `GET /api/events` | Lists events; optional `?from=&to=&caseId=&domain=` filters. `from` (inclusive) / `to` (exclusive) bound a half-open day window by ISO-day string compare; `caseId` narrows to one case's events; `domain` to `work`/`life`. No filters → **all** events. Returns `{ events, version }`. |
-| `POST /api/events` | Creates an event. `title` + `date` required; `allDay` defaults `false`; absent optionals are omitted from the record. A `caseId` is validated against an existing case **inside the lock**. On a linked create, the case's activity log gets an `event_linked` entry. → `{ event, version }`, `201`. |
+| `POST /api/events` | Creates an event. `title` + `date` required; `allDay` defaults `false`; absent optionals are omitted from the record. A `caseId` is validated against an existing case **inside the lock**. On a linked create, the case's activity log gets an `event_linked` entry. → `{ event, version }`, `201`. Instead of explicit times, `place: { durationMin, windows, busyWindows?, policy? }` lets the board find the earliest free gap itself (plan-and-insert inside the same lock; `409 { reason }` when nothing fits — see [placement](placement.md#third-consumer-chase-blocks-cos-ops24)); `place` is a request parameter, never stored. |
 | `GET /api/events/[id]` | Loads one event by id. Unknown id → `404`. → `{ event, version }`. |
 | `PATCH /api/events/[id]` | Partial update of any field, incl. **(re)linking via `caseId`**; `caseId: null`/`""` **unlinks** (leaves it standalone). Optional `expectedVersion` optimistic guard (`≠ current → 409`). Logs `event_linked`/`event_unlinked`/`event_updated` on the affected case(s). → `{ event, version }`. |
 | `DELETE /api/events/[id]` | **Hard-removes** the event (events have **no soft-archive**). If it was linked, the link is dropped and the case logs `event_unlinked`; the case itself is untouched. → `{ ok: true, version }`. |
@@ -138,6 +138,11 @@ on every success body.
 alongside `case` / `messages` / `manualActions`, computed by filtering `db.events` for
 `e.caseId === id` (the link's single source of truth — there is no `eventIds[]` on the case to
 read). A leaf or a container alike sees the appointments tied to it.
+
+**Not every event is created by hand.** [Fitness](fitness.md) and [Nutrition & Chef](nutrition.md)
+both materialize their own plans onto `db.events` through a shared, reconciling
+**[placement engine](placement.md)** — the same events, the same overlap-safety, created via those
+add-ons' own push routes rather than the `POST` above.
 
 ## The calendar MCP — the agent verbs
 
@@ -150,7 +155,7 @@ stays honest.
 
 | verb | does |
 |---|---|
-| `create_event(title, date, [allDay], [startTime], [endTime], [description], [location], [caseId], [domain])` | `POST /api/events`. Mints an `EVT-` id; **prefer setting `caseId`** to roll the event up under a case. Unknown `caseId` → tool error (400). |
+| `create_event(title, date, [allDay], [startTime], [endTime], [place], [description], [location], [caseId], [domain])` | `POST /api/events`. Mints an `EVT-` id; **prefer setting `caseId`** to roll the event up under a case. Unknown `caseId` → tool error (400). `place` (durationMin + candidate windows, optional busyWindows / policy) replaces explicit times — the board picks the slot; a `no_free_slot` / `outside_working_hours` 409 surfaces as a tool error with the reason. |
 | `list_events([from], [to], [caseId], [domain])` | `GET /api/events`. One line per event (day · time-or-`all-day` · title · linked `caseId`), chronological. Read-only. |
 | `get_event(id)` | `GET /api/events/{id}`. Renders title, date, time (or **all-day**), description, location, domain, and the linked `caseId` (or that it's standalone). |
 | `update_event(id, …)` | `PATCH /api/events/{id}`. Pass only changed fields. `caseId` (re)links; **`caseId: null` unlinks**. |

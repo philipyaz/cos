@@ -6,13 +6,13 @@ description: >
   output. It SETS / UPDATES / READS the one profile per board via the `fitness` MCP's
   `get_athlete_profile` / `set_athlete_profile` tools: the training-focus goal + goal date,
   weekly availability (days/week, max session minutes), the sports trained, and the equipment on
-  hand. It maps free-text ("I have a bike and a pool", "5 days a week, 90 min max") onto the
-  English `VALID_ATHLETE_*` vocabularies and validates before writing. Training STATUS, your
+  hand. It maps free-text ("5 days a week, 90 min max") onto the English `VALID_ATHLETE_*`
+  vocabularies and validates before writing. Training STATUS,
   WEIGHT, and your BODY goal (fat loss / muscle / recomp) are NOT here — those live in the body
   add-on (the `body-profile` skill / the `body` MCP). Use when the user says "set my athlete
-  profile", "I'm training for a triathlon", "I can train 4 days a week", "I have a kettlebell / a
-  treadmill / pool access", "what's my training profile", or otherwise asks to define what they're
-  TRAINING for and with. Not medical advice.
+  profile", "I'm training for a triathlon", "I can train 4 days a week", "I have a kettlebell /
+  pool access", "what's my training profile", or otherwise asks to define what they're TRAINING
+  for and with. Not medical advice.
 ---
 
 # Fitness — athlete profile (the coach's training-focus source of truth)

@@ -22,9 +22,10 @@ HTTP, and the MCP tools exist for exactly this.
 The skill **does not send or draft email**. The only thing it ever writes back to
 Gmail is the **`cos/processed`** watermark label. And it owns the *board* side only:
 the *knowledge* in an email — a fact, a decision, new context about the sender — is
-handed to **`/second-brain-ingest`**, which re-synthesizes the vault. This skill
-reconciles cases; the router synthesizes knowledge. (The vault is knowledge-only:
-never write task checkboxes into wiki pages — open work lives on the board.)
+submitted to the vault through the `vault` MCP's async `ingest`, driven per
+**`/vault-operations`**; the vault synthesizes knowledge, this skill reconciles cases.
+(The vault is knowledge-only: never write task checkboxes into wiki pages — open work
+lives on the board.)
 
 > **The headline guardrail.** The board is a *shared* surface — the human edits it by
 > hand in the UI, the agent edits it through this skill. An email can make the agent
@@ -56,9 +57,10 @@ key is missing). It decides whether this sweep may write on its own:
   and ask for changes after the fact.
 - **`autoSync: false` (approval mode)** — *prepare* the reconciliation and show it, but
   confirm before any board mutation or label write (creating a case, moving a lane,
-  closing a task, linking a message, applying `cos/processed`). Use **`propose`** for
-  changes that should have the human in the loop. Read-only context-gathering —
-  `get_case`, board `search`, Gmail `get_thread`, `list_labels` — needs no confirmation.
+  closing a task, linking a message, recording a drop, applying `cos/processed`). Use
+  **`propose`** for changes that should have the human in the loop. Read-only
+  context-gathering — `get_case`, board `search`, Gmail `get_thread`, `list_labels` —
+  needs no confirmation.
 
 State which mode you're in once, at the start of the run.
 
@@ -272,24 +274,45 @@ Attach the email with `source: "gmail"`, the sender in `from`, the `subject`, a 
 analysis, multiple steps, or ongoing tracking (a client onboarding, a negotiation, a project). A
 **reminder** is a *commitment you own* — one concrete action, in your court, with a real consequence
 if you miss it. It is *not* a dumping ground for "a minor notice": before you `create_reminder`, the
-matter has to pass all five tests. Fail any one and it isn't a reminder — **drop it** (label the
-thread `cos/processed`, nothing on the board):
+matter has to pass all five tests. Fail any one and it isn't a reminder — **drop it: record the
+decision, then label the thread.** `record_triage_decision({ sender, source: "gmail", reason })` —
+`reason` is the FIRST of the five tests below that failed — **then** `cos/processed`. **If the record
+call fails, do NOT watermark**: an unwatermarked thread simply re-enters the next sweep, while
+watermarking with no receipt is the silent-loss bug this record exists to close (this rule applies in
+both auto and approval mode — see Step 0's note below and the drop row in the table further down):
 
 1. **Commitment, not notification.** You decided to do it, or you owe someone — not an alert a system
    pushed. Job alerts, marketplace listings, *"terms updated"*, *"new sign-in"*, *"disk full"* are
-   noise → drop. A notice with a real obligation (*"payment failed"*) keeps the *commitment*
-   (*"update the card before it lapses"*), never the alert.
-2. **Ball in your court.** Waiting on someone to reply or decide is a *watch, not a task* → drop (at
-   most an `add_note` on the case); it returns only as a *dated follow-up you own* (*"chase them if
-   no word by 15 Aug"*).
+   noise → drop (`reason: "notification"`). A notice with a real obligation (*"payment failed"*)
+   keeps the *commitment* (*"update the card before it lapses"*), never the alert.
+2. **Ball in your court.** Waiting on someone to reply or decide is a *watch, not a task* → drop
+   (`reason: "watch"`; at most an `add_note` on the case); it returns only as a *dated follow-up you
+   own* (*"chase them if no word by 15 Aug"*).
 3. **Real, dated consequence.** Miss it and money, a slot, or a legal/health deadline breaks. No
-   stakes and no deadline (*"free up storage"*) → drop. ("Dated" means a window that closes — it
-   needn't carry a `dueAt`.)
+   stakes and no deadline (*"free up storage"*) → drop (`reason: "no_stakes"`). ("Dated" means a
+   window that closes — it needn't carry a `dueAt`.)
 4. **Specific next action.** *"Update the payment method"*, *"confirm the passport arrived"*, *"renew
    the domain before it lapses"* — not *"review / monitor / be aware of / decide whether to"*, which
-   are open loops that never close → drop.
+   are open loops that never close → drop (`reason: "open_loop"`).
 5. **Ties to a person, money, or a priority you care about.** Discretionary wants (a record, show
-   tickets) and courtesy nice-to-haves (a guest review) → drop.
+   tickets) and courtesy nice-to-haves (a guest review) → drop (`reason: "want_courtesy"`).
+
+**Before dropping, consult the decision list — a reversed sender is never dropped.** Fetch it
+**once per run**, at the first drop you consider, and reuse it for the rest of the run:
+`list_triage_decisions({ source: "gmail" })`. Then:
+
+- A sender with **any** `reversed` decision — for **any** reason — is **never dropped**: the human
+  said keep. The five tests still run on every thread, and a thread that PASSES reconciles normally
+  (a genuine obligation from a noisy sender must still surface — this is the issue's own argument
+  against blocking the sender). When the tests FAIL for a reversed sender, do **not** drop and do
+  **not** call `record_triage_decision` (the board would refuse it with `sender-reversed` anyway —
+  if you ever see that refusal, your fetched list is stale): instead surface the thread in the run
+  report under *"kept (per your instruction)"* (Step 10), reconcile additively where a case matches
+  (`add_note` / `link_message`), then watermark.
+- A sender with an **active** decision for the failing reason is *precedent*: cite it, drop with the
+  same reason, and the row's `count` bumps — you are not re-litigating a settled sender.
+- A sender with **no** record at all gets the full five-test judgment, exactly as today — absence
+  never implies keep OR drop.
 
 Two more things that look like reminders but aren't: something that needs only your *reply* belongs
 to `/unanswered-messages`; *context for a live matter* (*"IMRO sent the dossier"*) is an `add_note`
@@ -308,10 +331,14 @@ Then map the thread's current head to board ops:
 | **New matter (no case)** | `create_case` with `domain`, `status`, `summary` (name the resolved entity), seed `tasks`, `labels`, and `vaultLinks`. |
 | **Meeting invite / calendar event in the email** | Extract `title` / `date` / `startTime`–`endTime`; **search the board** for the matching case; `create_event` (via the **`calendar`** MCP) with `caseId` set when a case exists, else standalone (link it retroactively once it seeds a case); `link_message` the originating email (pass `url` here too). |
 | **Email is a commitment you own** (passes the five tests — a specific action, in your court, with a real consequence) | `create_reminder` (via **`board`**) with `title*`, optional `dueAt`, optional catalog `labels` (`list_labels` first), and an optional short `tasks` checklist; **search the board** for the matching case / initiative and set `caseId` (or `link_reminder`), else standalone; then attach the email to the reminder with `link_reminder_message` (not `link_message`; pass `url`, and for sent mail `outbound: true` + `to`/`cc` — a reminder auto-derives trust just like a case). Many emails about one matter → one reminder. |
-| **Email is a notification / watch / want** (fails the five tests — a job alert, a marketplace listing, "terms updated", a machine alert; "waiting on their reply"; a discretionary want) | **No reminder — drop.** Label the thread `cos/processed` and move on. If it's context for a live case, `add_note` it there; if it needs only your reply, that's `/unanswered-messages`' job — never mint a standalone reminder for it. |
+| **Email is a notification / watch / want** (fails the five tests — a job alert, a marketplace listing, "terms updated", a machine alert; "waiting on their reply"; a discretionary want) | **No reminder — record the drop, then drop.** `record_triage_decision({sender, source:"gmail", reason})` (a `sender-reversed` refusal = the human keeps this sender: report + additive reconcile instead — see above), then label the thread `cos/processed` and move on. If it's context for a live case, `add_note` it there; if it needs only your reply, that's `/unanswered-messages`' job — never mint a standalone reminder for it. |
 
 In approval mode (Step 0), prepare these calls and confirm — or `propose` — before any case
-create, lane move, task close, or message link.
+create, lane move, task close, message link, or drop: the drop list (sender, reason, and the
+`record_triage_decision` call) is part of the batch shown for confirmation, and on approval the
+record lands **before** the `cos/processed` watermark — the same order as auto mode. In neither mode
+may a thread be watermarked with no decision record (the quarantined / blocked-sender drops in Step
+2 are the one exception — they keep their own guard trail and never write a triage decision).
 
 > The full catalog of what you can do to a case — every lane value, field, and `board` tool, with
 > when to reach for each — lives in [`references/case-management.md`](references/case-management.md).
@@ -321,10 +348,12 @@ create, lane move, task close, or message link.
 ## Step 8 — Watermark and idempotency
 
 **Watermark last.** Apply **`cos/processed`** to the thread (Gmail **`label_thread`**) only *after*
-the board write lands. A thread already labelled never re-enters the scan. A *dropped* email
-(quarantined or blocked-sender, Step 2) has no board write to wait on — the guard already recorded
-it, so just watermark and move on; re-admission is the released queue's job (Step 3), independent of
-this watermark.
+the board write lands. A thread already labelled never re-enters the scan. An **editorial** drop
+(the five-test gate, Step 7) has a board write to wait on too — its `record_triage_decision` call
+*is* the decision record — so the same rule applies: record, THEN watermark; if the record call
+fails, do not watermark. A **quarantined or blocked-sender** drop (Step 2) is the one kind with no
+board write to wait on — the guard already recorded it, so just watermark and move on; re-admission
+is the released queue's job (Step 3), independent of this watermark.
 
 **Convergent by design.** Each action sets the case to the state the thread's *current head*
 implies, so re-runs converge and never thrash: a new inbound message re-surfaces the thread, and
@@ -336,20 +365,38 @@ finds nothing new simply no-ops.
 ## Step 9 — Entity resolution (brief)
 
 Resolve the sender's email address to *one canonical vault entity* — heuristic first (name, known
-email, existing wiki entity pages), then the vault **alias map** (`wiki/entities/Aliases.md` if
-present) for nicknames / secondary emails the heuristic can't catch. The resolved entity is a
+email, existing wiki entity pages), then the vault **alias map** (**`aliases.md`** at the vault
+root) for nicknames / secondary emails the heuristic can't catch. The resolved entity is a
 `vaultLinks` target, so a sender's address, a spoken name, and a board entity all collapse to the
-same page. Hand the *knowledge* in the email to **`/second-brain-ingest`** for the vault
-re-synthesis; this skill owns the board reconciliation.
+same page.
+
+At the end of the sweep, compose **one consolidated knowledge payload** for the run — the facts,
+decisions, and new sender-context worth keeping, with resolved entity names and the ids of the
+cases the payload actually carries knowledge about — and submit it to the vault MCP:
+`ingest({ content, cases })` (omit `domain`; the vault classifies each input from its content). A
+case only lane-moved, watermarked, or task-ticked this run — with nothing about it in the payload —
+stays OUT of `cases`: `/vault-operations` stamps a receipt on every id in `cases` once the ingest
+completes, so over-including one here marks it "covered" when the vault heard nothing about it.
+Drive the job to a terminal state per
+**`/vault-operations`** — don't restate the poll loop here, the skill name is the delegation. One
+job per run, not per thread: N jobs would mint N poll loops and N vault sessions for no benefit. If
+the run surfaced nothing worth keeping, skip the submission and say so in the report. In approval
+mode (Step 0), the composed payload is shown for confirmation like any other write.
 
 ## Step 10 — Log and report
 
 When `autoSync` is **on**, append every board write to the matching domain log — `work/log.md` or
-`life/log.md` (the same shape `/second-brain-ingest` uses):
+`life/log.md` (the same shape the vault's domain log uses):
 
     ## [YYYY-MM-DD] route | <thread one-liner>
     Board: updated CASE-12 (→ waiting_for_input, work) for [[Marco Rivera]] · completed T2 · linked M-9.
     Manual actions: respected human lane (waiting_for_input); flagged 1 apparent reopen as a note.
+    Watermark: thread labelled cos/processed.
+
+A dropped thread logs its receipt the same way — the record write IS the board write:
+
+    ## [YYYY-MM-DD] route | <thread one-liner>
+    Filtered: recorded drop (<sender>, reason:<reason>) — <TD-id> count <n>.
     Watermark: thread labelled cos/processed.
 
 In **approval mode**, log only what the user approved and committed.
@@ -362,14 +409,32 @@ Then report, per thread:
 - **Watermarks advanced** — which threads are now `cos/processed`.
 - The **board URL** for anything actionable: `<BOARD_URL>/my-issues`.
 
+And once, for the run:
+- **Vault ingest** — the job's terminal status (`completed` / `failed` / `interrupted` /
+  `cancelled`) and what landed, or "no knowledge worth ingesting this run".
+- **Vault coverage backlog** — once the vault job settles, call the `board` MCP's
+  `get_vault_coverage` and report the count as *"N matters the vault has not been told about"* (one
+  clean line at zero). Key the escalation on **growth**, not an absolute number: if this run's N is
+  higher than the last reported count (check the domain log's last "matters the vault has not been
+  told about" line), lead the WHOLE report with it (⚠) instead of burying it — a climbing number
+  means capture is losing ground. A large-but-shrinking N is the standing backlog draining, and
+  stays in the ordinary line.
+- **Filtered mail** — from this run's `list_triage_decisions({source:"gmail"})` summary: *"Filtered:
+  `dropped`:`promoted` (dropped:promoted) so far; +N drops this run."* When a reversed sender's mail
+  was surfaced instead of dropped (the reversed-sender rule, Step 7), add one line per sender: *"Kept
+  (per your instruction): `<sender>` — reversed, mail surfaced this run."*
+
 ---
 
 ## What's next
 
 After a sweep, the user can:
-- **Ask "what's open / what am I waiting on"** → `/second-brain-query` (answers from the board by
-  domain and lane).
-- **Process the knowledge too** — `/second-brain-ingest` re-synthesizes the vault for the senders /
-  topics this sweep touched and writes the `vaultLinks` ↔ `cases:` cross-links.
+- **Ask "what's open / what am I waiting on"** → the **board** (board MCP `search`, or the board
+  UI) — open-work questions live there, not in the vault.
+- **Ask "what do I know about this person / company / matter"** → the vault MCP's **`query`**
+  (synchronous — see **`/vault-operations`**).
 - **Re-run the sweep** — it's idempotent, so extra cycles that find nothing new simply no-op (or let
   the next scheduled run hand it the next batch).
+
+The run's knowledge is already in flight (Step 9) — the report (Step 10) carries the ingest job's
+status and the vault coverage backlog.

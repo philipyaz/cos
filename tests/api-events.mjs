@@ -13,6 +13,16 @@
 //   • validation                   → bad caseId / missing title / bad date / bad
 //                                   HH:MM startTime all 400 (with the right field)
 //   • DELETE                       → 200; the id no longer appears in GET /api/events
+//   • place (cos-ops#24)           → the engine-backed placement mode: earliest free
+//                                   gap, overlap-safe against a seeded event AND a
+//                                   just-placed one in the same run; 409 no_free_slot
+//                                   on a fully-busy window; policy:"within" 409s a
+//                                   non-working day (outside_working_hours); busyWindows
+//                                   is honoured but NEVER persisted (quote-bound sentinel
+//                                   check); explicit-times-vs-place and durationMin/
+//                                   window-shape 400s. Every assertion runs against a day
+//                                   PROVEN clean first (GET'd empty), never a hardcoded
+//                                   date — the live store is not empty.
 //
 // It snapshots board/data/cases.json first and restores it in a `finally`, so the
 // live board is left EXACTLY as found (net-zero) — db.events lives in cases.json
@@ -225,6 +235,171 @@ async function main() {
     check(!afterDel.has(evtId), "deleted event drops from GET /api/events");
     const goneDetail = await GET(`/api/events/${encodeURIComponent(evtId)}`);
     check(goneDetail.status === 404, `GET the deleted event → 404 (got ${goneDetail.status})`);
+
+    // ----------------------------------------------------------------------
+    // place (cos-ops#24) — the engine-backed placement mode. `place` replaces
+    // startTime/endTime with { durationMin, windows, busyWindows?, policy? } and lets
+    // the board find the earliest free gap. The live store is not empty, so every
+    // assertion below runs against a day PROVEN clean first, never a hardcoded date.
+    // ----------------------------------------------------------------------
+    const isWeekend = (dayISO) => {
+      const [y, mo, d] = dayISO.split("-").map(Number);
+      const dow = new Date(Date.UTC(y, mo - 1, d)).getUTCDay(); // 0=Sun..6=Sat
+      return dow === 0 || dow === 6;
+    };
+    const isoWeekday = (dayISO) => {
+      const [y, mo, d] = dayISO.split("-").map(Number);
+      const dow = new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
+      return dow === 0 ? 7 : dow; // Mon=1..Sun=7
+    };
+    const addDaysISO = (dayISO, n) => {
+      const [y, mo, d] = dayISO.split("-").map(Number);
+      return new Date(Date.UTC(y, mo - 1, d + n)).toISOString().slice(0, 10);
+    };
+    async function findCleanWeekday(startDay) {
+      let day = startDay;
+      for (let i = 0; i < 60; i++) {
+        if (!isWeekend(day)) {
+          const win = await GET(`/api/events?from=${day}&to=${addDaysISO(day, 1)}`);
+          if ((win.body.events || []).length === 0) return day;
+        }
+        day = addDaysISO(day, 1);
+      }
+      throw new Error(`Could not find a clean weekday within 60 days of ${startDay}.`);
+    }
+
+    const todayDay = new Date().toISOString().slice(0, 10);
+    const cleanDay = await findCleanWeekday(addDaysISO(todayDay, 300));
+    // The enclosing week's Saturday — a non-working day under DEFAULT_WORKING_HOURS,
+    // regardless of whether it happens to carry other events (policy:"within" refuses
+    // it outright, before any free-gap search).
+    const saturday = addDaysISO(cleanDay, 6 - isoWeekday(cleanDay));
+
+    // -- 2. Placed create: earliest gap, overlap-safe against a seeded event AND a
+    // just-placed one in the SAME call sequence. --------------------------------
+    const seeded = await POST("/api/events", {
+      title: `place-seed ${marker}`,
+      date: cleanDay,
+      allDay: false,
+      startTime: "10:00",
+      endTime: "11:00",
+    });
+    check(seeded.status === 201, `place: seed an explicit 10:00-11:00 event → 201 (got ${seeded.status})`);
+    const seededEvtId = seeded.body.event?.id;
+
+    const placed1 = await POST("/api/events", {
+      title: `place-1 ${marker}`,
+      date: cleanDay,
+      place: { durationMin: 60, windows: [{ start: "09:00", end: "12:00" }] },
+    });
+    check(placed1.status === 201, `place: first create → 201 (got ${placed1.status})`);
+    check(
+      placed1.body.event?.startTime === "09:00" && placed1.body.event?.endTime === "10:00",
+      `place: lands in the earliest free gap, 09:00-10:00 (got ${placed1.body.event?.startTime}-${placed1.body.event?.endTime})`,
+    );
+    check(placed1.body.event?.allDay === false, "place: the placed event has allDay:false");
+    const placed1EvtId = placed1.body.event?.id;
+
+    const placed2 = await POST("/api/events", {
+      title: `place-2 ${marker}`,
+      date: cleanDay,
+      place: { durationMin: 60, windows: [{ start: "09:00", end: "12:00" }] },
+    });
+    check(placed2.status === 201, `place: a second identical create → 201 (got ${placed2.status})`);
+    check(
+      placed2.body.event?.startTime === "11:00" && placed2.body.event?.endTime === "12:00",
+      `place: overlap-safe against BOTH the seeded and the just-placed event, lands 11:00-12:00 (got ${placed2.body.event?.startTime}-${placed2.body.event?.endTime})`,
+    );
+    const placed2EvtId = placed2.body.event?.id;
+
+    // -- 3. 409 no_free_slot: a window that is entirely busy skips, nothing is created. --
+    const full = await POST("/api/events", {
+      title: `place-full ${marker}`,
+      date: cleanDay,
+      place: { durationMin: 60, windows: [{ start: "10:00", end: "11:00" }] },
+    });
+    check(full.status === 409, `place: a fully-busy window → 409 (got ${full.status})`);
+    check(full.body.reason === "no_free_slot", `place: reason is "no_free_slot" (got ${full.body.reason})`);
+    const afterFull = await GET(`/api/events?from=${cleanDay}&to=${addDaysISO(cleanDay, 1)}`);
+    check(
+      (afterFull.body.events || []).length === 3,
+      `place: the 409 created nothing — still exactly 3 events that day (got ${(afterFull.body.events || []).length})`,
+    );
+
+    // -- 4. `within` refuses a non-working day outright (live settings.workingHours is
+    // absent, so the engine default Mon-Fri applies — assert on the reason, not hours). --
+    const satPlace = await POST("/api/events", {
+      title: `place-saturday ${marker}`,
+      date: saturday,
+      place: { durationMin: 60, windows: [{ start: "09:00", end: "17:00" }], policy: "within" },
+    });
+    check(satPlace.status === 409, `place: policy "within" on a Saturday → 409 (got ${satPlace.status})`);
+    check(
+      satPlace.body.reason === "outside_working_hours",
+      `place: reason is "outside_working_hours" (got ${satPlace.body.reason})`,
+    );
+
+    // -- 5. busyWindows honoured and NEVER persisted (a fresh clean day, so the only
+    // busy time in play is the one this call supplies). ---------------------------
+    const cleanDay2 = await findCleanWeekday(addDaysISO(cleanDay, 1));
+    const busyPlaced = await POST("/api/events", {
+      title: `place-busywindows ${marker}`,
+      date: cleanDay2,
+      place: {
+        durationMin: 60,
+        windows: [{ start: "09:00", end: "12:00" }],
+        busyWindows: [{ date: cleanDay2, start: "07:53", end: "10:30" }],
+      },
+    });
+    check(busyPlaced.status === 201, `place: busyWindows create → 201 (got ${busyPlaced.status})`);
+    check(
+      busyPlaced.body.event?.startTime === "10:30",
+      `place: the busy window pushes placement past it, to 10:30 (got ${busyPlaced.body.event?.startTime})`,
+    );
+    const busyPlacedEvtId = busyPlaced.body.event?.id;
+
+    // Quote-bound sentinel (ADR 0021 / cos#81's trap): a bare 07:53 collides with any
+    // ISO timestamp minted during this run (e.g. "...T07:53:12.345Z"); '"07:53"' matches
+    // only a complete JSON string value, so it proves the busy INPUT was never written.
+    const rawStore = await fs.readFile(DATA_FILE, "utf8");
+    check(rawStore.includes('"10:30"'), "place: the placed 10:30 startTime IS persisted");
+    check(!rawStore.includes('"07:53"'), "place: the busyWindows input is NEVER persisted anywhere in the store");
+
+    // -- 6. Validation 400s. -------------------------------------------------------
+    const placeAndStart = await POST("/api/events", {
+      title: `place-and-start ${marker}`,
+      date: cleanDay2,
+      startTime: "09:00",
+      place: { durationMin: 60, windows: [{ start: "09:00", end: "12:00" }] },
+    });
+    check(placeAndStart.status === 400, `place: explicit startTime + place → 400 (got ${placeAndStart.status})`);
+
+    const placeAndAllDay = await POST("/api/events", {
+      title: `place-and-allday ${marker}`,
+      date: cleanDay2,
+      allDay: true,
+      place: { durationMin: 60, windows: [{ start: "09:00", end: "12:00" }] },
+    });
+    check(placeAndAllDay.status === 400, `place: allDay:true + place → 400 (got ${placeAndAllDay.status})`);
+
+    const badDuration = await POST("/api/events", {
+      title: `place-bad-duration ${marker}`,
+      date: cleanDay2,
+      place: { durationMin: 10, windows: [{ start: "09:00", end: "12:00" }] },
+    });
+    check(badDuration.status === 400, `place: durationMin outside [15,240] → 400 (got ${badDuration.status})`);
+
+    const badWindow = await POST("/api/events", {
+      title: `place-bad-window ${marker}`,
+      date: cleanDay2,
+      place: { durationMin: 60, windows: [{ start: "12:00", end: "09:00" }] },
+    });
+    check(badWindow.status === 400, `place: window start >= end → 400 (got ${badWindow.status})`);
+
+    // Cleanup: the snapshot restore below backstops regardless, but tidy exit is cheap.
+    for (const id of [seededEvtId, placed1EvtId, placed2EvtId, busyPlacedEvtId].filter(Boolean)) {
+      await DELETE(`/api/events/${encodeURIComponent(id)}`);
+    }
   } finally {
     // Restore — leave the live board exactly as found (net-zero).
     await fs.writeFile(DATA_FILE, snapshot, "utf8");
@@ -235,7 +410,10 @@ async function main() {
     console.error(`\nFAIL — ${failures} calendar-event check(s) failed.`);
     process.exit(1);
   }
-  console.log("\nPASS — v4 calendar-events API holds (create/list/filter/patch/link/validate/delete).");
+  console.log(
+    "\nPASS — v4 calendar-events API holds (create/list/filter/patch/link/validate/delete, " +
+      "place: earliest-gap/overlap/409-reasons/busyWindows-not-persisted/validation).",
+  );
 }
 
 main().catch((e) => {

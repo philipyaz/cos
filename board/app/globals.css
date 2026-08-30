@@ -49,3 +49,53 @@ body {
 .board-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ── Mobile viewport (iOS Safari) ────────────────────────────────────────────
+   THE one sanctioned static-viewport height in board/ — every full-height
+   element uses this class. The static unit ships first as a pre-dvh
+   fallback, with the dynamic unit overriding where supported: it tracks the
+   REAL visible height as the Safari toolbars expand/collapse, which the
+   static unit does not (it assumes them retracted). tests/viewport-lint.mjs
+   bans the raw static unit everywhere else.
+   These are plain global classes, not Tailwind utilities — variant prefixes
+   (`md:pb-safe`, `sm:h-dvh-fallback`) would silently do nothing; anyone
+   needing a variant must extend this block, not prefix the class. */
+.h-dvh-fallback {
+  height: 100vh; /* viewport-lint-allow */
+  height: 100dvh;
+}
+/* Reserve the iOS home-indicator strip (0px elsewhere). Padding form for
+   in-flow footers/scroll bodies; margin form for fixed bottom-anchored chrome
+   (margin composes with the existing bottom-* offset without inflating the
+   element's own box). */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* How much fixed bottom-anchored chrome must clear: the safe-area inset alone,
+   plus the h-14 mobile tab bar below md (mobile-nav.tsx renders it only there).
+   The 3.5rem here and the h-14 there name each other — change both or neither. */
+:root {
+  --bottom-chrome-clear: env(safe-area-inset-bottom, 0px);
+}
+@media (max-width: 767.98px) {
+  :root {
+    --bottom-chrome-clear: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.mb-safe {
+  margin-bottom: var(--bottom-chrome-clear);
+}
+
+/* Clearance for the fixed mobile tab bar on in-flow content. Explicitly 0 at
+   md+ — the bar doesn't exist there, and <main> shouldn't reserve the bare
+   inset either (the shell already sizes to dvh). */
+.pb-tabbar {
+  padding-bottom: var(--bottom-chrome-clear);
+}
+@media (min-width: 768px) {
+  .pb-tabbar {
+    padding-bottom: 0;
+  }
+}

@@ -11,6 +11,12 @@ export const REMINDER_STATUS = ["open", "done", "dismissed"];
 export const CASE_DOMAIN = ["work", "life"];
 export const MESSAGE_SOURCE = ["gmail", "whatsapp", "jira", "agent", "client", "system"];
 export const PRIORITY = ["P0", "P1", "P2", "P3"];
+// Which of mail-to-board's five reminder tests a dropped thread failed (in lockstep with
+// VALID_TRIAGE_DROP_REASON in board/lib/types.ts).
+export const TRIAGE_DROP_REASON = ["notification", "watch", "no_stakes", "open_loop", "want_courtesy"];
+// A triage decision row's lifecycle (in lockstep with VALID_TRIAGE_DECISION_STATUS) — distinct from
+// the `resolution` verb ("confirm"/"reverse") a human answers the digest with.
+export const TRIAGE_DECISION_STATUS = ["active", "reversed"];
 // The three hierarchy tiers (in lockstep with VALID_CASE_KIND in board/lib/types.ts).
 // All three are CaseRecords; `kind` absent === "case" (a leaf).
 export const CASE_KIND = ["initiative", "workstream", "case"];
@@ -387,6 +393,31 @@ const LIST_INITIATIVES_TOOL = {
   },
 };
 
+// The board's own attention read (ADR 0017's compute-on-read family; cos-ops#20 named the
+// vocabulary — see board/lib/staleness.ts). Naming the selector in the description below is what
+// makes this tool the real `mcp/` call site for `needsAttention`, not just a comment referencing it.
+const GET_NEEDS_ATTENTION_TOOL = {
+  name: "get_needs_attention",
+  description:
+    "Read the board's own \"what needs attention\" report. Leads with `starving` — a single " +
+    "ranked worst-first list across cases, open reminders, and unanswered messages whose rank " +
+    "RISES with days idle (×1), days overdue (×2), and a passed-unactioned linked timed block (×3 — " +
+    "ANY past linked timed event the case was not touched after; the board cannot tell a chase block " +
+    "from a meeting the human linked); an " +
+    "obligation with a linked TIMED event in the next 7 days is excluded as already-allocated " +
+    "(all-day events never count — they're deadline markers). Use it as the entry point of the " +
+    "weekly staleness lens (board-organize) and any \"what is Philip forgetting that has teeth\" " +
+    "read. Then four buckets computed live off the `needsAttention` selector: overdue (past due, " +
+    "not done), agingWaiting (waiting_for_input idle > 3 days), untriaged (todo lane, no tasks, no " +
+    "priority — raw intake; it enters `starving` only once idle for a day), unlinked (no vaultLinks, not done). Buckets OVERLAP (a case can be " +
+    "both overdue and unlinked) — do not sum them into a distinct-case count; use the response's " +
+    "own `counts.total` (the starving rank overlaps the buckets too and is never folded into it). " +
+    "Call this FIRST in any \"where is Philip at / what needs a nudge\" sweep — the reconciliation " +
+    "entry point that lets an agent detect drift without waiting on his prompt. " +
+    "`GET /api/cases/needs-attention`.",
+  inputSchema: { type: "object", properties: {} },
+};
+
 const ADD_TASK_TOOL = {
   name: "add_task",
   description:
@@ -656,6 +687,150 @@ const LIST_UNANSWERED_MESSAGES_TOOL = {
         description: "OPTIONAL max number of messages to show (applied when summarizing; defaults to all).",
       },
     },
+  },
+};
+
+// ── Vault coverage (2) ───────────────────────────────────────────────────────
+// The receipt half of the vault<->board bridge: get_vault_coverage READS "what has
+// the vault never been told about" (cases carrying vaultLinks with no/stale
+// vaultIngestedAt receipt — the complement of needsAttention's `unlinked` bucket);
+// mark_vault_ingested WRITES the receipt. Both are core (no add-on gate) since
+// vaultLinks is core case state. See board/.claude/skills/vault-operations/SKILL.md
+// for when to call mark_vault_ingested in the ingest lifecycle.
+
+const GET_VAULT_COVERAGE_TOOL = {
+  name: "get_vault_coverage",
+  description:
+    "List every case the vault has NOT been told about — cases carrying `vaultLinks` whose ingest " +
+    "receipt is absent (never ingested) or older than their last update (stale). The backlog number " +
+    "for a sweep's run report; 0 means capture is healthy. Use at the end of a capture sweep, or " +
+    "whenever asked whether the second brain is actually being fed. `GET /api/cases/vault-coverage`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      includeArchived: {
+        type: "boolean",
+        description: "OPTIONAL — include archived cases in the gap set. Defaults false.",
+      },
+    },
+  },
+};
+
+const MARK_VAULT_INGESTED_TOOL = {
+  name: "mark_vault_ingested",
+  description:
+    "Stamp the vault-ingest RECEIPT (`vaultIngestedAt`) on the given cases. Call ONLY after the vault " +
+    "MCP's `ingest_status` reports `completed` for an ingest that named these cases — the receipt " +
+    "means the knowledge LANDED, never that it was attempted; an in-flight, failed, or interrupted " +
+    "job must leave it unset. The board stamps the time server-side. Unknown ids are skipped and " +
+    "reported back. `POST /api/cases/vault-receipt`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      ids: {
+        type: "array",
+        items: { type: "string" },
+        description: "Case ids the completed ingest named, e.g. ['CASE-1','CASE-4'].",
+      },
+    },
+    required: ["ids"],
+  },
+};
+
+// ── Triage decisions (3) ─────────────────────────────────────────────────────
+// The mail-triage editorial-drop decision record (board/lib/triage-decisions.ts): a per-(sender,
+// source, reason) FACT ("this sender's mail was judged noise"), deliberately NOT a log of dropped
+// emails. record_triage_decision WRITES the receipt mail-to-board's five-test gate leaves the
+// moment it drops a thread; list_triage_decisions READS the computed dropped:promoted ratio + the
+// first-time-dropped senders /reminders-review's digest reviews; resolve_triage_decision WRITES
+// the human's keep-or-confirm answer. Core (no add-on gate) — mail triage is not an add-on.
+
+const RECORD_TRIAGE_DECISION_TOOL = {
+  name: "record_triage_decision",
+  description:
+    "Record ONE editorial drop for a sender — call this the moment mail-to-board's five-test gate " +
+    "fails a thread, BEFORE labeling the thread `cos/processed`. If this call fails, do NOT " +
+    "watermark the thread — it must re-enter the next sweep rather than vanish with no receipt. " +
+    "Upserts by (sender, source, reason): a repeat drop from the same sender for the same reason " +
+    "bumps a `count` on the existing row rather than adding a new one. A `sender-reversed` refusal " +
+    "(HTTP 403) means the human REVERSED this sender via the review digest — never drop their mail; " +
+    "surface the thread in the run report instead (do not retry, do not watermark). `reason` is " +
+    "which of the five reminder tests the thread failed (the FIRST one that failed): 'notification' " +
+    "(an FYI, nothing to do), 'watch' (track only, no action owed), 'no_stakes' (no real consequence " +
+    "if ignored), 'open_loop' (no specific next action), 'want_courtesy' (a nice-to-have, not a " +
+    "commitment). `source` is 'gmail' today — the only sweep that calls this; 'whatsapp' is a named " +
+    "follow-on once whatsapp-triage records drops the same way. The full MessageSource union is " +
+    "accepted but nothing reads the other values yet. `POST /api/triage-decisions`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      sender: {
+        type: "string",
+        description:
+          "The raw Gmail 'from' header value, e.g. 'Newsletter <news@example.com>' or a bare " +
+          "address — the board normalizes it (extracts the address, lowercases).",
+      },
+      source: { type: "string", enum: MESSAGE_SOURCE, description: "Where the drop happened. 'gmail' today." },
+      reason: {
+        type: "string",
+        enum: TRIAGE_DROP_REASON,
+        description: "Which of the five reminder tests the thread failed (the first one that failed).",
+      },
+    },
+    required: ["sender", "source", "reason"],
+  },
+};
+
+const LIST_TRIAGE_DECISIONS_TOOL = {
+  name: "list_triage_decisions",
+  description:
+    "Read the mail-triage decision record: the dropped:promoted ratio, how many distinct senders " +
+    "have been filtered, and — the review payload — every FIRST-TIME sender (dropped at least once, " +
+    "never yet confirmed or reversed by a human), each with its reasons+counts and the TD ids to " +
+    "resolve. `source` is REQUIRED here (unlike the raw HTTP GET, which allows an unscoped read for " +
+    "generality) — an unscoped read would divide gmail-only drops by an all-source message count, a " +
+    "misleading ratio; always pass 'gmail' today. `status` optionally narrows the raw `decisions` " +
+    "list to 'active' or 'reversed' rows (the computed summary always spans both — history doesn't " +
+    "un-happen). Call this once per /reminders-review digest run, and once per mail-to-board sweep " +
+    "(fetch it before the first drop you consider, and reuse it for the rest of the run) to know " +
+    "which senders are reversed before dropping. `GET /api/triage-decisions`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      source: { type: "string", enum: MESSAGE_SOURCE, description: "REQUIRED — which source to report on. 'gmail' today." },
+      status: {
+        type: "string",
+        enum: TRIAGE_DECISION_STATUS,
+        description: "OPTIONAL — narrow the raw row list to 'active' or 'reversed'. The summary always spans both.",
+      },
+    },
+    required: ["source"],
+  },
+};
+
+const RESOLVE_TRIAGE_DECISION_TOOL = {
+  name: "resolve_triage_decision",
+  description:
+    "Answer a first-time sender from the /reminders-review digest. `confirm` = keep filtering — the " +
+    "sender leaves the first-time set and the sweep keeps dropping its mail as before. `reverse` = " +
+    "the human said KEEP — the sweep's next drop attempt for this sender is REFUSED " +
+    "(sender-reversed); surface their mail going forward instead. NEVER mirror a reversal into the " +
+    "guard's sender-trust store (block_sender/trust_sender) — this is an editorial verdict about " +
+    "noise, not a security one. When a sender was dropped for more than one reason, resolve EVERY " +
+    "one of its TD ids the same way (list_triage_decisions' firstTime[].ids) — a sender-scoped " +
+    "answer, not a per-reason one. `PATCH /api/triage-decisions/{id}` → 404 on a stale id (re-run " +
+    "list_triage_decisions for live ids), 400 on a bad resolution.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "The TriageDecision id, e.g. 'TD-3' (from list_triage_decisions)." },
+      resolution: {
+        type: "string",
+        enum: ["confirm", "reverse"],
+        description: "'confirm' keeps filtering this sender; 'reverse' means keep — stop dropping their mail.",
+      },
+    },
+    required: ["id", "resolution"],
   },
 };
 
@@ -956,6 +1131,17 @@ const GET_PRIORITIES_TOOL = {
     "user's STARRED nodes — the cases / workstreams / initiatives they pinned as favorites — PLUS their " +
     "free-text PRIORITY NOTES (their own words for what matters right now). Read-only. Call this to " +
     "ground a sweep or a plan in the user's stated priorities before you act. `GET /api/priorities`.",
+  inputSchema: { type: "object", properties: {} },
+};
+
+const GET_DEVICE_STATUS_TOOL = {
+  name: "get_device_status",
+  description:
+    "Read this Cos deployment's MULTI-DEVICE status: which machine this board is (device id + role: " +
+    "hub or spoke), whether its code schema matches the store on disk (the drift handshake), who holds " +
+    "the HUB lease (the one machine allowed to produce backups), and which other devices' agents have " +
+    "recently talked to this board (ephemeral last-seen). Read-only. Use it to answer 'which machine am " +
+    "I on / is this the hub / who is the hub / is my code in sync'. `GET /api/devices`.",
   inputSchema: { type: "object", properties: {} },
 };
 
@@ -1260,6 +1446,7 @@ export const TOOLS = [
   LIST_LABEL_BUNDLES_TOOL,
   GET_TREE_TOOL,
   LIST_INITIATIVES_TOOL,
+  GET_NEEDS_ATTENTION_TOOL,
   // case lifecycle
   CREATE_CASE_TOOL,
   UPDATE_CASE_TOOL,
@@ -1287,6 +1474,13 @@ export const TOOLS = [
   MARK_MESSAGE_UNANSWERED_TOOL,
   MARK_MESSAGE_ANSWERED_TOOL,
   LIST_UNANSWERED_MESSAGES_TOOL,
+  // vault coverage (2)
+  GET_VAULT_COVERAGE_TOOL,
+  MARK_VAULT_INGESTED_TOOL,
+  // triage decisions (3)
+  RECORD_TRIAGE_DECISION_TOOL,
+  LIST_TRIAGE_DECISIONS_TOOL,
+  RESOLVE_TRIAGE_DECISION_TOOL,
   // reminders (8)
   CREATE_REMINDER_TOOL,
   LIST_REMINDERS_TOOL,
@@ -1296,6 +1490,8 @@ export const TOOLS = [
   DELETE_REMINDER_TOOL,
   LINK_REMINDER_TOOL,
   LINK_REMINDER_MESSAGE_TOOL,
+  // devices (multi-device status)
+  GET_DEVICE_STATUS_TOOL,
   // priorities (5)
   GET_PRIORITIES_TOOL,
   ADD_PRIORITY_TOOL,

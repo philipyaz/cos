@@ -39,6 +39,13 @@ flowchart TB
     board --- backup
 ```
 
+**Across devices,** this whole shape runs on one machine — the *hub*. To **view** the board from
+another device you need nothing on it: the hub runs `tailscale serve`, so any tailnet device opens
+the full read/write UI (portless HTTPS) in a browser. You add a **spoke** — thin local stdio MCP
+wrappers pointed at the hub — only to **drive** the board with Claude Code / Cowork *on* that second
+machine, since Cowork accepts only local stdio MCP servers, not a remote HTTP one. View it → browser;
+act on it with an agent → spoke. See [Multi-device (hub & spoke)](architecture/multi-device.md).
+
 ## The architecture spine
 
 Start with the Overview, then read down the spine. Each page is a self-contained deep-dive on one

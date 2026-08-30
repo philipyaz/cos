@@ -2,16 +2,16 @@
 name: body-profile
 description: >
   Manage the BODY add-on — the single owner of your body identity, your weight + body-composition
-  history, and your GOAL. It drives the `body` MCP: set/read your FREE-TEXT objective (describe what
-  you're after in your own words — fat loss, muscle gain, recomposition, maintenance — plus an optional
-  target weight) via set_body_objective / get_body_objective; set/read your identity (sex, date of
-  birth, height, training status, whether you lift) via set_body_profile / get_body_profile; log
+  history, and your GOAL. It drives the `body` MCP: set/read your FREE-TEXT objective (what you're
+  after in your own words — fat loss, muscle gain, recomposition — plus an optional target weight)
+  via set_body_objective / get_body_objective; set/read your identity (sex, date of birth, height,
+  training status, whether you lift) via set_body_profile / get_body_profile; log
   weigh-ins + body composition (weight, body-fat %, lean mass, waist) via log_weight / list_weights;
-  and read the deterministic physiology facts (age, BMR, maintenance TDEE, BMI, fat-free mass, trend)
-  via get_body_status. The goal is PROSE, not a pick-list. Use when the user says "set my goal", "I
-  want to build muscle / lose fat / recomp / maintain", "I'm 178 cm", "I was born in 1991", "log my
-  weight", "I'm 18% body fat", "my waist is 84 cm", "what's my BMR / maintenance / body status", or
-  otherwise asks to define their body goal, identity, or weight. Not medical advice.
+  and read the deterministic physiology facts (age, BMR, maintenance TDEE, BMI, trend) via
+  get_body_status. The goal is PROSE, not a pick-list. Use when the user says "set my goal", "I
+  want to build muscle / lose fat / recomp / maintain", "I'm 178 cm", "log my weight", "I'm 18%
+  body fat", "my waist is 84 cm", "what's my BMR / maintenance / body status", or otherwise asks
+  to define their body goal, identity, or weight. Not medical advice.
 ---
 
 # Body (the shared body space)

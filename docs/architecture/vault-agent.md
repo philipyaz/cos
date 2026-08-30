@@ -113,6 +113,12 @@ enforced at two levels:
   flags them, along with any legacy `priorities.md` or `reminders/` directory, as knowledge-only
   violations. `query` *declines* a purely open-work question ("what's overdue?") with a one-line
   pointer to the board, then answers the knowledge angle if there is one.
+- **A query answer never asserts board state.** The query skill forbids stating what the
+  board does or does not contain — including inferring an absence from the wiki's silence
+  (the vault is selective by design) — and requires `cases:` references to be cited as-of
+  the page's `updated:` date, with the board named authoritative for current state. The
+  caller-side `vault-operations` skill mirrors the rule: any board claim in a vault answer
+  is verified against the `board` MCP before being repeated or acted on.
 
 This is the same single-seam discipline as the rest of Cos, applied negatively: the vault is the
 one surface that is structurally incapable of touching the action half.

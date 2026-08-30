@@ -3,21 +3,17 @@ name: reminders-review
 description: >
   The reminder janitor — a periodic sweep that reviews every OPEN reminder on the
   board and CLOSES the ones whose job is already done or whose moment has passed, so
-  the reminders list stays a live to-do surface instead of a graveyard of stale
-  nudges. For each open reminder it reads the full context via the `board` MCP (the
-  nudge, its due date, HOW LONG it has been sitting, its checklist, its linked emails,
-  and — when it links a case — that case's current state), then takes a CRITICAL look
-  and sorts each into CLOSE (the thing happened / got done → complete), DISMISS (no
-  longer relevant / the decision window lapsed / superseded → dismiss), KEEP-OPEN
-  (still live, or pinned by a star / priority), or NEEDS-YOU (a passed deadline it
-  can't prove is settled). It AUTO-closes ONLY what is PROVEN done (a finished
-  checklist, a linked case now closed, a delivery whose date clearly passed); every
-  judgment call — a lapsed job-alert, an old "decide whether to" nudge, a cold FYI,
-  anything tied to a starred node — it PROPOSES for your approval, and it NEVER
-  deletes. Use when the user says "review my reminders", "check my reminders", "what
-  reminders can I close", "clean up / clear out / tidy my reminders", "close the old /
-  stale / done reminders", "which reminders are still relevant / worth keeping", "go
-  through my reminders", or when the scheduled reminders-review sweep runs.
+  the reminders list stays a live to-do surface instead of a graveyard of stale nudges.
+  It reads each reminder's full context via the `board` MCP, then sorts it into CLOSE
+  (done), DISMISS (no longer relevant / superseded), KEEP-OPEN (still live, or pinned
+  by a star / priority), or NEEDS-YOU (a passed deadline it can't prove is settled). It
+  AUTO-closes ONLY what is PROVEN done; every judgment call it PROPOSES for your
+  approval, and it NEVER deletes. Use when the user says "review my reminders", "what
+  reminders can I close", "clean up / tidy my reminders", "close the old / stale / done
+  reminders", "which reminders are still relevant", "go through my reminders", or when
+  the scheduled reminders-review sweep runs. Also runs the filtered-mail digest —
+  first-time senders the mail sweep dropped, each a one-word keep-or-confirm ('what did
+  Cos filter?').
 ---
 
 # Reminders → Review (the open-reminder sweep)
@@ -36,9 +32,10 @@ It writes to the board **only** through the **`board`** MCP — never `bash`/`cu
 is a state machine; YOU are the intelligence.** The board just lists, reads, and flips
 the status of reminders deterministically — it has *no* notion of "this one is stale."
 Judging closeability is entirely **your** job here, from the context the reads give
-you. The only writes this skill makes are `complete_reminder` and
-`update_reminder {status:"dismissed"}`; it never creates, links, or **deletes** a
-reminder (that's the reconcilers' job, and hard-delete is nobody's job in this sweep).
+you. The only writes this skill makes are `complete_reminder`,
+`update_reminder {status:"dismissed"}`, and — for the filtered-mail digest (STEP 5) —
+`resolve_triage_decision`; it never creates, links, or **deletes** a reminder (that's the
+reconcilers' job, and hard-delete is nobody's job in this sweep).
 
 > **Guardrail 1 — overdue is NOT the same as done.** A passed due date, or a nudge
 > that's sat for weeks, is a prompt to **ASK**, not a licence to close. *"Submit the
@@ -174,7 +171,7 @@ safer choice.
 - a **delivery/collection** nudge whose date is **unambiguously past** *and* a sibling
   shows the delivered→done pattern → `complete_reminder`.
 
-Log each auto-close (STEP 6).
+Log each auto-close (STEP 7).
 
 **PROPOSE** — **always**, regardless of the switch, for **every judgment call**:
 
@@ -197,10 +194,46 @@ The writes, and nothing else:
   `reminder_completed` on the linked case. The close-as-done.
 - **`update_reminder {id, status:"dismissed"}`** → the close-as-not-relevant (no
   `completedAt`).
+- **`resolve_triage_decision {id, resolution}`** → the filtered-mail digest's write (STEP 5),
+  only ever following an explicit sender answer — never `block_sender`/trust ops.
 - **Never `delete_reminder`.** Complete/dismiss drops it from the open view *and* stays
   reversible (Trash → restore for ~30 days). Hard-delete is out of scope.
 
-## STEP 5 — Idempotency & re-run safety
+## STEP 5 — The filtered-mail digest (first-time senders only)
+
+`/mail-to-board`'s five-test gate DROPS a thread that fails it (a notification, a watch, a
+no-stakes item, an open loop, a want/courtesy) and — since cos-ops#41 — leaves a **receipt**: a
+per-`(sender, source, reason)` decision record on the board, upserted so hundreds of drops
+compress into tens of rows. This STEP is the review channel for that receipt: it surfaces only
+**senders being filtered for the FIRST time**, so the digest stays bounded by *new* senders, not
+by mail volume, and never grows as the corpus grows. **Today this covers `source: "gmail"` only**
+— `/whatsapp-triage` does not yet leave the same receipt (a named follow-on; see "What's Next"),
+so the digest's scope is Gmail, stated as such below. Fully self-contained — no reference to
+`/mail-to-board`'s own steps.
+
+- **One call:** `list_triage_decisions({ source: "gmail" })`.
+- **Nothing new** — `firstTime` is empty → **one line**: *"nothing new was filtered from your
+  mail."* — and move on (the no-op case; most runs land here).
+- **Otherwise**, the scale line — *"~`dropped` emails from `senders` senders filtered so far
+  (promoted: `promoted`); K senders new since your last review:"* — then **one line per
+  first-time sender**, never a per-email list: sender · reasons×counts · since `firstSeen` ·
+  **keep or confirm?**
+- **Answers, per sender** — resolve EVERY one of that sender's `ids` (from `firstTime[].ids`) the
+  same way: a sender-scoped verdict, not a per-reason one.
+  - **confirm** (keep filtering — the sweep is right) → `resolve_triage_decision({ id,
+    resolution: "confirm" })` for each id.
+  - **keep** (stop filtering — the sweep is wrong about this one) → `resolve_triage_decision({
+    id, resolution: "reverse" })` for each id; the mail sweep stops dropping this sender from its
+    next run.
+  - **Never** write the guard's sender-trust store (`block_sender`/trust ops) from this digest —
+    a keep/confirm is an **editorial** verdict about noise, not a **security** one; the two stay
+    on separate axes.
+- **Unanswered senders write nothing** and simply re-surface next run — idempotent, the same
+  re-propose shape as this skill's own reminder batch (STEP 6). This holds in **both** auto-sync
+  modes (STEP 0): the digest is conversational either way, and the *only* writes it ever makes are
+  the `resolve_triage_decision` calls that follow an explicit answer.
+
+## STEP 6 — Idempotency & re-run safety
 
 - **A clean board no-ops.** The sweep only ever reads open reminders; a run with
   nothing stale writes nothing.
@@ -212,7 +245,7 @@ The writes, and nothing else:
   each pass only *closes* the settled, so successive runs shrink the open set and then
   quiesce.
 
-## STEP 6 — Report
+## STEP 7 — Report
 
 When `autoSync` is **on**, append each auto-close to the matching domain log
 (`work/log.md` or `life/log.md`), one line apiece:
@@ -231,6 +264,8 @@ Then **report** a consolidated tally:
 - **Needs you** — passed deadlines that might still be owed (e.g. the meter readings) —
   surfaced, **not** closed.
 - **Kept open** — still-live nudges (awaiting the other side, future-dated, starred).
+- **Filtered mail** (STEP 5) — *"K new senders surfaced (answered: X confirmed, Y kept)"*, or the
+  one-line no-op (*"nothing new was filtered from your mail"*) when `firstTime` was empty.
 - The board surface: **`<BOARD_URL>`** → the **Reminders** page.
 
 ---
@@ -248,13 +283,17 @@ lands first try and you know how to react when it doesn't.
 | `get_priorities()` | `GET /api/priorities` → **200** | — (read-only) | Starred nodes + `PRI-…` notes = pinned intent; never auto-close against it. |
 | `complete_reminder(id*)` | `PATCH /api/reminders/{id}` `{status:"done"}` → **200** `{reminder, version}` | **`id`** | The **close-as-done**. Stamps `completedAt`; logs `reminder_completed` on the linked case. |
 | `update_reminder(id*, status:"dismissed")` | `PATCH /api/reminders/{id}` → **200** `{reminder, version}` | **`id`**; a bad `status`/`dueAt`/label → 400 | The **close-as-not-relevant** (no `completedAt`). Use `dismissed`, not `done`, when the thing didn't actually get done. |
+| `list_triage_decisions(source*,[status])` | `GET /api/triage-decisions` → **200** `{decisions[], summary, version}` | **`source`** (read-only) | STEP 5's one read. Always pass `source:"gmail"`. `summary.firstTime` is the digest's list; `summary.dropped`/`.senders`/`.promoted` are the scale line. |
+| `resolve_triage_decision(id*, resolution*)` | `PATCH /api/triage-decisions/{id}` → **200** `{decision, version}` | **`id`**, **`resolution`** (`confirm`\|`reverse`) | STEP 5's one write, only after an explicit sender answer. `confirm` keeps filtering; `reverse` = the human said keep. |
 
 **Errors come back as an MCP `isError: true` text result — READ it, don't blindly retry:**
 
 - **`Board returned 400: …`** — a malformed call (a `status` outside `open|done|dismissed`,
-  an unparseable `dueAt`, an unknown label id). **Fix the call**, don't resend it byte-for-byte.
+  an unparseable `dueAt`, an unknown label id, a `resolution` outside `confirm|reverse`). **Fix
+  the call**, don't resend it byte-for-byte.
 - **`Not found.` (404)** — a **stale `REM-<n>`** (already closed, or the id was guessed).
-  Re-run `list_reminders {status:"open"}` for the **live** ids and retry.
+  Re-run `list_reminders {status:"open"}` for the **live** ids and retry. A stale `TD-<n>` from
+  the digest is the same shape — re-run `list_triage_decisions` for live ids.
 - **`Could not reach the board …` (network)** — the board or its bridge is down. **Stop
   and report**; write nothing. (Nothing to advance — this sweep keeps no watermark.)
 - **No 409 to handle.** The `complete_reminder`/`update_reminder` tools don't send
@@ -263,9 +302,10 @@ lands first try and you know how to react when it doesn't.
 
 ## Conventions (guardrails recap)
 
-- **BOARD-ONLY writes, and only two of them.** `complete_reminder` and
-  `update_reminder {status:"dismissed"}` — never via `bash`/`curl`, never
-  `create_reminder`/`link_*` (the reconcilers own creation), **never `delete_reminder`**.
+- **BOARD-ONLY writes, and only three of them.** `complete_reminder`,
+  `update_reminder {status:"dismissed"}`, and `resolve_triage_decision` (the filtered-mail
+  digest, STEP 5) — never via `bash`/`curl`, never `create_reminder`/`link_*` (the reconcilers own
+  creation), **never `delete_reminder`**, and never the guard's trust store.
 - **Overdue ≠ done (Guardrail 1).** Auto-close only **PROVEN** completion (checklist
   done · linked case closed · one-shot delivery/event clearly past). A passed deadline
   you can't prove settled is **NEEDS-YOU**, surfaced — never flipped.
@@ -350,4 +390,5 @@ After a sweep, the user can:
 - **Trust the source gate** — the reconcilers (`/mail-to-board`, `/whatsapp-triage`) now
   apply the **same five tests at *creation*** and DROP notifications / watches / wants,
   so the backlog is a **one-time cull**; going forward the open list stays commitments,
-  not noise.
+  not noise. (Mail drops now leave a per-sender decision record STEP 5 reviews;
+  **WhatsApp drops are not yet recorded** — the named follow-on.)
