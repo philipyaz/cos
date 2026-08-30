@@ -83,17 +83,17 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.139.0" },
-    { name = "model2vec", specifier = ">=0.8,<0.9" },
+    { name = "model2vec", specifier = ">=0.8,<0.10" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
-    { name = "turbovec", specifier = ">=0.7,<0.8" },
+    { name = "turbovec", specifier = ">=0.7,<1.1" },
     { name = "uvicorn", specifier = ">=0.51.0" },
 ]
 provides-extras = ["dev"]
 
 [[package]]
 name = "fastapi"
-version = "0.139.0"
+version = "0.141.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -102,9 +102,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/af/a5f50ccfa659ec1802cb4ca842c23f06d906a8cc9aef6016a2caeea3d4ed/fastapi-0.139.0.tar.gz", hash = "sha256:99ab7b2d92223c76d6cf10757ab3f89d45b38267fc20b2a136cf02f6beac3145", size = 423016, upload-time = "2026-07-01T16:35:33.436Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8a/02/91e3416a8fdd715abb903a952a6bec7cdd8d14eed55d415fc8595524c319/fastapi-0.141.1.tar.gz", hash = "sha256:e8822fc40db1e1858054d7a949a888695bc9bdce70139178e33bd2871a453ca1", size = 425799, upload-time = "2026-07-29T17:18:05.568Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/7c/8e3c6ad324ea5cb36604fc3f968554887891c316d9dfde57761611d907ad/fastapi-0.139.0-py3-none-any.whl", hash = "sha256:cf15e1e9e667ddb0ad63811e60bd11390d1aac838ca4a7a23f421807b2308189", size = 130339, upload-time = "2026-07-01T16:35:32.19Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/03/10388a42375ee7e4ac9b94eb2c5c569c8b5795e377e701c9ac3ad63de890/fastapi-0.141.1-py3-none-any.whl", hash = "sha256:bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3", size = 131954, upload-time = "2026-07-29T17:18:04.364Z" },
 ]
 
 [[package]]
@@ -351,7 +351,7 @@ wheels = [
 
 [[package]]
 name = "model2vec"
-version = "0.8.2"
+version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
@@ -361,9 +361,9 @@ dependencies = [
     { name = "tokenizers" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/54/c8/8efa9e52d210957b02b1c711f4e3b88d1e9eb5485d1869aaa9833d0cd1c5/model2vec-0.8.2.tar.gz", hash = "sha256:4e88d1a5eb2136475ebd90505689046f61caf25c69371c331f21c6499637c110", size = 4532469, upload-time = "2026-05-29T12:01:21.035Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/e5/118c4a8af078ff97d9228718fbcd7d4f7e9cae93c3af59652d6f3407010a/model2vec-0.9.0.tar.gz", hash = "sha256:f50229cea128c9db5cfa7b2173478294be3c84e5d3d7fb8487ebd7af285383ab", size = 4590528, upload-time = "2026-08-12T14:24:38.524Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7b/a1/38101b223fb6cea0f2e401fbacdf4f6121628d45dc9329b255d7ac843234/model2vec-0.8.2-py3-none-any.whl", hash = "sha256:f0ecfe994316e401dca583fbf6dd22079d308c05717dd36d40bff60f265431cf", size = 54749, upload-time = "2026-05-29T12:01:19.411Z" },
+    { url = "https://files.pythonhosted.org/packages/af/ea/80246465cafa36a6c8c8ac767778423940e5b826fa57c10ebd957b570c1c/model2vec-0.9.0-py3-none-any.whl", hash = "sha256:8bcf3258d5668678739c13226a562d39eeaeb8fcac9b142bc4aceef8800d5b9d", size = 59865, upload-time = "2026-08-12T14:24:36.626Z" },
 ]
 
 [[package]]
@@ -758,17 +758,17 @@ wheels = [
 
 [[package]]
 name = "turbovec"
-version = "0.7.0"
+version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e1/f6/adbdaca6f0023a0d1887a63c332f37938644c714989af51c779fadb42b80/turbovec-0.7.0.tar.gz", hash = "sha256:35a5d29a7db962dbe59c56c93e6b8a685228d2d3e3e2fdef9e126c860bb581ce", size = 168791, upload-time = "2026-05-30T13:17:05.165Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/45/d2/00c981bd1a6be5b6a875435bf678e627f191e3daf47ea70e1b5ee3109c36/turbovec-1.0.0.tar.gz", hash = "sha256:4ceb3c4ad08e48c6b3483b88aca63d81a06449f90d5fbc1b162dd11df10b8fb2", size = 702952, upload-time = "2026-08-18T20:43:31.249Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a4/55/5e0c31ccbde716859ec81a8c4dc197973c40e0519a54778b26121d5f8056/turbovec-0.7.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:f57159e5d197879849bf532a14bef13ffeb6cc37fe7eec9cd5c833061c8dc03f", size = 834972, upload-time = "2026-05-30T13:16:57.569Z" },
-    { url = "https://files.pythonhosted.org/packages/d1/42/08535de942011b644dc4ca856082bbe7365f6244ae2b80afe55bc4f76225/turbovec-0.7.0-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:99cb2a6a841b760b00e097c4bdef1b8697f0a1edaf67e91df1f488a5a353c4ba", size = 6113489, upload-time = "2026-05-30T13:16:59.651Z" },
-    { url = "https://files.pythonhosted.org/packages/d9/5d/ad86864477be969dc9f934ef2c10c515096ba69790068df77605c989709e/turbovec-0.7.0-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:cd30062633060f6a0f66217fc789853155927ff46b524172df0494490bca306f", size = 13111465, upload-time = "2026-05-30T13:17:01.272Z" },
-    { url = "https://files.pythonhosted.org/packages/76/9a/1f8d8acfe5666871b794047ffcb7312b3d720e277c9d395dbaf7d79e3b1f/turbovec-0.7.0-cp39-abi3-win_amd64.whl", hash = "sha256:79e29e1e431d897d2de482abc96a5623bba26eea71cec27db57c1c1212b26997", size = 659245, upload-time = "2026-05-30T13:17:03.489Z" },
+    { url = "https://files.pythonhosted.org/packages/53/e0/d759918244236356199b0f4d868ee331d0440a9824f147780aaefa8fe1af/turbovec-1.0.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:a69e8e2e26ba943f31fba546ab595b60e9b4c25087ed905c3e6ceb0d297ee234", size = 668359, upload-time = "2026-08-18T20:43:25.45Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/e9/8de1e7d2636a8f5c73d39c64ec6fb4bd20180d8c966962d919356d06e175/turbovec-1.0.0-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:09aa495e802701f139820e21700dc947ea21734446112afefb4e480a8f65fa90", size = 700020, upload-time = "2026-08-18T20:43:27.028Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/6d/c1acf31a1ef381b588de86ebebb32c3ca7d310cbb84279ac1f65c3a3e854/turbovec-1.0.0-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:c810f50b967c2163b78d1e27d29e153ab5e8820de23921ad959227acca8bb06a", size = 719275, upload-time = "2026-08-18T20:43:28.402Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/7d/e0c14b09f6dfb7ff156d1f884119daebc5c8bf9f5b8fc72ada26c2674256/turbovec-1.0.0-cp39-abi3-win_amd64.whl", hash = "sha256:cd855e0b318a57dc57c733f9a62ae98de5192f4f6c2c760e305523e8ceb1b090", size = 611788, upload-time = "2026-08-18T20:43:29.854Z" },
 ]
 
 [[package]]
@@ -809,13 +809,13 @@ wheels = [
 
 [[package]]
 name = "uvicorn"
-version = "0.51.0"
+version = "0.52.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "h11" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a2/65/b7c6c443ccc58678c91e1e973bbe2a878591538655d6e1d47f24ba1c51f3/uvicorn-0.51.0.tar.gz", hash = "sha256:f6f4b69b657c312f516dd2d268ab9ae6f254b11e4bac504f37b2ab58b24dd0b0", size = 94412, upload-time = "2026-07-08T10:59:05.962Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f2/0f/3f86e61397dd33bf2ccf28188c40db6a740658aeebbbf6e7dbc101a1f487/uvicorn-0.52.4.tar.gz", hash = "sha256:73acfee47a0b133c5de13d219492d62d8a31e935f4fe6e41a232451a15379f86", size = 100627, upload-time = "2026-08-19T06:27:41.821Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/45/ec/dbb7e5a6b91f86bfb9eb7d2988a2730907b6a729875b949c7f022e8b88fa/uvicorn-0.51.0-py3-none-any.whl", hash = "sha256:5d38af6cd620f2ae3849fb44fd4879e0890aa1febe8d47eb355fb45d93fe6a5b", size = 73219, upload-time = "2026-07-08T10:59:04.44Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/79/4a20b54ab0491485ccd8c077db2d39187c7f12b3e15485d38a7be37c81b4/uvicorn-0.52.4-py3-none-any.whl", hash = "sha256:f86e41a149d7d05a9969337e3946a9c171c06a5d42680896daaba624aeac8da1", size = 79871, upload-time = "2026-08-19T06:27:40.36Z" },
 ]
