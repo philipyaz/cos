@@ -29,7 +29,12 @@ import type {
   NutritionTargetArtifact,
   NutritionTargetKind,
   TrainingStatus,
+  ShoppingItem,
+  ShoppingCategory,
+  ShoppingStatus,
+  ShoppingSource,
   MessageRecord,
+  MessageSource,
   CaseNote,
   Task,
   Subtask,
@@ -45,8 +50,10 @@ import type {
   TaskStatus,
   Priority,
   Actor,
+  TriageDecision,
+  TriageDropReason,
 } from "./types";
-import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, VALID_ARTIFACT_SOURCE, VALID_TRAINING_STATUS, caseKind } from "./types";
+import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, VALID_ARTIFACT_SOURCE, VALID_TRAINING_STATUS, VALID_SHOPPING_CATEGORY, VALID_SHOPPING_STATUS, VALID_SHOPPING_SOURCE, caseKind } from "./types";
 import {
   hierarchyViolation,
   rollupFor,
@@ -57,6 +64,7 @@ import {
 } from "./selectors";
 import { resolveTrashRetentionDays, resolveReminderAutoDeleteDays } from "./retention";
 import { getDeviceRole } from "./cos-env";
+import type { PlanDayOutcome } from "./fitness-plan-status";
 
 // Absolute path to the live JSON store. Exported so the SSE route can
 // fs.watch() it for live-update fan-out.
@@ -90,6 +98,24 @@ export class VersionConflictError extends Error {}
 // catalog). Route handlers map it to a 400. Shape-only checks still happen
 // outside the lock; this is for validity that depends on db state.
 export class BadRequestError extends Error {}
+
+// FAIL-CLOSED refusal: the (sender, source) already carries a REVERSED triage decision —
+// the human said keep, so recording a further drop is refused rather than silently folded
+// in (a stale skill bundle, rebuilt but not re-uploaded to Cowork, must not be able to keep
+// dropping a sender Philip reversed). Carries the reversed row so the route can surface it.
+// Routes map it to 403 (NOT 409 — 409 already means "version conflict" on this server, and
+// the shared mcp-kit helper discards the response body on 409; a 403 flows through its
+// generic branch, which renders `detail`, so the guidance reaches the calling agent).
+export class TriageReversedError extends Error {
+  readonly decision: TriageDecision;
+  constructor(decision: TriageDecision) {
+    super(
+      `this sender was reversed by the human — never drop their mail; surface the thread in ` +
+        `the report instead. (sender: ${decision.sender}, source: ${decision.source})`,
+    );
+    this.decision = decision;
+  }
+}
 
 // FAIL-CLOSED role guard (multi-device): a SPOKE machine runs no state machine —
 // its board-facing tools point at the hub's BOARD_URL, and a spoke-local store
@@ -193,6 +219,11 @@ const nowISO = (): string => new Date().toISOString();
 // v15 (CaseRecord.vaultIngestedAt, the per-case vault-ingest receipt) is a no-op here too —
 // the optional rides through migrateCase's spread verbatim, exactly like starred (v7) and
 // MessageRecord.url (v8): absent stays absent, present rides through unchanged.
+// v16 carries db.shoppingItems forward when it is an array — mirrors db.pantryItems. No
+// backfill, no synthesis.
+// v17 carries db.triageDecisions forward when it is an array (the per-sender mail-triage
+// editorial-drop decision record — mirrors db.healthEntries/db.coachingArtifacts). No
+// backfill: nothing to backfill, since no drop was ever recorded before this version.
 export function migrate(raw: unknown): DBShape {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
@@ -215,6 +246,9 @@ export function migrate(raw: unknown): DBShape {
   if (Array.isArray(obj.foodLogs)) db.foodLogs = obj.foodLogs as DBShape["foodLogs"];
   if (Array.isArray(obj.pantryItems)) db.pantryItems = obj.pantryItems as DBShape["pantryItems"];
   if (Array.isArray(obj.mealPlanEntries)) db.mealPlanEntries = obj.mealPlanEntries as DBShape["mealPlanEntries"];
+  // v16: db.shoppingItems carries forward when present — mirrors db.pantryItems. No
+  // backfill, no synthesis.
+  if (Array.isArray(obj.shoppingItems)) db.shoppingItems = obj.shoppingItems as DBShape["shoppingItems"];
   if (Array.isArray(obj.weights)) db.weights = obj.weights as DBShape["weights"];
   // v14: db.nutritionGoal is NO LONGER carried forward — it is the read-only source the v14
   // synthesis below transforms into db.bodyProfile + db.bodyObjective, then dropped on next write
@@ -227,6 +261,7 @@ export function migrate(raw: unknown): DBShape {
   if (Array.isArray(obj.views)) db.views = obj.views as DBShape["views"];
   if (Array.isArray(obj.labels)) db.labels = obj.labels as DBShape["labels"];
   if (obj.settings && typeof obj.settings === "object") db.settings = obj.settings as DBShape["settings"];
+  if (Array.isArray(obj.triageDecisions)) db.triageDecisions = obj.triageDecisions as DBShape["triageDecisions"];
 
   // ── v14 carry-forward + synthesis ("body" add-on + nutrition redesign) ──────────────────────
   // v14 files already carry these singletons/arrays — take them verbatim (idempotent).
@@ -345,6 +380,12 @@ function validateDB(db: DBShape): void {
   for (const x of db.nutritionTargets ?? []) {
     if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid nutrition target: missing id");
   }
+  for (const x of db.shoppingItems ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid shopping item: missing id");
+  }
+  for (const x of db.triageDecisions ?? []) {
+    if (!x || typeof x.id !== "string" || !x.id) throw new Error("invalid triage decision: missing id");
+  }
 }
 
 async function ensureFile(): Promise<void> {
@@ -352,7 +393,7 @@ async function ensureFile(): Promise<void> {
     await fs.access(DATA_FILE);
   } catch {
     await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [], foodLogs: [], pantryItems: [], mealPlanEntries: [], weights: [], healthEntries: [], coachingArtifacts: [], nutritionTargets: [] };
+    const empty: DBShape = { schemaVersion: SCHEMA_VERSION, version: 0, cases: [], messages: [], events: [], reminders: [], priorities: [], foodLogs: [], pantryItems: [], mealPlanEntries: [], weights: [], healthEntries: [], coachingArtifacts: [], nutritionTargets: [], shoppingItems: [], triageDecisions: [] };
     await fs.writeFile(DATA_FILE, JSON.stringify(empty, null, 2), "utf8");
   }
 }
@@ -375,6 +416,8 @@ function parseAndMigrate(text: string): DBShape {
   if (!db.healthEntries) db.healthEntries = []; // athleteProfile stays optional/absent (a singleton, set on first POST)
   if (!db.coachingArtifacts) db.coachingArtifacts = [];
   if (!db.nutritionTargets) db.nutritionTargets = []; // agent-authored targets (v14); the three v14 singletons stay optional/absent until first set
+  if (!db.shoppingItems) db.shoppingItems = []; // the persistent shopping list (v16)
+  if (!db.triageDecisions) db.triageDecisions = []; // mail-triage editorial-drop decisions (v17)
   if (!db.pending) db.pending = [];
   if (!db.views) db.views = [];
   if (!db.labels) db.labels = [];
@@ -1156,28 +1199,54 @@ export function upsertCoachingArtifact(
   const now = nowISO();
   const existing = findCoachingArtifactByPeriod(db, input.kind, input.periodKey);
   if (existing) {
-    // Receipt carry-forward (training_plan only). The calendar push route
-    // (push-plan-to-calendar) writes a per-day eventId INTO payload.days[i], but a
-    // regenerated plan replaces payload wholesale — without this, regenerate-then-push
-    // would duplicate the whole week (the exact failure cos-ops#17 exists to end). A
-    // day with no incoming eventId inherits the outgoing one for the SAME date; a date
-    // that no longer exists in the new plan simply drops its receipt (the old event is
-    // never deleted here — a human may have adopted/edited it; a documented known limit).
+    // Receipt-AND-OUTCOME carry-forward (training_plan only). The calendar push route
+    // (push-plan-to-calendar) writes a per-day eventId INTO payload.days[i], and the day
+    // route (cos-ops#19) writes a per-day status/movedTo — but a regenerated plan replaces
+    // payload wholesale. Without this, regenerate-then-push would duplicate the whole week
+    // (the exact failure cos-ops#17 exists to end), and regenerating a week (or the Phase-B
+    // move flow — both re-save via save_training_plan) would silently WIPE every recorded
+    // outcome, the exact destructive-feeling failure cos-ops#19 exists to remove. A day with
+    // no incoming eventId inherits the outgoing one for the SAME date; a day with no incoming
+    // `status` KEY inherits the outgoing day's status (and its movedTo, when that status is
+    // "moved") the same way. An incoming day that DOES carry its own `status` wins (deliberate
+    // overwrite stays possible — e.g. re-answering a day). A date that no longer exists in the
+    // new plan simply drops its receipt/outcome (the old event is never deleted here — a human
+    // may have adopted/edited it; a documented known limit).
     if (
       input.kind === "training_plan" &&
       Array.isArray(existing.payload.days) &&
       Array.isArray(input.payload.days)
     ) {
       const outgoingEventIdByDate = new Map<string, string>();
+      const outgoingOutcomeByDate = new Map<string, { status: string; movedTo?: string }>();
       for (const day of existing.payload.days as Record<string, unknown>[]) {
-        if (day && typeof day.date === "string" && typeof day.eventId === "string" && day.eventId) {
+        if (!day || typeof day.date !== "string") continue;
+        if (typeof day.eventId === "string" && day.eventId) {
           outgoingEventIdByDate.set(day.date, day.eventId);
+        }
+        if (typeof day.status === "string") {
+          outgoingOutcomeByDate.set(day.date, {
+            status: day.status,
+            ...(day.status === "moved" && typeof day.movedTo === "string" ? { movedTo: day.movedTo } : {}),
+          });
         }
       }
       for (const day of input.payload.days as Record<string, unknown>[]) {
-        if (day && typeof day.date === "string" && !day.eventId) {
-          const carried = outgoingEventIdByDate.get(day.date);
-          if (carried) day.eventId = carried;
+        if (!day || typeof day.date !== "string") continue;
+        if (!day.eventId) {
+          const carriedEventId = outgoingEventIdByDate.get(day.date);
+          if (carriedEventId) day.eventId = carriedEventId;
+        }
+        if (day.status == null) {
+          // null/undefined ≡ absent (a model that serialises every optional key must not wipe
+          // the recorded outcomes): drop the stray keys, then inherit the outgoing outcome.
+          delete day.status;
+          delete day.movedTo;
+          const carriedOutcome = outgoingOutcomeByDate.get(day.date);
+          if (carriedOutcome) {
+            day.status = carriedOutcome.status;
+            if (carriedOutcome.movedTo) day.movedTo = carriedOutcome.movedTo;
+          }
         }
       }
     }
@@ -1201,14 +1270,37 @@ export function upsertCoachingArtifact(
   return { artifact, created: true };
 }
 
+// Apply a per-day outcome onto a training_plan artifact (cos-ops#19) — the write twin of the
+// carry-forward above, but a TARGETED single-day write (no whole-artifact re-save). Sets
+// day.status; movedTo is set ONLY for "moved" and DELETED for every other status (a
+// done/skipped/planned day carrying a stale movedTo would make the push route and the skills
+// disagree about where the session lives). Assumes the day already exists at `date` — the
+// caller (setPlanDayOutcome) validates that first. Bumps rec.updatedAt; returns the mutated day.
+export function applyPlanDayOutcome(
+  rec: CoachingArtifact,
+  outcome: { date: string; status: PlanDayOutcome; movedTo?: string },
+): Record<string, unknown> {
+  const days = (Array.isArray(rec.payload.days) ? rec.payload.days : []) as Record<string, unknown>[];
+  const day = days.find((d) => d && d.date === outcome.date)!;
+  day.status = outcome.status;
+  if (outcome.status === "moved" && outcome.movedTo) {
+    day.movedTo = outcome.movedTo;
+  } else {
+    delete day.movedTo;
+  }
+  rec.updatedAt = nowISO();
+  return day;
+}
+
 // Merge a partial patch onto a coaching artifact. Present-keys-only: a `payload` object
 // replaces the body, a valid `source` enum updates the author, a `generatedAt` string updates
 // the generation time. Identity (id, createdAt, kind, periodKey) is NEVER changed here — this
 // is the un-validating coercive chokepoint (mirrors applyFoodLogUpdate). Bumps updatedAt.
 // KNOWN LIMIT: unlike upsertCoachingArtifact, a `payload` patch here replaces training_plan
-// days wholesale with NO eventId carry-forward — left unguarded on purpose (no MCP tool
-// reaches this PATCH path; a manual payload edit is a deliberate replacement, not a
-// regenerate). See docs/features/fitness.md.
+// days wholesale with NO carry-forward of eventId OR outcome (status/movedTo) — left
+// unguarded on purpose (no MCP tool reaches this PATCH path; a manual payload edit is a
+// deliberate replacement, not a regenerate). Use the day route / setPlanDayOutcome for a
+// targeted per-day outcome write instead. See docs/features/fitness.md.
 export function applyCoachingArtifactUpdate(rec: CoachingArtifact, patch: Record<string, unknown>): CoachingArtifact {
   if ("payload" in patch && patch.payload && typeof patch.payload === "object" && !Array.isArray(patch.payload)) {
     rec.payload = patch.payload as Record<string, unknown>;
@@ -1769,4 +1861,178 @@ export function removeNutritionTarget(db: DBShape, id: string): boolean {
   if (idx === -1) return false;
   db.nutritionTargets.splice(idx, 1);
   return true;
+}
+
+// ── The persistent shopping list (v16; "nutrition" add-on, cos-ops#37) ──────────
+// A 1:1 clone of the pantry-item helpers applied to db.shoppingItems. Store only what
+// cannot be computed (ADR 0017) — the candidates engine (shopping-candidates.ts) derives
+// suggestions on read and never writes here.
+export function nextShoppingItemId(db: DBShape): string {
+  const max = (db.shoppingItems ?? [])
+    .map((x) => parseInt(x.id.replace(/^[A-Za-z]+-/, ""), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `SHOP-${max + 1}`;
+}
+
+export function findShoppingItem(db: DBShape, id: string): ShoppingItem | undefined {
+  return (db.shoppingItems ?? []).find((x) => x.id === id);
+}
+
+// Hard-remove a shopping item. Plain splice (mirrors removePantryItem) — no soft-archive;
+// a dangling sourceRef pointing AT the removed row elsewhere is tolerated by construction.
+export function removeShoppingItem(db: DBShape, id: string): boolean {
+  if (!db.shoppingItems) return false;
+  const idx = db.shoppingItems.findIndex((x) => x.id === id);
+  if (idx === -1) return false;
+  db.shoppingItems.splice(idx, 1);
+  return true;
+}
+
+// Merge a partial patch onto a shopping item. Same coercive chokepoint contract as
+// applyPantryUpdate: an empty `name` is ignored (the required field is never blanked),
+// `category` is validated against VALID_SHOPPING_CATEGORY (out-of-enum / null clears —
+// optional field), `status`/`source` are validated against their VALID_ arrays (out-of-enum
+// ignored; both are required so neither is ever blanked), optional numbers/strings clear
+// on null/"". PLUS the one special rule: flipping `status` to "bought" stamps `boughtAt`;
+// flipping it to any other valid status clears it. `boughtAt` is server-stamped only —
+// never read from the patch.
+export function applyShoppingItemUpdate(rec: ShoppingItem, patch: Record<string, unknown>): ShoppingItem {
+  if ("name" in patch && typeof patch.name === "string" && patch.name.trim() !== "") rec.name = patch.name.trim();
+  if ("category" in patch) {
+    rec.category =
+      patch.category != null && VALID_SHOPPING_CATEGORY.includes(patch.category as ShoppingCategory)
+        ? (patch.category as ShoppingCategory)
+        : undefined;
+  }
+  if ("quantity" in patch) rec.quantity = toOptionalNumber(patch.quantity);
+  if ("unit" in patch) rec.unit = toOptionalString(patch.unit);
+  if ("status" in patch && VALID_SHOPPING_STATUS.includes(patch.status as ShoppingStatus)) {
+    const next = patch.status as ShoppingStatus;
+    // Stamp on the TRANSITION into "bought" only: an idempotent retry (a timed-out bridge call
+    // re-sent, a double tap) must not move the purchase date forward — the candidates engine
+    // keys its "bought this window" suppression on boughtAt.
+    if (next === "bought") {
+      if (rec.status !== "bought" || !rec.boughtAt) rec.boughtAt = nowISO();
+    } else {
+      rec.boughtAt = undefined;
+    }
+    rec.status = next;
+  }
+  if ("source" in patch && VALID_SHOPPING_SOURCE.includes(patch.source as ShoppingSource)) {
+    rec.source = patch.source as ShoppingSource;
+  }
+  if ("sourceRef" in patch) rec.sourceRef = toOptionalString(patch.sourceRef); // soft ref, never validated relationally
+  if ("note" in patch) rec.note = toOptionalString(patch.note);
+  rec.updatedAt = nowISO();
+  return rec;
+}
+
+// ── Mail-triage decisions (v17) ──────────────────────────────────────────────
+// The store's first POLICY collection: not a work artifact (case/message/reminder/plan/log)
+// but an editorial judgment about a SENDER. Written by mail-to-board's five-test drop gate,
+// consulted so a reversed sender is never dropped again, reviewed by /reminders-review's
+// first-time-senders digest. See board/lib/triage-decisions.ts for the computed read.
+export function nextTriageDecisionId(db: DBShape): string {
+  const max = (db.triageDecisions ?? [])
+    .map((x) => parseInt(x.id.replace(/^[A-Za-z]+-/, ""), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `TD-${max + 1}`;
+}
+
+export function findTriageDecision(db: DBShape, id: string): TriageDecision | undefined {
+  return (db.triageDecisions ?? []).find((d) => d.id === id);
+}
+
+// Deterministic normalization of a raw Gmail `from` header value into the sender key
+// TriageDecision rows are upserted by. Order matters — checked against 14 live-measured
+// non-bare forms (the plan's architect finding 1): the addr-spec inside real angle brackets,
+// THEN inside HTML-escaped angle brackets (`&lt;…&gt;` — some stored headers escape them),
+// THEN the first bare addr-spec anywhere in the string via a character class that excludes
+// whitespace/`<>(),` — so "Display Name (addr@host)" and "addr@host (parenthetical)" both
+// resolve to the bare address, with NEITHER surrounding paren attached, never a name
+// fragment (the rejected "first whitespace token" rule mis-keyed 11 of 117 live senders by
+// their first name, colliding unrelated senders and splitting one human into two keys — which
+// would silently break the reversal guarantee). Only when none of those find an "@" does the
+// whole trimmed value become the key (a bare display name like "Jordan Lee": stable, never a
+// name fragment). Lowercased last, mirroring the guard's TrustRecord.email key (no shared code
+// possible — that normalizer lives in the sidecar).
+export function normalizeTriageSender(raw: string): string {
+  // Strip a `mailto:` prefix, surrounding quotes, and trailing sentence punctuation from an
+  // addr-spec — each of those forked one sender into two keys (`"a@b.com"` vs `a@b.com`,
+  // `a@b.com;` vs `a@b.com`), which silently breaks the reversal guarantee.
+  const clean = (addr: string): string =>
+    addr
+      .trim()
+      .replace(/^mailto:/i, "")
+      .replace(/^["']+|["']+$/g, "")
+      .replace(/[.;,]+$/, "")
+      .toLowerCase();
+  const trimmed = (raw ?? "").trim();
+  const angle = trimmed.match(/<([^<>]+)>/);
+  if (angle) return clean(angle[1]);
+  const escapedAngle = trimmed.match(/&lt;([^&]+)&gt;/);
+  if (escapedAngle) return clean(escapedAngle[1]);
+  // A parenthesised addr-spec wins over a bare one: "Tips@Home newsletter (tips@example.com)" keys
+  // by the real address, not by the display name that happens to contain an "@".
+  const paren = trimmed.match(/\(([^()\s]+@[^()\s]+)\)/);
+  if (paren) return clean(paren[1]);
+  const bare = trimmed.match(/[^\s<>(),]+@[^\s<>(),]+/);
+  if (bare) return clean(bare[0]);
+  return trimmed.toLowerCase();
+}
+
+// Record one editorial drop for (sender, source, reason) — normalizes the sender, then either
+// bumps an existing row's count or mints a new one (mirrors upsertNutritionTarget's
+// { artifact, created } shape). FAILS CLOSED first: ANY row for this (sender, source) —
+// whatever its reason — already "reversed" throws TriageReversedError, so a stale skill
+// bundle (rebuilt but not re-uploaded to Cowork — ADR 0024) cannot silently keep dropping a
+// sender the human said keep. A repeat drop of the same (sender, source, reason) bumps
+// `count` and adds no row; a new reason for an already-active sender adds a sibling row.
+export function recordTriageDrop(
+  db: DBShape,
+  input: { sender: string; source: MessageSource; reason: TriageDropReason },
+): { decision: TriageDecision; created: boolean } {
+  if (!db.triageDecisions) db.triageDecisions = [];
+  const sender = normalizeTriageSender(input.sender);
+  const reversed = db.triageDecisions.find(
+    (d) => d.sender === sender && d.source === input.source && d.status === "reversed",
+  );
+  if (reversed) throw new TriageReversedError(reversed);
+  const now = nowISO();
+  const existing = db.triageDecisions.find(
+    (d) => d.sender === sender && d.source === input.source && d.reason === input.reason,
+  );
+  if (existing) {
+    existing.count += 1;
+    existing.lastSeen = now;
+    return { decision: existing, created: false };
+  }
+  const decision: TriageDecision = {
+    id: nextTriageDecisionId(db),
+    sender,
+    source: input.source,
+    reason: input.reason,
+    count: 1,
+    firstSeen: now,
+    lastSeen: now,
+    status: "active",
+  };
+  db.triageDecisions.push(decision);
+  return { decision, created: true };
+}
+
+// Apply a human review answer to a decision row (/reminders-review's digest). "confirm" = keep
+// filtering — just stamps reviewedAt, which is what drops the sender out of the computed
+// first-time set. "reverse" = the human said KEEP — flips status, which makes every future
+// recordTriageDrop for this (sender, source) throw. Idempotent re-calls just restamp
+// reviewedAt (un-reversing is out of scope — no criterion needs it).
+export function applyTriageResolution(
+  rec: TriageDecision,
+  resolution: "confirm" | "reverse",
+): TriageDecision {
+  rec.reviewedAt = nowISO();
+  if (resolution === "reverse") rec.status = "reversed";
+  return rec;
 }

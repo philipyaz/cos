@@ -1,0 +1,88 @@
+// The computed READ over db.triageDecisions (ADR 0017 — computed on read, never stored): the
+// dropped:promoted ratio and the first-time-dropped sender set, from records the board already
+// owns. Nothing here is stored, nothing calls an LLM (ADR 0001) — this is the same
+// server-side-arithmetic carve-out as the correlations stats and nutrition-status.ts. Pure,
+// I/O-free, and clock-free (unlike its *-status.ts siblings, nothing here is staleness-based, so
+// there is no clock to inject). This is ADR 0017's FOURTH shape: rather than a sibling
+// `GET /.../status` route, the summary is embedded in the collection's own `GET` — the issue that
+// named this unit explicitly forbids a new status route.
+//
+// What to DO with the numbers stays in the two skills that call it: mail-to-board reports the
+// ratio, /reminders-review renders the first-time senders as a keep-or-confirm digest. This module
+// only computes.
+
+import type { DBShape, MessageSource, TriageDropReason } from "./types";
+
+// One first-time (never reviewed) sender, grouped across every reason it was dropped for — the
+// digest's unit of review. `ids` are every unreviewed row's id, resolved TOGETHER when the human
+// answers (a sender-scoped verdict, not a per-reason one — see TriageReversedError).
+export interface FirstTimeSender {
+  sender: string;
+  source: MessageSource;
+  reasons: { reason: TriageDropReason; count: number }[];
+  firstSeen: string; // min over the sender's unreviewed rows
+  lastSeen: string; // max over the sender's unreviewed rows
+  ids: string[]; // the TD ids to resolve when the human answers
+}
+
+// dropped/senders/promoted/firstTime each have exactly one named consumer (the ops#18/#19 defect
+// class — never ship an unconsumed engine field): dropped + promoted → mail-to-board's Step 10
+// ratio line AND the digest's scale line; senders → the digest's scale line; firstTime → the
+// digest's per-sender list. No pre-divided `ratio` field — the two numbers are the honest ratio; a
+// quotient would be derived-of-derived with no consumer of its own.
+export interface TriageDecisionSummary {
+  dropped: number; // Σ count over the (source-filtered) rows, both statuses
+  senders: number; // distinct (sender, source) pairs among them
+  promoted: number; // db.messages rows matching the source filter (all sources when unfiltered)
+  firstTime: FirstTimeSender[]; // ACTIVE rows with no reviewedAt, grouped per (sender, source)
+}
+
+// With NO `source` filter, `dropped` spans only the sources that record drops (gmail today) while
+// `promoted` spans every message source — a mixed-scope ratio (454 gmail drops-eligible : 881
+// all-source messages, on the live store). The unfiltered summary stays defined (honest once
+// whatsapp-triage records drops too), but the surface agents actually use never emits it: the
+// `list_triage_decisions` MCP tool makes `source` REQUIRED (mcp/board-server/tools.mjs), and both
+// wired skill calls pass `source: "gmail"`. The HTTP GET keeps `source` optional for generality.
+// The (sender, source) identity, as one Map/Set key. A NUL separator (written as the ESCAPE, never
+// a raw byte — a raw 0x00 in the source made git treat this file as binary) cannot appear in a
+// normalized sender or a source enum, so two different pairs can never collide into one key.
+const senderKey = (d: { sender: string; source: MessageSource }): string => `${d.sender}\u0000${d.source}`;
+
+export function computeTriageSummary(db: DBShape, source?: MessageSource): TriageDecisionSummary {
+  const all = db.triageDecisions ?? [];
+  const rows = source ? all.filter((d) => d.source === source) : all;
+
+  const dropped = rows.reduce((sum, d) => sum + d.count, 0);
+  const senderKeys = new Set(rows.map(senderKey));
+
+  // `promoted` = the INBOUND messages the sweeps linked onto the board for this source. Sent mail
+  // (`outbound: true`, the SENT scan's rows) never runs through the five-test drop gate, so it is
+  // not a drop candidate and would only inflate the ratio's denominator.
+  const messages = (db.messages ?? []).filter((m) => !m.outbound);
+  const promoted = source ? messages.filter((m) => m.source === source).length : messages.length;
+
+  // A review answer is SENDER-scoped (the digest asks about a sender, reversal refuses a sender),
+  // so the first-time set is too: a sender with ANY reviewed row for this (sender, source) stays
+  // settled even when a later sweep mints a sibling row under a NEW reason (the five-test gate's
+  // `reason` is the FIRST failing test, which varies email to email for one newsletter). Without
+  // this, a confirmed sender resurfaced in the next digest the moment its reason changed.
+  const reviewedSenders = new Set(rows.filter((d) => d.reviewedAt || d.status === "reversed").map(senderKey));
+
+  const firstTimeMap = new Map<string, FirstTimeSender>();
+  for (const d of rows) {
+    if (d.status !== "active" || d.reviewedAt) continue; // reviewed or reversed — settled, never resurfaces
+    const key = senderKey(d);
+    if (reviewedSenders.has(key)) continue; // a sibling row was reviewed — the SENDER is settled
+    let entry = firstTimeMap.get(key);
+    if (!entry) {
+      entry = { sender: d.sender, source: d.source, reasons: [], firstSeen: d.firstSeen, lastSeen: d.lastSeen, ids: [] };
+      firstTimeMap.set(key, entry);
+    }
+    entry.reasons.push({ reason: d.reason, count: d.count });
+    if (d.firstSeen < entry.firstSeen) entry.firstSeen = d.firstSeen;
+    if (d.lastSeen > entry.lastSeen) entry.lastSeen = d.lastSeen;
+    entry.ids.push(d.id);
+  }
+
+  return { dropped, senders: senderKeys.size, promoted, firstTime: [...firstTimeMap.values()] };
+}

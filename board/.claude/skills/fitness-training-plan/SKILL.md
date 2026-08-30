@@ -57,6 +57,42 @@ Generate action **hands off to you**, it does not call a server-side model. So
 
 ## The procedure: FETCH → GENERATE → PERSIST
 
+### 0.5 CLOSE OUT last week (before authoring anything)
+
+Before generating anything new, reconcile what actually happened last week — an outcome is a
+fact only the user (or a proven workout) can supply, and skipping this step means STEP 4's
+rotation reads intentions instead of reality.
+
+- **Find the most recent prior plan.** `list_coaching_artifacts { kind:"training_plan", limit:4 }`,
+  take the most recent one whose week PRECEDES the week you're about to plan, then
+  `get_coaching_artifact { id }` and read its **`reconciliation`** — all three fields:
+  `sessionDays` (the batched line's "N planned"), `outcomes` (feeds STEP 4's rotation), and
+  `unresolvedDays`.
+- **Auto-resolve the proven subset, silently.** For every `unresolvedDays.days[]` entry with
+  `provenDone: true`, call `set_plan_day_outcome(artifact_id, date, "done")` — no need to ask,
+  a same-date workout entry already proves it happened. Cite the proving `healthEntryId` in your
+  run report.
+- **Batch everything else into one batched question.** For the remaining `unresolvedDays`, ask
+  ONE question — counts first, then the days: *"Last week: 3 planned, 1 proven done. Mon
+  strength + Wed stretch are unanswered — done, skipped, or move one into this week?"* **In
+  every mode**: an outcome is a fact only the user knows — **never guess, never mark an
+  unanswered day**; it simply stays `planned` (the issue's "Never fabricate" rule — the same
+  discipline JOB 0 uses for nutrition intake). **In an unattended (scheduled) run nobody can
+  answer:** put the batched question in the run report (and in the new plan's `weekly_notes`)
+  and **proceed to STEP 1 immediately** — the unanswered days stay `planned` and are re-asked
+  next run. Only a conversational run waits for the answer; the weekly plan is never skipped
+  because a question went unanswered.
+- **Answers.** "done" / "skipped" → `set_plan_day_outcome(artifact_id, date, status)`. "move it
+  [to \<date\>]" → `set_plan_day_outcome(artifact_id, date, "moved", moved_to:<chosen date>)`
+  **and** carry that session into the new week's plan you're about to author (place it on
+  `moved_to`'s date when you reach STEP 6) — that's the cross-week relocation; STEP 8's push
+  materialises it once you save. Two rules the board enforces on the re-save (400 otherwise):
+  **keep the old date's day entry** in the week you re-save (its `moved` status and its calendar
+  receipt carry forward by date — dropping the entry loses both), and **one entry per date** — a
+  session moved onto a date that already has one is MERGED into that single entry (or the
+  existing session is pushed to another free date), never a second entry on the same date.
+- **Nothing unresolved, or no prior plan** → say so in **one line** and go straight to STEP 1.
+
 ### 1. FETCH the goal + constraints — `get_athlete_profile {}` + the body add-on
 
 Read TWO sources (the body half moved off the athlete profile in v14):
@@ -127,6 +163,12 @@ prescribed recently** — then **DELIBERATELY VARY the new week against them.** 
 If there are **no prior plans**, this is week one — set a sensible **baseline** and
 note in `weekly_notes` that future weeks will rotate off it.
 
+**Rotate off outcomes, not intentions.** STEP 0.5's `reconciliation.outcomes` counts and each
+recent plan's per-day `status` are the real rotation input, not just what was originally
+scheduled — a session that was repeatedly `skipped` or `moved` must **change** next week
+(different slot, sport, duration, or dropped entirely), not be re-planned verbatim as if it had
+happened.
+
 ### 5. (soft) FETCH nutrition if weight is a goal — `list_food_log { ... }`
 
 **Only if** the body goal involves fat loss or a target weight (from `get_body_objective` — the
@@ -183,6 +225,9 @@ save_training_plan({
 malformed body, it does not repair it. A bad `sport` string or a missing day will be
 refused.
 
+**When re-saving a week, never include `status`, `movedTo`, or `eventId` keys in the days you
+send** — the board carries them forward; sending one overwrites the recorded fact.
+
 ### 8. Push the week to the calendar — `push_plan_to_calendar`
 
 Once the plan is saved, put the sessions on the calendar **by default**. **First, read
@@ -210,13 +255,15 @@ ONE confirmation STEP 0 reserves for the whole run — lay the week out and get 
 single yes before calling it. In auto mode, call it and report.
 
 **Relay every `skipped` result with its reason** — `rest_day` (expected, no action
-needed), `no_free_slot` (the day was genuinely fully booked; tell the user which
-day), or `outside_working_hours` (every candidate slot fell inside working hours —
-this is a policy skip, not congestion; tell the user their working day left no
-margin). When a skipped rest day's result carries an `eventId`, the plan changed
-since that day was last pushed and a stale session is still on the calendar — tell
-the user and offer to remove it via the `calendar` MCP's delete tool (the board
-itself never deletes it). (The `/fitness/training-plan` page's own "Add to calendar"
+needed), `resolved` (the day was already marked done/skipped/moved by STEP 0.5's close-out or
+the training-plan view; expected), `no_free_slot` (the day was genuinely
+fully booked; tell the user which day), or `outside_working_hours` (every candidate slot fell
+inside working hours — this is a policy skip, not congestion; tell the user their working day
+left no margin). When a skipped result — a rest day OR a `resolved` day — carries an
+`eventId`, a session is still on the calendar for a slot that no longer holds one (the plan
+changed since that day was last pushed, or the day was **moved** and its original slot is now
+stale) — tell the user and offer to remove it via the `calendar` MCP's delete tool (the board
+itself never deletes it). A `resolved` result without an `eventId` needs no action. (The `/fitness/training-plan` page's own "Add to calendar"
 button calls the same route server-side; either path works, but only this skill's
 path can supply `busy_windows`.)
 
@@ -234,6 +281,10 @@ the **not-medical-advice** framing.
 
 ## Guardrails recap
 
+- **Close out last week FIRST** (STEP 0.5) — before authoring anything new, auto-resolve the
+  proven subset silently and batch the rest into one question.
+- **Rotation reads outcomes, not intentions; never fabricate one** — an unanswered day stays
+  `planned`; only the user (or a proven workout) can confirm what actually happened.
 - **The board does NOT generate — YOU do.** No board-side LLM; you author the plan
   and `save_training_plan` it. Never say "click Generate and wait" — that button
   hands off to you, and the result lands on the `/fitness/training-plan` feed.

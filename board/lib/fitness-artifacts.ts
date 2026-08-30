@@ -10,6 +10,7 @@
 
 import { VALID_COACHING_ARTIFACT_KIND, VALID_ARTIFACT_SOURCE } from "@/lib/types";
 import type { CoachingArtifactKind, ArtifactSource } from "@/lib/types";
+import { VALID_PLAN_DAY_OUTCOME } from "@/lib/fitness-plan-status";
 
 // A "YYYY-MM-DD" calendar-day string check (the brief's periodKey + the date field shape).
 function isYmd(v: unknown): v is string {
@@ -64,9 +65,38 @@ export interface CoachingArtifactInput {
 // rich body (the generate routes already produced schema-valid JSON); they only assert the
 // load-bearing fields. Each returns an error string on failure, or null on success.
 
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
 function checkTrainingPlan(payload: Record<string, unknown>): string | null {
   if (!isNonEmptyString(payload.week)) return "training_plan payload.week must be a non-empty string";
   if (!Array.isArray(payload.days)) return "training_plan payload.days must be an array";
+  // The board-owned per-day keys (cos-ops#19) and the one structural invariant the whole
+  // outcome channel keys on: ONE entry per date. The day route, the carry-forward, the eventId
+  // receipts and the push all address a day by its date — a second entry on the same date is
+  // unreachable by every one of them. `status`, when present, must be a real outcome (a stray
+  // "Done" would make the push route and the reconciliation disagree); `movedTo` is required
+  // for "moved" and meaningless otherwise. A null/undefined `status` is ABSENT (the carry-forward
+  // treats it so), never an error — a model that serialises every optional key must still save.
+  const seen = new Set<string>();
+  for (const raw of payload.days as unknown[]) {
+    if (!raw || typeof raw !== "object") continue;
+    const day = raw as Record<string, unknown>;
+    if (typeof day.date === "string") {
+      if (seen.has(day.date)) return `training_plan payload.days has two entries dated ${day.date} — one entry per date`;
+      seen.add(day.date);
+    }
+    if (day.status != null) {
+      if (!VALID_PLAN_DAY_OUTCOME.includes(day.status as never)) {
+        return `training_plan payload.days[${day.date ?? "?"}].status must be one of ${VALID_PLAN_DAY_OUTCOME.join("|")} (got ${JSON.stringify(day.status)})`;
+      }
+      if (day.status === "moved" && !(typeof day.movedTo === "string" && ISO_DAY.test(day.movedTo))) {
+        return `training_plan payload.days[${day.date ?? "?"}]: status "moved" needs movedTo as YYYY-MM-DD`;
+      }
+    }
+    if (day.movedTo != null && day.status !== "moved") {
+      return `training_plan payload.days[${day.date ?? "?"}]: movedTo is only valid with status "moved"`;
+    }
+  }
   return null;
 }
 

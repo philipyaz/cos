@@ -1,6 +1,6 @@
 ---
 name: nutrition-mcp-setup
-description: Stand up the `nutrition` MCP for the "Nutrition & Chef" add-on on a new machine and wire it into both Claude clients — the simplest of the optional add-ons (a pure thin fetch-wrapper over the board's /api/nutrition/* routes, like the calendar server; NO sidecar, NO external repo, all in-repo at mcp/nutrition-server). It is exposed to Claude Code via a supergateway + launchd BRIDGE on $NUTRITION_BRIDGE_PORT/:8007 and to Claude Cowork Desktop as a direct stdio command, and the add-on must be ENABLED (Settings.addons.nutrition.enabled) for its 14 tools' WRITES to land + its /nutrition nav to appear. Use when setting up the nutrition/chef add-on on a new machine, when Cowork or Code can't see the `nutrition` server, when the nutrition bridge (:8007) is down, when log_food / plan_meal / add_pantry_item write but the board 404s them, or when enabling/disabling the Nutrition & Chef add-on.
+description: Stand up the `nutrition` MCP for the "Nutrition & Chef" add-on on a new machine and wire it into both Claude clients — the simplest of the optional add-ons (a pure thin fetch-wrapper over the board's /api/nutrition/* routes, like the calendar server; NO sidecar, NO external repo, all in-repo at mcp/nutrition-server). It is exposed to Claude Code via a supergateway + launchd BRIDGE on $NUTRITION_BRIDGE_PORT/:8007 and to Claude Cowork Desktop as a direct stdio command, and the add-on must be ENABLED (Settings.addons.nutrition.enabled) for its tools' WRITES to land + its /nutrition nav to appear. Use when setting up the nutrition/chef add-on on a new machine, when Cowork or Code can't see the `nutrition` server, when the nutrition bridge (:8007) is down, when log_food / plan_meal / add_pantry_item write but the board 404s them, or when enabling/disabling the Nutrition & Chef add-on.
 ---
 
 # Nutrition & Chef MCP setup (the simplest add-on — thin fetch-wrapper bridge :8007)
@@ -178,10 +178,20 @@ curl -s -X PATCH "$BOARD_URL/api/addons/nutrition" \
 Enabling flips `Settings.addons.nutrition.enabled` to `true` in `cases.json`, bumps `db.version` →
 SSE, so the sidebar's **Add-ons** nav group + the three `/nutrition/*` pages light up live (no
 reload), and writes start landing.
+
+Enabling nutrition also **hard auto-enables the foundational `body` add-on in the same settings
+write** (nutrition `dependsOn` body — the cascade in `/api/addons/[id]`; body owns the identity,
+weight series, and free-text objective that nutrition reads). The `/body` nav and `/api/body`
+prefix come on with it, but **this skill does not wire body's MCP** — run **`/body-mcp-setup`**
+(bridge `:8012`) next so agents can drive what just turned on:
+```sh
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"
+curl -s "$BOARD_URL/api/addons" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).addons.find(x=>x.id==="body");process.exit(a&&a.enabled===true?0:1)})' && echo "body auto-enabled"
+```
 - **CHECKPOINT** — the catalog reports it enabled (and the bridge reachable):
   ```sh
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-  curl -s "$BOARD_URL/api/addons" | grep -o '"id":"nutrition"[^}]*"enabled":true' && echo "add-on enabled"
+  curl -s "$BOARD_URL/api/addons" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).addons.find(x=>x.id==="nutrition");process.exit(a&&a.enabled===true?0:1)})' && echo "add-on enabled"
   ```
 
 ### 7. End-to-end verify (a tool call round-trips through the board)
@@ -286,7 +296,7 @@ echo "Uninstalled the nutrition bridge + both registrations. ⌘Q + reopen Cowor
   hides/404s the `/nutrition/*` pages, but GET reads (`list_*`, `get_*`, `read_pantry`) stay open
   and the **`/addons` catalog link stays reachable**. So the classic "log_food keeps failing with
   Not found." is almost always *the add-on is off* (§6), not a bridge fault — check `/api/addons`.
-- **The estimation INTELLIGENCE is NOT in the MCP.** The 14 tools just store the numbers you give
+- **The estimation INTELLIGENCE is NOT in the MCP.** The tools just store the numbers you give
   them; the MCP never estimates calories/macros. That judgment lives in the operator skill
   (`/nutrition-chef`). Don't expect `log_food` to fill in calories from a description — pass them.
 - **`COS_MCP_IDLE_EXIT_MS` lives ONLY in the bridge plist, never in the Cowork config.** mcp-kit's
