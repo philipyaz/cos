@@ -11,7 +11,7 @@ dependencies = [
   "uvicorn>=0.51.0",
   "numpy>=1.26",
   "turbovec>=0.7,<1.1",
-  "model2vec>=0.8,<0.9",
+  "model2vec>=0.8,<0.10",
 ]
 
 [project.optional-dependencies]
