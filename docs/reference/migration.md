@@ -188,3 +188,33 @@ never the data: update the code (`git pull`) and restart the board.
   answers *"what has the vault never been told?"* — cases carrying `vaultLinks` whose receipt
   is absent or older than the case's own `updatedAt` — the deterministic alarm for a capture
   pipeline that fails silently. Full design: [vault-async](vault-async.md).
+- **v15 → v16 — `db.shoppingItems[]` (the persistent shopping list).** Adds the optional
+  `db.shoppingItems?: ShoppingItem[]` array (store-minted `SHOP-<n>` ids; `category` deliberately
+  includes non-food `household` / `personal-care`; `status` `needed` → `bought` stamps `boughtAt`
+  server-side on the transition, any other status clears it; `source` + a soft `sourceRef`). **Purely
+  additive + back-compatible:** old v15 files read unchanged — `migrate()` carries the array forward
+  when present and a missing key defaults to `[]`, no backfill. **New enums:** `ShoppingCategory`,
+  `ShoppingStatus`, `ShoppingSource`. The candidates read (`GET /api/nutrition/shopping/candidates`
+  / `get_shopping_candidates`) is computed on read, never persisted. Full design:
+  [Nutrition](../features/nutrition.md#the-shopping-list-v16).
+- **v16 → v17 — `db.triageDecisions[]` (the mail-triage drop record).** Adds the optional
+  `db.triageDecisions?: TriageDecision[]` array — the store's first **policy** collection: one row per
+  `(sender, source, reason)` (store-minted `TD-<n>` ids; the sender is normalised to its addr-spec), a
+  fact ("this sender's mail was judged noise") rather than a log of dropped emails; a repeat drop bumps
+  `count`, a human `confirm` stamps `reviewedAt` (sender-scoped: every reason row of that sender is
+  settled), a `reverse` sets `status: "reversed"` and fails every later drop of that sender closed
+  (403 `sender-reversed`). **Purely additive + back-compatible:** old v16 files read unchanged —
+  `migrate()` carries the array forward when present and a missing key defaults to `[]`, no backfill.
+  **New enums:** `TriageDropReason`, `TriageDecisionStatus`. The dropped:promoted ratio and the
+  first-time-dropped set are computed on read, never persisted. Full design:
+  [Triage skills](../architecture/triage-skills.md).
+
+!!! note "Payload-internal keys never bump the schema"
+    Some records carry a `payload` the board stores **verbatim** (a `CoachingArtifact`'s training plan,
+    for instance). Keys the board itself writes *inside* such a payload — `eventId` (the calendar-push
+    receipt, #81) and `status` / `movedTo` (the per-day outcome, #94) on a training plan's `days[i]` —
+    ride along without a `SCHEMA_VERSION` bump: an older board round-trips the payload unchanged on a
+    targeted write. The consequence the guard cannot catch: a **pre-#94 board that re-saves a whole
+    week** (`save_training_plan`) carries only `eventId` forward and silently drops every recorded
+    outcome, while the store's `schemaVersion` still reads current. The rule stays the same —
+    [never run older code against this store](upgrading.md) — the ledger just names the keys.

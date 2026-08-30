@@ -8,6 +8,8 @@
 #      (selectors/store/format) via the zero-dep TS resolve hook in tests/unit/.
 #      HARD gate. Needs Node >= 22 (TS type-stripping for `node --test`); SKIPped
 #      (not failed) on older Node so the rest of the suite still runs.
+#   1b. board-starving-obligations — cos-ops#24's aging rank over the pure
+#      selector (Node >= 22).
 #   2. board-lint.mjs  — board invariants (HARD gate: any violation => FAIL).
 #   2b. skill-reachability.mjs — a skill under board/.claude/skills/ may only
 #      delegate to a slash-skill that has a Cowork bundle in
@@ -29,16 +31,36 @@
 #      engine returns must be CONSUMED (a defined action, or an explicit
 #      state-and-move-on) by JOB 0 of nutrition-chef/SKILL.md (HARD gate; the ADR
 #      0014 gate for cos-ops#18). Static, read-only, no board needed — catches the
-#      board computing an answer nobody reads.
+#      board computing an answer nobody reads. Also runs
+#      fitness-outcome-consumers.mjs in the same step (ADR 0022 — a parser-grade
+#      gate rides an EXISTING step id rather than minting a new one): every
+#      top-level field of the fitness PlanReconciliation engine must be consumed by
+#      the weekly + daily close-out sections of the two fitness skills (cos-ops#19).
+#      Also runs shopping-list-consumers.mjs (cos-ops#37) — the ADR 0014 gate's shopping
+#      twin: every ShoppingCandidatesResult field + every server.mjs shopping tool must
+#      be named inside JOB 6 of nutrition-chef/SKILL.md, a small set of load-bearing
+#      phrases must hold, the engine defines no new threshold constant, the shopping
+#      routes never reference `pending`, and the route-vs-tool wiring matches. Rides the
+#      SAME [2f] step id (ADR 0022: a new parser-grade gate rides an existing id) as its
+#      own file with its own echo + fail_reasons token.
+#      [2f] also rides
+#      triage-decisions-consumers.mjs (cos-ops#41) — the same ADR 0014 shape for
+#      TriageDecisionSummary's fields + the three triage MCP tools, consumed by
+#      mail-to-board's drop region (which also records BEFORE it watermarks) and
+#      reminders-review's digest STEP — a parser-grade gate rides an existing id
+#      rather than minting a new one.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
-#      two HARD sub-checks: (3c) the board-assertion guardrail phrases must be
+#      three HARD sub-checks: (3c) the board-assertion guardrail phrases must be
 #      present in every second-brain-query/SKILL.md under vault/ and in the
 #      caller-side vault-operations skill (cos-ops#3); (3d) the vault-ingest
 #      receipt contract — vault-operations must carry the exact "stamp the
 #      receipt only on `completed`" phrases, so a future skill edit can't
-#      silently drop the only-on-completed rule (cos-ops#2).
+#      silently drop the only-on-completed rule (cos-ops#2); (3e) the releasing
+#      docs must never claim an owner bypass — the main ruleset's bypass_actors
+#      is deliberately empty, and this exact claim hid a 45-day release outage
+#      (cos-ops#23).
 # NOTE ON THE api-* STEPS (4-12): they drive a REAL board over HTTP, but against an
 # AUTO-STARTED, ISOLATED THROWAWAY board — an own-.next `next dev` on port 3999, its
 # store pointed at a sandbox seeded from tests/fixtures/board-seed.json (synthetic),
@@ -143,6 +165,14 @@
 #      while a same-aged spice/staple never does; no write path persists a lifecycle/horizon field or
 #      a guessed expiresAt; schemaVersion unchanged. Snapshots+restores cases.json. Skipped when no
 #      board, or under an external COS_TEST_BOARD_URL board (no file access to its store).
+#  10h5. api-nutrition-shopping — ONLY if a board is running: the v16 shopping-list + candidates
+#      contract (cos-ops#37). A `household` NON-FOOD item round-trips (create/list/get); PATCH
+#      status:"bought" stamps boughtAt, status:"needed" clears it; a stale expectedVersion 409s; a
+#      dangling sourceRef POSTs + reads fine (a soft ref); a planned in-window meal naming an
+#      invented ingredient surfaces as a candidate, is suppressed once added to the list, and two
+#      back-to-back candidate GETs return the SAME version (persists nothing); the GATE mirrors
+#      api-nutrition-gate; delete removes it. Plus an in-file route-vs-tool check (always-run home:
+#      shopping-list-consumers.mjs). Snapshots+restores cases.json. Skipped when no board is up.
 #  10i. api-fitness-push — ONLY if a board is running: a push INGEST → SUMMARIZE round-trip that
 #      kills the split-brain-taxonomy bug — POST /api/fitness/push a realistic HAE payload (sleep +
 #      heart_rate_variability metrics + a workout), then assert GET /api/fitness/summary returns
@@ -257,6 +287,8 @@
 #      plists (+ its REAL bind behavior via a throwaway http server), scheduled
 #      backup plist, spoke install-set scoping + loud role errors, the loader's
 #      spoke/localhost + invalid-role hard-fails. Run UNCONDITIONALLY (node only).
+#   13g. upgrade-check.mjs — the post-pull planner (scripts/upgrade-check.mjs): path → step
+#      contract + a CLI smoke test on a throwaway git repo. Hermetic; HARD gate.
 #  14. search-sidecar — headless python tests for the semantic search sidecar
 #      (search/test_search.py): index/topk/batch/determinism over BOTH backends,
 #      offline (COS_SEARCH_EMBEDDER=hash, no network). uv-GATED — skipped (not
@@ -295,8 +327,14 @@ TEST_BOARD_PORT="${COS_TEST_BOARD_PORT:-3999}"
 BASE=""
 BOARD_UP=0
 # Set only for the AUTO-STARTED board (empty under COS_TEST_BOARD_URL): the
-# sandbox data dir, for the one test (api-schema-guard) that must rewrite the
-# store FILE to stage its scenario. Never points at live data.
+# sandbox data dir. Once the sandbox board is UP it is exported to every api-*
+# step as COS_BOARD_DATA (the store file the tests snapshot, restore, and read
+# raw). Every api-*.mjs falls back to the literal board/data/cases.json when the
+# variable is absent — so before this export the 33 steps that were invoked
+# without it snapshotted + restored the LIVE file while the sandbox board wrote
+# elsewhere: their raw-store assertions were vacuous (cos#93's red api-events),
+# and on a dev hub the restore could overwrite a live write made mid-run. Never
+# points at live data.
 TEST_BOARD_DATA_DIR=""
 HTTP_CODE="test-board"
 # Shared by the test board AND the test processes so trust-derivation agrees on
@@ -355,6 +393,8 @@ start_test_board() {
     code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "${url}/api/cases" 2>/dev/null || echo 000)"
     if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ]; then
       BASE="${url}"; BOARD_UP=1
+      # Every api-* step inherits the sandbox store path (see TEST_BOARD_DATA_DIR above).
+      export COS_BOARD_DATA="${TEST_BOARD_DATA_DIR}/cases.json"
       echo "test board UP at ${BASE} (seeded synthetic sandbox; the live store is never touched)."
       return 0
     fi
@@ -423,6 +463,26 @@ if [ "${NODE_MAJOR}" -ge 22 ]; then
     echo "unit: FAIL"
     fail=1
     fail_reasons="${fail_reasons} unit"
+  fi
+else
+  echo "SKIP: Node ${NODE_MAJOR}.x lacks TS type-stripping for \`node --test\` (need >= 22)."
+fi
+
+# --- 1b. starving-obligations ranking (pure logic — hard gate) ---------------
+# cos-ops#24: the aging rank (starvingObligations) over cases + open reminders +
+# unanswered messages — tests/board-starving-obligations.mjs, the file the issue
+# names. Same node:test + TS-resolve mechanism as [1]; Node >= 22 or SKIP.
+echo
+echo "--- [1b] starving-obligations ranking (aging unit) ----------"
+if [ "${NODE_MAJOR}" -ge 22 ]; then
+  if ( cd "${REPO_ROOT}" && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+        --experimental-strip-types --import ./tests/unit/ts-resolve.mjs \
+        --test tests/board-starving-obligations.mjs ); then
+    echo "starving-obligations: PASS"
+  else
+    echo "starving-obligations: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} starving-obligations"
   fi
 else
   echo "SKIP: Node ${NODE_MAJOR}.x lacks TS type-stripping for \`node --test\` (need >= 22)."
@@ -499,7 +559,7 @@ else
   fail_reasons="${fail_reasons} skill-frontmatter"
 fi
 
-# --- 2f. nutrition-status-consumers (hard gate) -------------------------------
+# --- 2f. nutrition-status-consumers + fitness-outcome-consumers (hard gate) --
 # The ADR 0014 gate (cos-ops#18): every top-level field the nutrition status engine
 # (`NutritionStatus` in board/lib/nutrition-status.ts) returns must be CONSUMED — a
 # defined action, or an explicit state-and-move-on — by JOB 0 of nutrition-chef/SKILL.md,
@@ -515,7 +575,61 @@ else
   fail_reasons="${fail_reasons} nutrition-status-consumers"
 fi
 
-# --- 3. vault property checks (grep; mostly WARN-level, one HARD sub-check) --
+# The same ADR 0014 gate for the fitness per-day close-out (cos-ops#19): every
+# top-level field of `PlanReconciliation` (board/lib/fitness-plan-status.ts) must be
+# consumed by fitness-training-plan/SKILL.md's "### 0.5 CLOSE OUT last week" section
+# AND `unresolvedDays` by fitness-pre-workout-brief/SKILL.md's "## STEP 1.5" section;
+# also pins the route-vs-tool check (the PATCH .../day route and the fitness-client /
+# MCP server both reference it) as an ALWAYS-RUN static check, since the live-board
+# api test's own copy of that assertion silently SKIPs when no board is up. Rides
+# THIS existing step id rather than minting a new one (ADR 0022 — the static [2*]
+# family already hit its five-in-eight-days revisit trigger).
+echo "--- [2f] fitness-outcome-consumers (close-out field contract) ---"
+if node "${SCRIPT_DIR}/fitness-outcome-consumers.mjs"; then
+  echo "fitness-outcome-consumers: PASS"
+else
+  echo "fitness-outcome-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} fitness-outcome-consumers"
+fi
+
+# --- 2f. shopping-list-consumers (hard gate; rides the [2f] step id — cos-ops#37) --
+# The ADR 0014 gate's shopping twin: every top-level field the shopping-candidates
+# engine (`ShoppingCandidatesResult` in board/lib/shopping-candidates.ts) returns, and
+# every shopping tool mcp/nutrition-server/server.mjs's TOOLS array registers, must be
+# CONSUMED — by name — inside JOB 6 of nutrition-chef/SKILL.md. Also enforces a small
+# set of load-bearing phrases, that the engine defines no new threshold constant, that
+# the shopping routes never reference `pending`, and the route-vs-tool wiring. Static,
+# read-only, node-only.
+echo
+echo "--- [2f] shopping-list-consumers (JOB 6 field + tool contract) ---"
+if node "${SCRIPT_DIR}/shopping-list-consumers.mjs"; then
+  echo "shopping-list-consumers: PASS"
+else
+  echo "shopping-list-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} shopping-list-consumers"
+fi
+
+# --- 2f. triage-decisions-consumers (hard gate; rides [2f] — cos-ops#41) -----
+# The ADR 0014 gate: every top-level field TriageDecisionSummary (board/lib/triage-decisions.ts)
+# returns, and every triage tool the board MCP server registers, must be CONSUMED — by name —
+# by mail-to-board (which also records BEFORE it watermarks) and reminders-review's digest
+# STEP. Rides this existing [2f] id with its own echo line + fail_reasons token rather than
+# minting a new [2*] id — a parser-grade gate needs no new test step (cos-ops#21's direction;
+# #94's fitness-outcome-consumers and #98's shopping-list-consumers do the same). Static,
+# read-only, node-only.
+echo
+echo "--- [2f] triage-decisions-consumers (drop-record + digest field contract) ---"
+if node "${SCRIPT_DIR}/triage-decisions-consumers.mjs"; then
+  echo "triage-decisions-consumers: PASS"
+else
+  echo "triage-decisions-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} triage-decisions-consumers"
+fi
+
+# --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --
 # Post-migration the vault holds knowledge only: no task checkboxes in wiki/,
 # and reminders are drained to the board (no open "- [ ]" left). These are the
 # migration *target*; flagged as WARN so the suite is runnable while the
@@ -639,6 +753,61 @@ if [ "${receipt_gate_fail}" -ne 0 ]; then
   fail_reasons="${fail_reasons} vault-receipt-contract"
 else
   echo "OK: vault-ingest receipt contract present in vault-operations."
+fi
+
+# 3e. HARD GATE — releasing docs truth (cos-ops#23). The releasing docs must never
+# again claim an owner bypass: ruleset 17526068's `bypass_actors` is deliberately
+# empty, and this exact claim hid a 45-day release outage (ADR 0014: a load-bearing
+# rule is a gate, not prose alone — mirrors 3c/3d). Like 3c/3d it is a PRESENCE
+# check on the load-bearing phrase ("no owner bypass exists" must be stated in both
+# files), plus a case-insensitive guard against the three retired claims (a repo test
+# cannot observe the ruleset itself, only what the docs say about it). If a bypass
+# actor is ever legitimately added, update the docs and this sub-check in the same PR.
+releasing_truth_fail=0
+releasing_md="${REPO_ROOT}/docs/reference/releasing.md"
+release_please_yml="${REPO_ROOT}/.github/workflows/release-please.yml"
+
+if [ -f "${releasing_md}" ]; then
+  if ! grep -qiF -- "no owner bypass exists" "${releasing_md}"; then
+    echo "FAIL: ${releasing_md#"${REPO_ROOT}"/} no longer states that no owner bypass exists."
+    releasing_truth_fail=1
+  fi
+  for p in \
+    "Owner bypass (default)" \
+    "lets the repository owner bypass" \
+    "owner can bypass"; do
+    if grep -qiF -- "${p}" "${releasing_md}"; then
+      echo "FAIL: ${releasing_md#"${REPO_ROOT}"/} still claims an owner bypass: ${p}"
+      releasing_truth_fail=1
+    fi
+  done
+else
+  echo "FAIL: docs/reference/releasing.md not found."
+  releasing_truth_fail=1
+fi
+
+if [ -f "${release_please_yml}" ]; then
+  if ! grep -qiF -- "no owner bypass exists" "${release_please_yml}"; then
+    echo "FAIL: ${release_please_yml#"${REPO_ROOT}"/} no longer states that no owner bypass exists."
+    releasing_truth_fail=1
+  fi
+  if grep -qiF -- "merge via owner bypass" "${release_please_yml}"; then
+    echo "FAIL: ${release_please_yml#"${REPO_ROOT}"/} still claims an owner bypass: merge via owner bypass"
+    releasing_truth_fail=1
+  fi
+else
+  echo "FAIL: .github/workflows/release-please.yml not found."
+  releasing_truth_fail=1
+fi
+
+if [ "${releasing_truth_fail}" -ne 0 ]; then
+  echo "releasing-docs-truth: FAIL"
+  echo "  hint: ruleset 17526068's bypass_actors is [] and stays []; describe the removed"
+  echo "  claim without quoting it (\"no owner bypass exists\" is fine)."
+  fail=1
+  fail_reasons="${fail_reasons} releasing-docs-truth"
+else
+  echo "OK: releasing docs make no owner-bypass claim."
 fi
 
 # --- start the throwaway TEST board (api steps [4]-[12] drive THIS, never live)
@@ -1135,6 +1304,29 @@ else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
+# --- 10h5. api-nutrition-shopping (live board) --------------------------------
+# The v16 shopping-list + candidates contract (cos-ops#37): a `household` NON-FOOD item
+# round-trips; PATCH status:"bought" stamps boughtAt, status:"needed" clears it; a stale
+# expectedVersion 409s; a dangling sourceRef POSTs + reads fine (a soft ref); a planned
+# in-window meal naming an invented ingredient surfaces as a candidate, is suppressed once
+# added to the list, and two back-to-back candidate GETs return the SAME version (persists
+# nothing); the GATE mirrors api-nutrition-gate; delete removes it. Plus an in-file
+# route-vs-tool check (the always-run home is shopping-list-consumers.mjs — this copy can
+# SKIP). Snapshots+restores cases.json. Skipped when no board.
+echo
+echo "--- [10h5] api-nutrition-shopping (live board) ---------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-shopping.mjs"; then
+    echo "api-nutrition-shopping: PASS"
+  else
+    echo "api-nutrition-shopping: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-shopping"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
 # --- 10i. api-fitness-push (only when a board is healthy) --------------------
 # A round-trip through the fitness-push INGEST → SUMMARIZE pipeline that kills the bug the old
 # test masked: with the add-on ENABLED, POST /api/fitness/push a realistic Health-Auto-Export
@@ -1205,6 +1397,69 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-fitness-push-plan: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-fitness-push-plan"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10j3. api-fitness-plan-outcome (only when a board is healthy) ----------
+# The per-day training-plan OUTCOME channel (cos-ops#19: PATCH /api/fitness/coaching/<id>/day
+# + the computed `reconciliation` on GET .../coaching/<id>) with the "fitness" add-on ENABLED:
+# a targeted PATCH changes exactly one day's status, byte-identical elsewhere; SCHEMA_VERSION
+# is untouched (the outcome rides the verbatim payload); `reconciliation.unresolvedDays`
+# reflects the write on the very next GET; a same-date healthEntries workout PROVES exactly
+# one day (provenDone:true + healthEntryId), never the others; an unanswered day stays
+# `planned` and is never written by a mere read; validation (bad status, moved without
+# moved_to, moved_to on a non-moved status, an unknown date, a rest-day date) 400s; the
+# add-on GATE closes the write while the read stays open; the route-vs-tool regex pair
+# (also duplicated, always-run, in fitness-outcome-consumers.mjs — this step SKIPs when no
+# board is up); and push-plan-to-calendar reports a resolved future day as skipped/resolved
+# with no event created. Snapshots + restores board/data/cases.json (coachingArtifacts +
+# healthEntries + settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10j3] api-fitness-plan-outcome (live board) -------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-plan-outcome.mjs"; then
+    echo "api-fitness-plan-outcome: PASS"
+  else
+    echo "api-fitness-plan-outcome: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-plan-outcome"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10k. api-triage-decisions (only when a board is healthy) ----------------
+# The mail-triage editorial-drop decision record (cos-ops#41, v17): a drop writes a receipt
+# keyed (sender, source, reason) — a repeat drop bumps `count`, adds no row; the sender is
+# NORMALIZED (a display-name+parenthetical form collapses to the bare address). The
+# dropped:promoted ratio + the first-time-dropped set are computed on read (ADR 0017): seeding
+# a second sender moves them immediately, confirming one excludes it from `firstTime` on the
+# very next read, and a further drop of an already-confirmed sender bumps its count without
+# resurrecting it. Reversing a sender's row is enforced FAIL-CLOSED — a further drop for that
+# sender (any reason) is refused 403 `code:"sender-reversed"`. Like [10h4]/[13d], the
+# "nothing computed is ever persisted to the store FILE" sub-check needs FILE access to the
+# running board's store, but (unlike them) this step still runs its HTTP-only checks under an
+# external COS_TEST_BOARD_URL board — only that one sub-check SKIPs without a local path
+# (architect finding 4: TEST_BOARD_DATA_DIR is shell-local and must be passed per-command).
+# Snapshots + restores board/data/cases.json (net-zero). Skipped entirely when no board.
+echo
+echo "--- [10k] api-triage-decisions (live board) ------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if [ -n "${TEST_BOARD_DATA_DIR}" ]; then
+    RUN_TRIAGE_OK=1
+    CRM_BASE_URL="${BASE}" COS_BOARD_DATA="${TEST_BOARD_DATA_DIR}/cases.json" node "${SCRIPT_DIR}/api-triage-decisions.mjs" || RUN_TRIAGE_OK=0
+  else
+    RUN_TRIAGE_OK=1
+    CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-triage-decisions.mjs" || RUN_TRIAGE_OK=0
+  fi
+  if [ "${RUN_TRIAGE_OK}" -eq 1 ]; then
+    echo "api-triage-decisions: PASS"
+  else
+    echo "api-triage-decisions: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-triage-decisions"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
@@ -1497,6 +1752,23 @@ else
   echo "gen-roles: FAIL"
   fail=1
   fail_reasons="${fail_reasons} gen-roles"
+fi
+
+# --- 13g. upgrade-check (hermetic; the post-pull planner's path → step contract) ----
+# scripts/upgrade-check.mjs turns a git range into the ordered post-pull checklist for
+# an EXISTING install (rebuild the board, kickstart the bridges whose code moved, upload
+# the rebuilt Cowork bundles, create the new scheduled triggers, add new config keys,
+# back up before a schema bump). Every one of those is a SILENT no-op when forgotten, so
+# the mapping is pinned here. Pure-function tests + a CLI smoke test on a throwaway git
+# repo in $TMPDIR: no board, no launchd, no config, no live data.
+echo
+echo "--- [13g] upgrade-check (hermetic post-pull planner) --------"
+if node "${SCRIPT_DIR}/upgrade-check.mjs"; then
+  echo "upgrade-check: PASS"
+else
+  echo "upgrade-check: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} upgrade-check"
 fi
 
 # --- 13. search sidecar (python, headless, deterministic) --------------------

@@ -229,6 +229,8 @@ on every success body. Each prefix is a `GET` (list) + `POST` on the collection 
 | `/api/nutrition/pantry/reconcile` | bulk pantry reconcile — **POST only**, gated, upserts by normalised name |
 | `/api/nutrition/plan` | meal-plan entries — `?from=&to=&slot=&status=` list filters |
 | `/api/nutrition/status` | reconciliation status — **GET only**, ungated, computed fresh (never stored) |
+| `/api/nutrition/shopping` | shopping-list items — `?status=&category=` list filters (default: ALL rows) |
+| `/api/nutrition/shopping/candidates` | computed shopping candidates — **GET only**, ungated, computed fresh (never stored) |
 
 **The gate is the only thing that distinguishes these from a core route:** every **write** asserts the
 add-on is enabled **inside `mutate()`** (`assertAddonEnabled(db, "nutrition")`), so a disabled add-on
@@ -322,6 +324,60 @@ one record.
 
 Reachable as **`reconcile_pantry`** on the `nutrition` MCP — gated, like every other pantry write.
 
+## The shopping list (v16)
+
+A **persistent list** (`db.shoppingItems`, `ShoppingItem`, `SHOP-<n>`) — the state the brief asked
+for: *"a shopping list… not only about nutrition."* Store only what cannot be computed: a row
+exists because a human or an agent decided to buy the thing, never because the engine below
+inferred it.
+
+| Field | Notes |
+|---|---|
+| `name` | required, non-empty |
+| `category` | `produce \| protein \| dairy \| bakery \| frozen \| pantry \| household \| personal-care \| other` — deliberately includes NON-FOOD |
+| `quantity` / `unit` | optional |
+| `status` | `needed` (default) \| `bought` \| `dismissed` |
+| `source` | `manual` (default) \| `plan` \| `pantry` \| `channel` |
+| `sourceRef` | a SOFT ref (`MEAL-<n>` \| `PANTRY-<n>` \| `M-<n>`) — dangling tolerated, never validated, exactly like `MealPlanEntry.pantryItemIds` |
+| `note` | optional |
+| `boughtAt` | server-stamped ONLY — set when `status` flips to `bought`, cleared on any other status |
+
+**The category vocabulary deliberately includes non-food** — `household` and `personal-care` sit
+beside the food categories, so one list holds batteries next to bananas; a separate "household"
+add-on would have split the very thing the brief asked to unify. **The status lifecycle**:
+`needed` → `bought` (stamps `boughtAt`) or `dismissed` (keeps history, and is inert — see below).
+Both transitions are a single `PATCH` / `update_shopping_item` call, never a read-modify-write.
+
+### The computed candidates — `/api/nutrition/shopping/candidates`
+
+A **read**, never stored, composing signals the store already carries — the same computed-on-read
+discipline as the status read above:
+
+- **Plan-side** — an ingredient a `planned` meal in the window names, that no pantry row and no
+  live `needed` / bought-this-window list row already covers.
+- **Pantry-side** — `expiredPantryItems` (a FACT — a printed `expiresAt`) and
+  `pantryLifecycle.likelyPastHorizon` (an INFERENCE — no printed date), both read from the same
+  status engine above and never re-derived.
+
+Matching reuses the vertical's one declared name-identity key, `normalizePantryName` (the bulk
+reconcile's own upsert key, above), split into whole-word tokens: a pantry or list **row** matches
+a planned ingredient **line** when every token of the row's name is a whole token of the line —
+so `"Eggs"` matches `"2 eggs"` and an accented pantry name matches its unaccented ingredient line,
+but `"Eggplant"` does not match `"eggs"`, `"Rice vinegar"` does not match `"rice"`, `"Oat milk"`
+does not match `"milk"`. This is a deliberate **under-suppression bias** — a re-offered item costs
+one line in a batched question; a wrongly-suppressed one is a forgotten item, the exact failure
+this feature exists to prevent. The other half of the same bias: a pantry row that is **expired**
+or **likely past its freshness horizon** is not usable stock, so it never makes a planned
+ingredient read as "in pantry" — the ingredient stays a candidate. Both rules are pinned by unit
+tests rather than left to be rediscovered.
+
+**Fact vs. inference, never blurred.** An expired row states a fact (`expired <expiresAt>`); a
+freshness-horizon row carries the label **`(inferred — no printed date)`**, verbatim, at every hop
+that renders it — the engine's `reason` string, the MCP render, and the operator skill's prose.
+
+**Nothing routes through `db.pending`.** Confirmation is conversational, exactly like the bulk
+pantry reconcile above — never the board's propose/approve queue.
+
 ## The nutrition MCP — the agent's diary verbs
 
 A new **stdio MCP server** (registry name **`nutrition`**, bridge port **`8007`**,
@@ -333,8 +389,9 @@ server's archetype. It never shells out to `curl`, makes **no LLM calls**, and a
 **16 diary tools** for the three verticals below (the read tools ungated and the write tools gated
 behind the add-on flag), the
 [5 v14 tools](#the-new-endpoints-mcp-tools) (the dietary profile + the agent-authored targets)
-documented above, and **`get_nutrition_status`** (the reconciliation status read, ungated — see
-above) — **22 in all**:
+documented above, **`get_nutrition_status`** (the reconciliation status read, ungated — see
+above), and the **5 v16 shopping-list tools** (`list_shopping` / `get_shopping_candidates` ungated,
+the rest gated) — **27 in all**:
 
 | Vertical | Reads | Writes (gated) |
 |---|---|---|
@@ -342,6 +399,7 @@ above) — **22 in all**:
 | **Food log** | `list_food_log`, `get_food_log` | `log_food`, `update_food_log`, `delete_food_log` |
 | **Pantry** | `read_pantry` | `add_pantry_item`, `update_pantry_item`, `remove_pantry_item`, `reconcile_pantry` |
 | **Meal plan** | `list_meal_plan`, `get_meal_plan` | `plan_meal`, `update_meal_plan`, `remove_meal_plan`, `push_meal_plan_to_calendar` |
+| **Shopping list** | `list_shopping`, `get_shopping_candidates` | `add_shopping_item`, `update_shopping_item`, `remove_shopping_item` |
 
 A write on a **disabled** add-on returns the board's `404`, surfaced as a `Not found.` tool error —
 the tool descriptions tell the agent to enable the add-on from the `/addons` catalog and retry. The
@@ -396,6 +454,17 @@ can't (the same food in another language, or at a different pack size), then pro
 collapsed diff — counts first, only the genuinely ambiguous items named — for a single confirmation.
 That confirmation fires **even in auto mode**, because a photo extraction is fallible; expired items
 are proposed for removal in the same confirmation, and `reconcile_pantry` itself never deletes.
+
+**The Friday shopping draft (JOB 6).** After JOB 0's reconcile, the skill reads `list_shopping` +
+`get_shopping_candidates` and splits the result into a **proven set** (`source: "plan"` — an
+ingredient this week's plan names that the pantry doesn't hold, written directly) and a
+**judgement set** (the pantry-side FACT/INFERENCE candidates, plus anything the skill knows from
+context the state can't see). Auto mode writes the proven set and asks **at most one** batched
+question for the judgement set; approval mode lays the whole proposed list out for **exactly one**
+yes. A clean list — nothing to add, nothing to ask — produces **no output at all**, the same
+don't-chase-silence contract `reminders-review` uses. Ticking an item off
+(`update_shopping_item(id, status: "bought")`) **offers** one `reconcile_pantry` for the bought
+food rows afterward, closing the loop back into the pantry without a second capture.
 
 ### Control model — transparency, not "fail-closed"
 

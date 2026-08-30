@@ -1,16 +1,25 @@
-// tests/skill-reachability.mjs — a skill may only delegate to a slash-skill that exists in ITS OWN
-// runtime (board/.claude/CLAUDE.md: "a skill may only compose tools that already exist"). Every
-// board skill runs in Cowork, which installs skills only from board/.claude/skill-bundles/*.zip —
-// so a delegation to a skill with no bundle there is a silent no-op at runtime, not a load-time
-// error. That is exactly how cos-ops#1 happened: two capture sweeps delegated vault ingest to
-// `/second-brain-ingest`, a skill that lives only in the vault's own headless session, and the
-// vault went unfed for 41 days with no error anywhere.
+// tests/skill-reachability.mjs — this file owns TWO reachability contracts, in both directions:
+//
+// SCAN 1 (delegation -> target): a skill may only delegate to a slash-skill that exists in ITS
+// OWN runtime (board/.claude/CLAUDE.md: "a skill may only compose tools that already exist").
+// Every board skill runs in Cowork, which installs skills only from
+// board/.claude/skill-bundles/*.zip — so a delegation to a skill with no bundle there is a silent
+// no-op at runtime, not a load-time error. That is exactly how cos-ops#1 happened: two capture
+// sweeps delegated vault ingest to `/second-brain-ingest`, a skill that lives only in the vault's
+// own headless session, and the vault went unfed for 41 days with no error anywhere.
+//
+// SCAN 2 (registry -> reference, cos-ops#35): an add-on's registry-declared setup skill
+// (board/lib/addons.ts's mcp.setupSkill) must be reachable from the first-run orchestrator
+// (.claude/skills/cos-setup/SKILL.md) — either sequenced as a step, or explicitly declared out of
+// scope with a reason. That is exactly how cos-ops#35 happened: `fitness-mcp-setup` and
+// `body-mcp-setup` were both declared in the registry and both silently absent from cos-setup,
+// and `setupSkill` had zero code consumers to notice the drift.
 //
 //   node tests/skill-reachability.mjs
 //
 // Read-only, no deps — scans the checked-in tree directly (board-lint.mjs is the precedent for a
 // static invariant checker living in tests/; this is a fourth, disjoint gate: pack-skills --check
-// owns bundle FRESHNESS + catalog SYNC, this owns delegation-target EXISTENCE).
+// owns bundle FRESHNESS + catalog SYNC, this owns delegation-target EXISTENCE in both directions).
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -83,17 +92,92 @@ for (const file of files) {
   })
 }
 
-if (violations.length) {
-  console.error('[skill-reachability] delegation target(s) with no Cowork bundle:')
-  for (const v of violations) console.error(`  ${v}`)
-  console.error(
-    `[skill-reachability] ${violations.length} violation(s) across ${files.length} file(s) scanned. ` +
-      'A skill may only delegate to a slash-skill that exists in its own runtime — see board/.claude/CLAUDE.md.',
+const scan1Count = violations.length
+
+// SCAN 2 (registry -> reference, cos-ops#35): every add-on's registry-declared setupSkill must be
+// reachable from cos-setup — either sequenced as a step, or explicitly declared out of scope with
+// a reason. Source-level regex over board/lib/addons.ts as TEXT, not an import — the house idiom
+// for a tests/ static gate (tests/board-lint.mjs reads its inputs the same way).
+const ADDONS_FILE = join(REPO_ROOT, 'board', 'lib', 'addons.ts')
+const ROOT_SKILLS_DIR = join(REPO_ROOT, '.claude', 'skills')
+const COS_SETUP_FILE = join(ROOT_SKILLS_DIR, 'cos-setup', 'SKILL.md')
+
+const rootSkillExists = (name) => {
+  try {
+    return statSync(join(ROOT_SKILLS_DIR, name, 'SKILL.md')).isFile()
+  } catch {
+    return false
+  }
+}
+
+const addonsSrc = readFileSync(ADDONS_FILE, 'utf8')
+const setupSkills = new Set(
+  [...addonsSrc.matchAll(/setupSkill:\s*["']([a-z0-9-]+)["']/g)].map((m) => m[1]),
+)
+// Every `setupSkill:` key in the registry must have parsed as a plain quoted kebab string — a
+// template literal, a shared const, or an odd name would otherwise silently shrink the checked
+// set (a per-entry false negative the >= 1 guard below cannot see).
+const setupSkillKeys = (addonsSrc.match(/\bsetupSkill\s*:(?!\s*string\b)/g) || []).length // registry entries only, not the interface's `setupSkill: string`
+if (setupSkillKeys !== setupSkills.size) {
+  violations.push(
+    `board/lib/addons.ts has ${setupSkillKeys} setupSkill key(s) but only ${setupSkills.size} parsed as a ` +
+      'plain quoted kebab-case string — every setupSkill value must be written as "name-mcp-setup" so this ' +
+      'gate can see it.',
   )
+}
+
+if (setupSkills.size === 0) {
+  // The parse itself broke (regex or registry moved) — deliberately >= 1, not an exact count, so
+  // a fourth add-on landing never has to bump a frozen expectation here.
+  violations.push(
+    'no mcp.setupSkill entries parsed from board/lib/addons.ts — the regex or the registry moved; ' +
+      'this scan can no longer see its input.',
+  )
+} else {
+  const cosSetupSrc = readFileSync(COS_SETUP_FILE, 'utf8')
+  for (const name of setupSkills) {
+    if (!rootSkillExists(name)) {
+      violations.push(
+        `board/lib/addons.ts declares setupSkill "${name}" but .claude/skills/${name}/SKILL.md ` +
+          "does not exist — a typo'd or renamed setupSkill value.",
+      )
+    }
+    // The slash-invocation form only: `/name` not preceded by a path/word character, so a bare
+    // file-path mention (`.claude/skills/name/SKILL.md`) does not count as reachability.
+    if (!new RegExp('(?<![\\w./-])/' + name + '(?![\\w-])').test(cosSetupSrc)) {
+      violations.push(
+        `\`/${name}\` is declared as an add-on's setupSkill in board/lib/addons.ts but ` +
+          '.claude/skills/cos-setup/SKILL.md never references it — sequence it as a step (or ' +
+          `declare it out of scope with a reason), naming it as \`/${name}\`.`,
+      )
+    }
+  }
+}
+
+const scan2Count = violations.length - scan1Count
+
+if (violations.length) {
+  console.error('[skill-reachability] reachability violation(s):')
+  for (const v of violations) console.error(`  ${v}`)
+  const contracts = []
+  if (scan1Count > 0) {
+    contracts.push(
+      `${scan1Count} across ${files.length} file(s) scanned — a skill may only delegate to a ` +
+        'slash-skill that exists in its own runtime (see board/.claude/CLAUDE.md).',
+    )
+  }
+  if (scan2Count > 0) {
+    contracts.push(
+      `${scan2Count} across ${setupSkills.size} registry setup skill(s) checked — an add-on's ` +
+        'setupSkill in board/lib/addons.ts must be reachable from cos-setup (see cos-ops#35).',
+    )
+  }
+  console.error(`[skill-reachability] ${violations.length} violation(s) total. ${contracts.join(' ')}`)
   process.exit(1)
 }
 
 console.log(
-  `[skill-reachability] ${files.length} file(s) scanned, ${refsChecked} delegation ref(s) checked — all reachable.`,
+  `[skill-reachability] ${files.length} file(s) scanned, ${refsChecked} delegation ref(s) checked, ` +
+    `${setupSkills.size} registry setup skill(s) reachable from cos-setup — all reachable.`,
 )
 process.exit(0)

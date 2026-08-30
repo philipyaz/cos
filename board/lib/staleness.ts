@@ -5,12 +5,16 @@
 // clock (`now`/`today`) injected, a thin `force-dynamic` route returning the read + `version`,
 // one MCP tool, a unit test, and an api test. Worked examples: `nutrition-status.ts` +
 // `/api/nutrition/status`, `selectVaultCoverage` + `/api/cases/vault-coverage`, and now
-// `needsAttention` (`./selectors`) + `/api/cases/needs-attention`.
+// `needsAttention` (`./selectors`) + `/api/cases/needs-attention`. VARIANT: a computed read may
+// instead ride an EXISTING domain GET when the issue forbids a new route — cos-ops#19's fitness
+// reconciliation (riding the existing `GET /api/fitness/coaching/[id]`) is the worked example.
 //
 // This module owns the VOCABULARY — the whole-day-difference idiom + the idle thresholds + this
 // rule — not an engine registry. Each status read's engine stays in its own domain module
-// (nutrition-status, body-baseline, selectors, and cos-ops#19's future fitness read all IMPORT
-// from here; they do not move here). Whole-day differences over "YYYY-MM-DD" strings use
+// (nutrition-status, body-baseline, selectors, and fitness-plan-status keep their own modules;
+// they do not move here — the fitness read compares dates with strict lexicographic string
+// comparison and imports `wholeDaysBetween` only if a whole-day diff there is ever actually
+// needed). Whole-day differences over "YYYY-MM-DD" strings use
 // `wholeDaysBetween` below — NEVER mint a private day-diff (the last private one, body-baseline's
 // `dayDiff`, died in this change). Idle thresholds are named constants here, never inline numbers.
 //
@@ -50,5 +54,7 @@ export function wholeDaysBetween(fromDay: string, toDay: string): number {
 // here at the tighter attention threshold per cos-ops#20 (the brief's direction is EARLIER agent
 // detection, and agingWaiting's 3-day rule is the one becoming a public API contract at this
 // moment). Measured zero live-membership change on the day it shipped: no case sat in the 3–5 day
-// idle band on the live store.
+// idle band on the live store. Also consumed by starvingObligations (./selectors) as the
+// membership gate over open reminders and unanswered messages, and (via isStale) over cases —
+// cos-ops#24's aging rank.
 export const STALE_AFTER_DAYS = 3;

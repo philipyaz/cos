@@ -43,6 +43,22 @@ export const VALID_PANTRY_LOCATION: PantryLocation[] = ["fridge", "freezer", "pa
 export type MealPlanStatus = "planned" | "cooked" | "skipped";
 export const VALID_MEAL_PLAN_STATUS: MealPlanStatus[] = ["planned", "cooked", "skipped"];
 
+// A shopping-list item's aisle grouping — deliberately includes non-food (v16; the
+// brief's "not only about nutrition"): household + personal-care sit beside the food
+// categories so a persistent list can hold batteries next to bananas.
+export type ShoppingCategory = "produce" | "protein" | "dairy" | "bakery" | "frozen" | "pantry" | "household" | "personal-care" | "other";
+export const VALID_SHOPPING_CATEGORY: ShoppingCategory[] = ["produce", "protein", "dairy", "bakery", "frozen", "pantry", "household", "personal-care", "other"];
+
+// A shopping-list item's lifecycle state. "dismissed" keeps history (never deleted)
+// but is inert — it suppresses nothing (see computeShoppingCandidates).
+export type ShoppingStatus = "needed" | "bought" | "dismissed";
+export const VALID_SHOPPING_STATUS: ShoppingStatus[] = ["needed", "bought", "dismissed"];
+
+// Where a shopping-list row came from — "channel" is the WhatsApp-feed seam (cos-ops#39
+// ships the producer; this vertical only reserves the value + the soft M-<n> sourceRef).
+export type ShoppingSource = "manual" | "plan" | "pantry" | "channel";
+export const VALID_SHOPPING_SOURCE: ShoppingSource[] = ["manual", "plan", "pantry", "channel"];
+
 // ── Nutrition weight-loss enums (v10) ──────────────────────────────────────────
 // The weight-loss vertical adds two pure value domains used by NutritionGoal + the
 // targets engine. Each has a VALID_ array (mirroring the v9 enums) so the goal route
@@ -129,7 +145,16 @@ export const VALID_BIOLOGICAL_SEX: BiologicalSex[] = ["male", "female"];
 // after the agent confirms the vault MCP reports a completed ingest that named the case. An
 // absent receipt === the vault has never been told about this case (fail-closed); a receipt
 // older than the case's updatedAt === told, but stale since. No new enums.
-export const SCHEMA_VERSION = 15;
+// v16 adds db.shoppingItems (ShoppingItem[]) — the persistent shopping list, owned by the
+// "nutrition" add-on — purely additive; old v15 files read unchanged (the array defaults
+// absent). migrate() carries it forward when present, no backfill, no synthesis. New enums:
+// ShoppingCategory, ShoppingStatus, ShoppingSource.
+// v17 adds db.triageDecisions (TriageDecision[]) — the per-(sender, source, reason) editorial-drop
+// decision record mail-to-board's five-test gate writes when it drops a thread, and
+// /reminders-review's first-time-senders digest reviews. Purely additive; old files read unchanged
+// (triageDecisions defaults to []). migrate() carries it forward when present — no backfill, since
+// no drop was ever recorded before this version. New enums: TriageDropReason, TriageDecisionStatus.
+export const SCHEMA_VERSION = 17;
 
 // Who performed a mutation — drives activity attribution + note authorship.
 export type Actor = "human" | "agent" | "system";
@@ -429,6 +454,27 @@ export interface MealPlanEntry {
   updatedAt: string;
 }
 
+// The persistent shopping list (v16) — the state half of cos-ops#37. Store only what
+// cannot be computed (ADR 0017); computeShoppingCandidates (board/lib/shopping-candidates.ts)
+// derives suggestions on read and persists nothing. `sourceRef` is a SOFT ref, exactly
+// like MealPlanEntry.pantryItemIds — dangling tolerated, never validated: "MEAL-<n>" |
+// "PANTRY-<n>" | "M-<n>" (the WhatsApp-feed seam cos-ops#39 will produce). `boughtAt` is
+// server-stamped only (applyShoppingItemUpdate) — never read from a caller's patch.
+export interface ShoppingItem {
+  id: string; // "SHOP-<n>" minted like CASE-<n>/EVT-<n> ids
+  name: string; // required, non-empty
+  category?: ShoppingCategory;
+  quantity?: number;
+  unit?: string;
+  status: ShoppingStatus; // "needed" (default)
+  source: ShoppingSource; // "manual" (default at the route boundary)
+  sourceRef?: string; // MEAL-<n> | PANTRY-<n> | M-<n>, soft — see above
+  note?: string;
+  boughtAt?: string; // ISO — stamped when status flips to "bought", cleared otherwise
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ── Nutrition weight-loss records (v10) ────────────────────────────────────────
 // The weight-loss vertical adds two pieces of state owned by the "nutrition" add-on:
 // a time-series of weigh-ins (db.weights) and ONE goal/profile (db.nutritionGoal). Both
@@ -589,15 +635,20 @@ export const VALID_ARTIFACT_SOURCE: ArtifactSource[] = ["agent", "human", "board
 // (kind, periodKey): the periodKey is the ISO week ("2026-W25") for plan/review, a
 // "YYYY-MM-DD" day for a brief, and "<from>_<to>" for a correlation report — re-persisting
 // the same (kind, periodKey) UPSERTS (replaces payload/source/generatedAt, keeps id +
-// createdAt sticky). `payload` is the kind-specific canonical body stored verbatim (the
-// existing generate route's output). `generatedAt` is the model-generation time (payload's
-// own generated_at when present, else createdAt); createdAt is the sticky first-persist time.
+// createdAt sticky). `payload` is the kind-specific canonical body (the existing generate
+// route's output) — stored verbatim EXCEPT three BOARD-OWNED per-day keys on a training_plan's
+// `days[i]`: `eventId` (#81, the calendar-push receipt), and `status` / `movedTo` (cos-ops#19,
+// the recorded outcome). The board validates, carries them forward across an upsert (see
+// upsertCoachingArtifact), conditionally clears them (applyPlanDayOutcome), and computes over
+// them (computePlanReconciliation) — never send them when saving a plan; the board owns them.
+// `generatedAt` is the model-generation time (payload's own generated_at when present, else
+// createdAt); createdAt is the sticky first-persist time.
 export interface CoachingArtifact {
   id: string;            // minted "COACH-<n>"
   kind: CoachingArtifactKind;
   periodKey: string;     // UNIQUE per (kind, periodKey): ISO week / "YYYY-MM-DD" / "<from>_<to>"
   source: ArtifactSource;
-  payload: Record<string, unknown>; // the kind-specific canonical body (verbatim)
+  payload: Record<string, unknown>; // the kind-specific canonical body (verbatim except the board-owned per-day keys — see above)
   generatedAt: string;   // ISO; payload.generated_at if present else createdAt
   createdAt: string;     // ISO; sticky first-persist time (preserved across upsert)
   updatedAt: string;     // ISO; bumped on every upsert
@@ -804,6 +855,48 @@ export interface QuarantineRecord {
   caseId?: string; // board case the message was link_message'd to at quarantine time
   replayed?: boolean; // released-queue replay flag (default false); true once re-admitted to triage
   releasedAt?: string; // ISO-8601 UTC; stamped on the status→released transition — the clock the TTL auto-purge measures from
+}
+
+// ── Mail-triage decisions (v17; this store, NOT the guard sidecar) ────────────
+// A per-(sender, source, reason) editorial-drop record — deliberately NOT a log of dropped
+// emails: mail-to-board's five-test gate (SKILL.md) fails a thread for one of five reasons and
+// this collection remembers the VERDICT, not the message. Structural twin of QuarantineRecord
+// (a dedup'd row, count/firstSeen/lastSeen, a human review lifecycle, no auto-delete) but a
+// deliberate vocabulary fork: an editorial "this sender is noise" judgment reads better as
+// active/reversed than the security released/dismissed or the reminder done/dismissed — do not
+// mint a fourth vocabulary for "the human acknowledged/overrode" in this domain.
+
+// Which of mail-to-board's five reminder tests the thread FAILED (the first failing test wins) —
+// the same vocabulary reminders-review names as its dismiss reason codes: Notification · Watch ·
+// No-stakes · Open-loop · Want/courtesy. One language across the intake gate and the sweep.
+export type TriageDropReason = "notification" | "watch" | "no_stakes" | "open_loop" | "want_courtesy";
+export const VALID_TRIAGE_DROP_REASON: TriageDropReason[] = [
+  "notification", "watch", "no_stakes", "open_loop", "want_courtesy",
+];
+
+//   active   — the standing judgment: this sender's mail (for this reason) is noise; drops fold in
+//   reversed — the human said KEEP: recording further drops for this sender+source is REFUSED
+//              (403 "sender-reversed"). Deliberate vocabulary fork from the quarantine lifecycle's
+//              released/dismissed and the reminder's done/dismissed: an editorial verdict needs the
+//              unambiguous word. Do not mint a fourth vocabulary for "the human overrode".
+export type TriageDecisionStatus = "active" | "reversed";
+export const VALID_TRIAGE_DECISION_STATUS: TriageDecisionStatus[] = ["active", "reversed"];
+
+// One editorial-drop decision — a per-(sender, source, reason) FACT ("this sender's mail was judged
+// noise"), deliberately NOT a log of dropped emails: hundreds of drops compress into one row whose
+// `count` bumps. `sender` is the normalized bare lowercase address (the upsert key half, like
+// TrustRecord.email). `reviewedAt` is stamped only when the human ANSWERS the digest (confirm or
+// reverse); absent = never asked-and-answered, so the sender is still "first-time" for review.
+export interface TriageDecision {
+  id: string;              // minted "TD-<n>"
+  sender: string;          // normalized: lowercased, trimmed, addr-spec extracted
+  source: MessageSource;   // "gmail" today; whatsapp-triage is the named follow-on
+  reason: TriageDropReason;
+  count: number;           // drops folded into this row (>= 1)
+  firstSeen: string;       // ISO — first drop
+  lastSeen: string;        // ISO — latest drop
+  status: TriageDecisionStatus;
+  reviewedAt?: string;     // ISO — set by resolve (confirm/reverse); absent = unreviewed
 }
 
 // ── Encrypted off-site backup (lives in ~/.cos-backups, NOT in this store) ─────
@@ -1043,6 +1136,7 @@ export interface DBShape {
   bodyObjective?: BodyObjective; // Body objective SINGLETON (v14) — free-text goal + target anchor; owned by the "body" add-on (NOT an array)
   dietProfile?: DietProfile; // Dietary profile SINGLETON (v14) — allergies/dietType/notes/philosophy; owned by the "nutrition" add-on (NOT an array)
   nutritionTargets?: NutritionTargetArtifact[]; // Agent-authored daily nutrition targets (v14); owned by the "nutrition" add-on
+  shoppingItems?: ShoppingItem[]; // The persistent shopping list (v16); owned by the "nutrition" add-on
   healthEntries?: HealthEntry[]; // Apple Watch health time-series (v12); owned by the "fitness" add-on
   athleteProfile?: AthleteProfile; // Athlete training-profile SINGLETON (v12); owned by the "fitness" add-on (NOT an array)
   coachingArtifacts?: CoachingArtifact[]; // Fitness AI coaching artifacts (v13); ONE polymorphic array (all four kinds); owned by the "fitness" add-on
@@ -1050,6 +1144,7 @@ export interface DBShape {
   views?: SavedView[]; // saved views
   labels?: LabelDef[]; // the active label catalog (installed bundles + custom labels)
   settings?: Settings;
+  triageDecisions?: TriageDecision[]; // Mail-triage editorial-drop decisions (v17); core (mail triage) — no add-on gate
 }
 
 export const VALID_CASE_STATUS: CaseStatus[] = ["urgent", "todo", "in_progress", "waiting_for_input", "done"];

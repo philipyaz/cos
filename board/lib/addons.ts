@@ -100,7 +100,8 @@ const NUTRITION_ADDON: AddonManifest = {
   // Owned db ARRAYS only. db.dietProfile (v14 dietary singleton) is a bare object, not an array,
   // so it is omitted here (like the old nutritionGoal). db.weights is RE-HOMED to the "body"
   // add-on (v14). db.nutritionTargets (v14) is the agent-authored daily-targets feed.
-  dataArrays: ["foodLogs", "pantryItems", "mealPlanEntries", "nutritionTargets"],
+  // db.shoppingItems (v16) is the persistent shopping list (cos-ops#37).
+  dataArrays: ["foodLogs", "pantryItems", "mealPlanEntries", "nutritionTargets", "shoppingItems"],
   // HARD-depends on "body": nutrition reads body identity/weight/objective and is meaningless
   // without it, so enabling nutrition auto-enables body (the cascade in /api/addons/[id]).
   dependsOn: [{ id: "body", required: true }],
@@ -137,6 +138,12 @@ const NUTRITION_ADDON: AddonManifest = {
       "get_nutrition_targets",
       // (v14 hard-cut: log_weight/list_weights moved to the body add-on; get/set_nutrition_goal
       //  removed — the free-text body objective replaces the goal singleton.)
+      // v16 shopping list (cos-ops#37)
+      "list_shopping",
+      "add_shopping_item",
+      "update_shopping_item",
+      "remove_shopping_item",
+      "get_shopping_candidates",
     ],
   },
 };
@@ -207,6 +214,8 @@ const FITNESS_ADDON: AddonManifest = {
       // v15 calendar placement (idempotent, overlap-safe; the training-plan twin of
       // nutrition's push_meal_plan_to_calendar).
       "push_plan_to_calendar",
+      // cos-ops#19: the per-day close-out write (targeted; no whole-artifact re-save).
+      "set_plan_day_outcome",
     ],
   },
 };

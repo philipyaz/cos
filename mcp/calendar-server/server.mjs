@@ -59,6 +59,8 @@ const LINK_GUARDRAIL =
 
 // ── Tool definitions (OUR event model field names exactly) ─────────────────────
 
+const PLACEMENT_POLICY = ["within", "margins"];
+
 const CREATE_EVENT_TOOL = {
   name: "create_event",
   description:
@@ -67,7 +69,13 @@ const CREATE_EVENT_TOOL = {
     " `date` is the calendar day it falls on (YYYY-MM-DD); for a timed event also set `startTime` " +
     "(HH:MM 24h) and optionally `endTime`. `allDay` defaults to false. Set `domain` ('work'|'life') " +
     "to mirror the linked case's side, or leave it advisory. Returns the minted EVT-id. A `caseId` " +
-    "that doesn't reference an existing case is rejected with a clear error (search the board first).",
+    "that doesn't reference an existing case is rejected with a clear error (search the board first). " +
+    "…or let the BOARD place it: pass `place` (durationMin; windows in preference order; optional " +
+    "busyWindows — YOUR read of the user's real calendar, per-call, never stored; optional policy " +
+    "'within' = clamp into working hours (admin/work chases — refuses non-working days) or 'margins' " +
+    "= protect working hours (life blocks)) INSTEAD of startTime/endTime — the board finds the " +
+    "earliest free gap overlap-safely and answers 409 with a reason when nothing fits (try the next " +
+    "day).",
   inputSchema: {
     type: "object",
     properties: {
@@ -79,7 +87,9 @@ const CREATE_EVENT_TOOL = {
       allDay: { type: "boolean", description: "All-day event. Defaults to false." },
       startTime: {
         type: "string",
-        description: "Start time as 'HH:MM' (24h), e.g. '14:30'. Present for a timed (non all-day) event.",
+        description:
+          "Start time as 'HH:MM' (24h), e.g. '14:30'. Present for a timed (non all-day) event. " +
+          "Omit this (and endTime) when using `place` instead.",
       },
       endTime: { type: "string", description: "Optional end time as 'HH:MM' (24h)." },
       description: { type: "string", description: "Optional free-text description / agenda." },
@@ -94,6 +104,54 @@ const CREATE_EVENT_TOOL = {
         type: "string",
         enum: CASE_DOMAIN,
         description: "Optional/advisory 'work' or 'life' — may mirror the linked case's domain.",
+      },
+      place: {
+        type: "object",
+        description:
+          "Let the board find the slot INSTEAD of startTime/endTime — the earliest free gap in your " +
+          "candidate windows, overlap-safe against the board's own events and busyWindows. Answers a " +
+          "tool error carrying a 409 reason ('no_free_slot' | 'outside_working_hours' | 'past') when " +
+          "nothing fits; try the next day.",
+        properties: {
+          durationMin: { type: "number", description: "Block length in minutes, 15–240." },
+          windows: {
+            type: "array",
+            description: "Candidate time ranges, in PREFERENCE order — you choose these, the board picks the slot.",
+            items: {
+              type: "object",
+              properties: {
+                start: { type: "string", description: "HH:MM (24h) window start." },
+                end: { type: "string", description: "HH:MM (24h) window end." },
+              },
+              required: ["start", "end"],
+            },
+          },
+          busyWindows: {
+            type: "array",
+            description:
+              "Optional — YOUR read of the user's REAL calendar for the target date, {date,start,end} " +
+              "only (no titles/attendees). Used for this call and discarded; never stored.",
+            items: {
+              type: "object",
+              properties: {
+                date: { type: "string", description: "YYYY-MM-DD." },
+                start: { type: "string", description: "HH:MM (24h) busy-window start." },
+                end: { type: "string", description: "HH:MM (24h) busy-window end." },
+              },
+              required: ["date", "start", "end"],
+            },
+          },
+          policy: {
+            type: "string",
+            enum: PLACEMENT_POLICY,
+            description:
+              "Optional. 'within' clamps candidate windows into working hours and refuses a non-" +
+              "working day (admin/work chases). 'margins' protects working hours as busy, so a life " +
+              "block never lands inside them. Omit for board-events-only avoidance, no working-hours " +
+              "enforcement.",
+          },
+        },
+        required: ["durationMin", "windows"],
       },
     },
     required: ["title", "date"],
@@ -213,7 +271,7 @@ const TOOLS = [
 ];
 
 const server = new Server(
-  { name: "calendar", version: "1.0.0" },
+  { name: "calendar", version: "1.1.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -305,12 +363,23 @@ async function handleCreateEvent(args) {
   if (args.domain !== undefined && !CASE_DOMAIN.includes(args.domain)) {
     return err(`'domain' must be one of: ${CASE_DOMAIN.join(", ")}.`);
   }
+  // `place` (cos-ops#24) — a LIGHT shape check only, mirroring the route's own rule, so the
+  // error arrives before the HTTP hop; the route re-validates durationMin/windows/policy fully.
+  if (args.place !== undefined) {
+    if (typeof args.place !== "object" || args.place === null || Array.isArray(args.place)) {
+      return err("'place' must be an object.");
+    }
+    if (args.allDay === true || (typeof args.startTime === "string" && args.startTime !== "") || (typeof args.endTime === "string" && args.endTime !== "")) {
+      return err("Either explicit times or 'place', not both.");
+    }
+  }
 
   const payload = { title: args.title, date: args.date };
   if (typeof args.allDay === "boolean") payload.allDay = args.allDay;
   for (const k of ["startTime", "endTime", "description", "location", "domain"]) {
     if (typeof args[k] === "string" && args[k] !== "") payload[k] = args[k];
   }
+  if (args.place !== undefined) payload.place = args.place;
   // The board asserts a linked caseId references an existing case and 400s an
   // unknown one — surfaced via api()'s error path. Search the board FIRST.
   if (typeof args.caseId === "string" && args.caseId.trim()) payload.caseId = args.caseId.trim();
@@ -322,7 +391,7 @@ async function handleCreateEvent(args) {
   const when = e.allDay ? "all-day" : [e.startTime, e.endTime].filter(Boolean).join("–") || "(no time)";
   return text(
     `Created ${e.id} — "${e.title}"\n` +
-      `Date: ${e.date} ${when}\n` +
+      `Date: ${e.date} ${when}${args.place !== undefined ? " (placed by the board)" : ""}\n` +
       (e.location ? `Location: ${e.location}\n` : "") +
       (e.domain ? `Domain: ${e.domain}\n` : "") +
       (e.caseId
@@ -441,5 +510,5 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 await start(
   server,
   new StdioServerTransport(),
-  `calendar MCP server v1 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
+  `calendar MCP server v1.1 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
 );

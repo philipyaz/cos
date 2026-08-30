@@ -6,7 +6,7 @@
   },
   "mail-to-board": {
     "class": "scheduled",
-    "summary": "Reconciles your Gmail (received **and** sent) onto the board — links messages to cases, advances tasks, moves lanes, dedups — and **never** undoes your manual edits.",
+    "summary": "Reconciles your Gmail (received **and** sent) onto the board — links messages to cases, advances tasks, moves lanes, dedups — and **never** undoes your manual edits. Drops noise with a per-sender decision receipt.",
     "schedules": [{ "trigger": "Run /mail-to-board", "cadence": "~10–15 min" }]
   },
   "whatsapp-triage": {
@@ -17,18 +17,21 @@
   "board-organize": {
     "class": "scheduled",
     "summary": "Tidies the case tree into a clean **Initiative ▸ Workstream ▸ Case** hierarchy, grounded in your starred / priority items — never re-homing what you placed by hand.",
-    "schedules": [{ "trigger": "Run /board-organize", "cadence": "every 2–6 h / daily" }]
+    "schedules": [
+      { "trigger": "Run /board-organize", "cadence": "every 2–6 h / daily" },
+      { "trigger": "Run /board-organize — include the weekly staleness lens", "cadence": "weekly", "does": "The STALENESS LENS on top of the normal tidy: reads the starving rank (get_needs_attention), researches the top 3 (vault first, web only as fallback), writes the concrete next step into each case's task, and places a linked timed chase block via the board's own placement." }
+    ]
   },
   "reminders-review": {
     "class": "scheduled",
-    "summary": "Reviews every **open reminder** and **closes** the ones already done or past their moment — auto-closing only what's *proven* done (finished checklist, linked case closed, delivery date passed) and **proposing** the rest (cold job-alerts, lapsed RSVPs) — so the reminders list stays a live to-do surface, not a graveyard.",
+    "summary": "Reviews every **open reminder** and **closes** the ones already done or past their moment — auto-closing only what's *proven* done (finished checklist, linked case closed, delivery date passed) and **proposing** the rest (cold job-alerts, lapsed RSVPs) — so the reminders list stays a live to-do surface, not a graveyard. Also surfaces newly filtered senders (the mail sweep's drops) for a keep-or-confirm.",
     "schedules": [{ "trigger": "Run /reminders-review", "cadence": "daily / every few hours" }]
   },
   "nutrition-chef": {
     "class": "scheduled",
-    "summary": "Reconciles the meal plan first — auto-closing past-dated planned meals a food log proves were cooked, batching the rest into one question — then plans the week's meals from what's on hand (preferring what's expiring), or checks how you're tracking to your calorie target.",
+    "summary": "Reconciles the meal plan first — auto-closing past-dated planned meals a food log proves were cooked, batching the rest into one question — then plans the week's meals from what's on hand (preferring what's expiring), or checks how you're tracking to your calorie target — and keeps the persistent shopping list (JOB 6): candidates from plan + pantry, one batched confirmation.",
     "schedules": [
-      { "trigger": "Run /nutrition-chef take stock of the pantry and draft the shopping list", "cadence": "Friday (before the weekend shop)", "does": "Takes stock of the pantry — what's fresh, what's low, what's expiring — and drafts the weekend **shopping list**, after the standing meal-plan reconcile." },
+      { "trigger": "Run /nutrition-chef take stock of the pantry and draft the shopping list", "cadence": "Friday (before the weekend shop)", "does": "Takes stock of the pantry — what's expired, what's likely past its freshness horizon, what this week's plan needs — and drafts the weekend **shopping list**, after the standing meal-plan reconcile." },
       { "trigger": "Run /nutrition-chef plan this week's meals, preferring what's expiring", "cadence": "Sunday", "does": "Plans the week's meals from what's on hand (preferring what's expiring), honoring allergies + diet, optionally onto the calendar — after the standing meal-plan reconcile." }
     ]
   },

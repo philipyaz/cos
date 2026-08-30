@@ -87,7 +87,7 @@ key, so the retired key stays archived offline, labelled with the cutover date.
 ## Operational design — three triggers, one floor
 
 The hard guarantee is the **launchd 03:30 daily floor**
-([`com.chiefofstaff.backup.plist.template`](https://github.com/philipyaz/cos/blob/main/backup/deploy/com.chiefofstaff.backup.plist.template)).
+(rendered from [`backup/backup.service.json`](https://github.com/philipyaz/cos/blob/main/backup/backup.service.json) by `node scripts/gen-launchd.mjs --install backup` — there are no committed plist templates any more).
 While the board is running it *adds* two more triggers of the **same** `backup.mjs` — a manual
 button and an opportunistic top-up — so a machine that's awake and in use is backed up well inside
 the daily window, while a machine that's only ever asleep at 03:30 still gets caught at next wake.

@@ -75,6 +75,52 @@ today's data is already in (the HAE shortcut usually posts it), proceed.
 
 ---
 
+## STEP 1.5 — Close out yesterday (the daily reconciliation)
+
+**Do this AFTER STEP 1's ingest, not before** — the close-out's proof reads today's
+`db.healthEntries`, so reconciling before yesterday's workout is ingested means asking about a
+session the watch already proved.
+
+- `list_coaching_artifacts({ kind: "training_plan", limit: 1 })` → `get_coaching_artifact({ id })`
+  → read **`reconciliation`** (its `unresolvedDays`). When today's brief targets a named other
+  day, still reconcile against **today**.
+- Any `unresolvedDays.days[]` entry with **`provenDone: true`** → `set_plan_day_outcome(artifact_id,
+  date, "done")` **silently** — a same-date workout already proves it happened. One line in the
+  brief's report, no question asked.
+- Any **remaining `unresolvedDays`** → fold **one** question into the brief's opening (e.g.
+  *"Yesterday's strength session — done, skipped, or move it?"*). Answers write through
+  `set_plan_day_outcome`. **Never guess — an unanswered day simply stays `planned`.**
+- **Reorganise today (propose, never auto-move).** When an unresolved-then-answered *move*, or
+  today's own recovery read, argues for it, **propose** pulling the missed session into today
+  (or another day this week), or pushing today's session back. **Never relocate without an
+  explicit yes, in any mode** — this skill never auto-moves a session the way a calendar
+  auto-scheduler would. On a yes:
+  1. `set_plan_day_outcome(old_artifact_id, old_date, "moved", moved_to: <new date>)`.
+  2. Re-save the week (or the target week) via `save_training_plan` with the session placed on
+     its new date — **never include `status`, `movedTo`, or `eventId` keys in the days you
+     send**; the board carries them forward from the old day. **Keep the old date's day entry**
+     in what you send (the board carries its `moved` status + calendar receipt forward by date;
+     dropping the entry loses both), and keep **one entry per date**: a session pulled onto a
+     date that already has one is MERGED into that single entry (or the existing session is
+     pushed to another free day) — the board rejects two entries on one date (400).
+  3. `push_plan_to_calendar` for the affected week (ops#17's idempotent path) so the calendar
+     reflects the move. **Read the user's REAL calendar yourself first** — this skill does not
+     inherit that instruction from `fitness-training-plan`'s STEP 8 (a Cowork bundle is
+     per-skill; text living in another skill's file does not exist at THIS skill's runtime), so
+     it is restated here: read the real calendar for the affected date(s), collect **only**
+     `{date, start, end}` busy times — never a title or attendee — and pass them as
+     `busy_windows` on the push. Cos uses `busy_windows` for that one call only and **never
+     stores or syncs** it.
+  Relay any `skipped` result the push reports, same as the weekly skill does — and when the
+  moved day's own result comes back `resolved` **with an `eventId`**, its original session is
+  still on the calendar: tell the user and offer to remove it via the `calendar` MCP's delete
+  tool (the board never deletes it).
+- **A clean day adds nothing.** Nothing unresolved and nothing worth proposing to move →
+  **no extra output** in the brief — no "all clear" paragraph. The brief simply starts at
+  STEP 1 of the procedure below.
+
+---
+
 ## PROCEDURE — FETCH → GENERATE → PERSIST
 
 `<today>` is today's date as `YYYY-MM-DD` unless the user names another day.
@@ -115,6 +161,13 @@ partial data, don't read a flat 50 as "average recovery".
 date). That planned session is what the brief **confirms or adjusts**. If there's no plan, or
 no entry for today, fall back to a sensible session from the profile's `sports[]` (or a rest
 day if recovery is poor) and say there was no planned session.
+
+Read today's day `status` (from STEP 1.5's fetch, or absent ≡ `planned`) before treating it as
+live: a day already **`status: "moved"`** is NOT today's session anymore — it relocated
+elsewhere; follow its `movedTo` and brief on recovery only (there is no training decision left
+to make for today from that original entry). A day already **`status: "done"`** means today's
+training question is already answered — the brief becomes **recovery-only** (no "should I
+train" call to make; just report readiness).
 
 ### 4. GENERATE the brief (your judgement)
 
@@ -205,6 +258,12 @@ through. Note that the brief is saved and visible on the **/fitness/pre-workout-
 
 ## Conventions (guardrails recap)
 
+- **Close out yesterday FIRST** (STEP 1.5, after the overnight-data ingest) — auto-resolve the
+  proven subset silently, batch the rest into one question, and a clean day adds no extra
+  output.
+- **Never relocate a session without confirmation, in any mode** — propose moving a missed or
+  today's session, but only act on an explicit yes; never fabricate an outcome (an unanswered
+  day stays `planned`).
 - **`fitness` MCP only, via the tools.** Never `bash`/`curl`. The
   **/fitness/pre-workout-brief** page is the read twin (a history feed); you author + persist.
 - **Use the board's `form_score` — never recompute it.** `get_form_score` is the
