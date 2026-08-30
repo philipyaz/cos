@@ -6,16 +6,25 @@ Cos has three families of skills, and the distinction matters before you read fu
   [`board/.claude/skills/`](https://github.com/philipyaz/cos/tree/main/board/.claude/skills)
   and run inside **Claude Cowork**, the agent that drives the board. They are
   prompt-defined routines, not code: a `SKILL.md` is a procedure the operator follows.
+  The family also includes a **called** procedure, [`vault-operations`](../reference/vault-async.md),
+  that the reconcilers below invoke for the vault half of their runs rather than a
+  schedulable sweep of its own.
 - **Vault knowledge skills** — `second-brain-ingest` / `-query` / `-lint`, in
   `vault/example-vault/.claude/skills/`. They own the wiki; they never touch lanes or
   tasks. See [The vault agent](vault-agent.md).
 - **Machine setup skills** — `cos-setup`, `guard-setup`, `mcp-bridge-setup`,
   `backup-recovery`, in `.claude/skills/`. One-time bootstrap, out of scope here.
 
-The operator family has four members: two **reconcilers** that pull channels onto the
-board (`mail-to-board`, `whatsapp-triage`), one **housekeeper** that organizes what they
-leave behind (`board-organize`), and a **catalog of recipes** that describes how each is
-scheduled.
+Every operator skill declares exactly one **automation class**, recorded in
+[`automation.json`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/automation.json) —
+**scheduled** (a sweep worth a Cowork timer, with a suggested trigger + cadence), **called**
+(invoked by other skills mid-run, like `vault-operations` above), or **on-demand only**
+(deliberately timerless, with the reason written down). Two **reconcilers** pull channels onto the
+board (`mail-to-board`, `whatsapp-triage`); one **housekeeper** organizes what they leave behind
+(`board-organize`); the rest span the health, fitness, and messaging domains. The
+[skills README](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/README.md) is the
+**catalog of recipes** that describes how each `scheduled` skill runs — **generated** from
+`automation.json` by `scripts/pack-skills.mjs` (`--check` fails on drift).
 
 !!! tip "See also: Unanswered messages"
     A lighter-weight operator sweep, [`unanswered-messages`](../features/unanswered-messages.md),
@@ -42,8 +51,12 @@ a sweep that finds nothing past its watermark no-ops.
 !!! note "Scheduling is documentation, not a daemon"
     The skills' [`README`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/README.md)
     indexes which skills you can run as Cowork scheduled tasks — what each does, the trigger
-    to paste, and a suggested cadence (mail every 10–15 min, board-organize every few hours).
-    It ships no intervals and starts no processes; you set cadence by hand in Cowork.
+    to paste, and a suggested cadence (mail every 10–15 min, board-organize every few hours,
+    its staleness lens weekly) —
+    **generated** from each skill's declaration in
+    [`automation.json`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/automation.json),
+    so the index cannot silently drift from the skills it describes. It ships no intervals and
+    starts no processes; you set cadence by hand in Cowork.
 
 ```mermaid
 flowchart LR
@@ -58,14 +71,53 @@ flowchart LR
     org -->|Initiative ▸ Workstream ▸ Case| board
 ```
 
+## Getting them into Cowork — the skill bundles
+
+Cowork installs a skill from a **`.zip`**, not from a folder on disk. So each skill is also shipped
+as a bundle under
+[`board/.claude/skill-bundles/`](https://github.com/philipyaz/cos/tree/main/board/.claude/skill-bundles) —
+**one zip per skill**, carrying its `SKILL.md`, its `references/`, and any other supporting file,
+with the skill folder at the archive root. Install via **Cowork Desktop → Settings → Capabilities →
+Skills → Upload skill**.
+
+The bundles are a **build artifact** of the skill folders, in the same sense as `.mcp.json` and the
+[labels reference](../reference/labels.md) — generated, committed, never hand-edited:
+
+```bash
+node scripts/pack-skills.mjs          # rebuild the bundles that changed + the generated catalog
+node scripts/pack-skills.mjs --check  # CI gate: fails if a bundle is stale/missing/orphaned, or the catalog has drifted
+```
+
+!!! warning "A stale zip is a silent failure"
+    The bundle is what Cowork actually runs. Edit a guardrail in `SKILL.md`, skip the rebuild, and
+    the scheduled task keeps following the *old* procedure — with nothing at runtime to tell you.
+    That is why `--check` is a hard CI gate rather than a convention.
+
+The archives are written **deterministically** — entries sorted, fixed 1980-01-01 timestamps, fixed
+permissions, and entries *stored rather than compressed* — so rebuilding an unchanged skill is
+byte-identical on any machine. That is what makes committing binaries tolerable: the diff moves only
+when a skill genuinely changes, and the freshness check is a byte comparison rather than a separate
+checksum manifest.
+
+Compression is off deliberately. Node bundles its own zlib and changed flavors between majors, so
+deflate emits different bytes for identical input across Node versions — enough to make every bundle
+read as stale in CI while being clean locally. Storing also suits git better: git zlib-compresses and
+deltas blobs itself, which works on a mostly-plain-text stored zip and barely at all on a deflated one.
+
 ## The two reconcilers as one shared pipeline
 
 `mail-to-board` and `whatsapp-triage` are the same machine wearing two envelopes. Both
 reconcile a channel's **state** onto the board: link each message to a case, advance or
 close tasks, move the lane, set catalog labels. Both are **board-only writers** — they
 drive the board exclusively through the `board` MCP (Cowork's sandbox blocks outbound
-HTTP, which is the whole reason the MCP exists), and they delegate the *knowledge* in a
-message to the vault router. WhatsApp triage is additionally **read-only on its own
+HTTP, which is the whole reason the MCP exists) — and at the end of a run they compose
+the run's knowledge into one payload and submit it through the vault MCP's async
+`ingest`, driving the job to a terminal state per the
+[`vault-operations`](../reference/vault-async.md) skill — which, on `completed`, also
+stamps the per-case receipt (`mark_vault_ingested`) on the cases the payload named. The
+run's report carries the job's terminal status **and the vault coverage backlog**
+("N matters the vault has not been told about" — the deterministic read over cases
+whose receipt is absent or stale). WhatsApp triage is additionally **read-only on its own
 channel**: it uses only the `whatsapp` MCP read tools and can never send a message.
 
 The contract is best understood as a fixed sequence of guarantees, identical across both
@@ -110,6 +162,67 @@ user sent** means the ball is now in the *other* party's court — the case move
 sent. Linking the user's own sent message with `outbound: true` plus its recipients is
 also what lets the board **auto-derive sender trust** (below); it is the one step you must
 get right for trust to flow.
+
+## The editorial drop — a per-sender decision record
+
+`mail-to-board`'s five-test gate (Step 7 of its `SKILL.md`) fails most threads it sees — a
+notification, a watch, a no-stakes item, an open loop, a want/courtesy — and used to write
+**nothing** when it did: the same `cos/processed` watermark a real reconciliation gets, applied
+to a thread the board never heard about. Since cos-ops#41, a drop leaves a **receipt**: one row
+in `db.triageDecisions`, upserted by `(sender, source, reason)` so hundreds of drops compress
+into tens of rows — a **fact** ("this sender's mail was judged noise"), deliberately not a log of
+dropped emails.
+
+**One reason vocabulary, shared verbatim by both ends of the pipeline.** The five failing tests
+name the `reason`: `notification` · `watch` · `no_stakes` · `open_loop` · `want_courtesy`. Intake
+(`mail-to-board`) and review (`reminders-review`) speak the identical five words — lifted, not
+re-minted — so a sender's history reads the same wherever you look at it.
+
+**Record, then watermark — never the reverse.** `record_triage_decision` is called *before* the
+`cos/processed` label goes on, mirroring the pipeline's own "write, then advance the watermark"
+discipline (above). If the record call fails, the thread is **not** watermarked — an
+unwatermarked thread simply re-enters the next sweep, while a watermark with no receipt would be
+the silent-loss bug this record exists to close.
+
+**Reversal is sender-scoped, and enforced at the write — not just in prose.** A row's lifecycle
+is `active → reversed` (a deliberate vocabulary fork from the guard's `quarantined | released |
+dismissed` and the reminder's `open | done | dismissed` — an editorial "this is noise" verdict
+reads better as `reversed` than either). Reversing **any** row for a `(sender, source)` makes the
+board **refuse** the next drop for that sender: `POST /api/triage-decisions` returns **403** with
+a machine-readable `code: "sender-reversed"`, so even a stale skill bundle (rebuilt but not
+re-uploaded to Cowork) cannot silently keep dropping a sender the human said keep. The reversal is
+**never** mirrored into the [guard's sender-trust store](../security/guard.md): a keep/confirm is
+an editorial verdict about noise, not a security one — the same trust-vs-content split the
+reconcilers already draw (above).
+
+**The review surface: first-time senders only.** `reminders-review` (see
+[Reminders](../features/reminders.md)) gained a digest STEP that reads
+`list_triage_decisions({ source: "gmail" })` and surfaces only senders being filtered for the
+**first time** (an active row with no `reviewedAt`), so the digest is bounded by *new* senders,
+not by mail volume, and stays a one-line no-op ("nothing new was filtered from your mail") on
+most runs. Answering **confirm** stamps the review time and the sweep keeps filtering; answering
+**keep** reverses the row and the sweep stops. Both the ratio (`dropped:promoted`) and the
+first-time set are **computed on read, never persisted** — the same discipline the rest of the
+board's derived state follows.
+
+**Both surfaces, per the platform's own rule (no capability is UI-only):** an HTTP route pair —
+`/api/triage-decisions`, `/api/triage-decisions/{id}` (see [Platform API](platform-api.md)) — and
+three tools on the existing **`board`** MCP server (`record_triage_decision`,
+`list_triage_decisions`, `resolve_triage_decision`; see
+[`mcp/board-server/README.md`](https://github.com/philipyaz/cos/blob/main/mcp/board-server/README.md)).
+No new server, port, or bridge.
+
+**The reconciler asymmetry, stated plainly.** "The two reconcilers as one shared pipeline"
+(above) has one exception today: `mail-to-board`'s drops leave this receipt; `whatsapp-triage`
+runs the identical five tests but does **not** yet record them — a named follow-on, sequenced
+deliberately (prove the rule on one channel before doubling the exposure). Until it lands, the
+digest's scope is Gmail only, stated as such in its own no-op line.
+
+**The editorial twin of the quarantine record.** [Guard quarantine](../security/guard.md) is the
+*security* drop's audit trail (a flagged scan, reviewed and released/dismissed by a human);
+`triageDecisions` is the *editorial* drop's — the same shape (a dedup'd row, a human review
+lifecycle, no auto-delete), a different axis. The two never cross: a reversal here is never a
+trust op, and a quarantine release is never an editorial confirm.
 
 ## The cross-cutting guardrails (a system, not a checklist)
 
@@ -209,8 +322,8 @@ clusters those orphans into a clean **Initiative ▸ Workstream ▸ Case** tree,
 resolved `vaultLinks` entity — the same key the reconcilers stamp.
 
 It touches **only the shape of the tree** — `kind`, `parentId`, container lifecycle, and the
-title/summary of the containers *it* created. It never triages messages, moves lanes,
-touches tasks, or sends anything. Two guardrails define it:
+title/summary of the containers *it* created. It never triages messages, moves lanes, sets
+labels, or sends anything. Two guardrails define it:
 
 - **The human's hand wins.** Grounded in the manual-action guard, a `parentId` (or
   `title`/`summary`) a human set by hand is **frozen** — never re-homed, renamed, or
@@ -231,12 +344,25 @@ skill's own prior placements are refined rather than re-thrashed, proposals stay
 approved, and a clean board no-ops. See the
 [Case hierarchy](hierarchy.md) page for the tree model itself.
 
+**The weekly staleness lens (cos-ops#24) is the one stated exception** to "never touches
+tasks": on its own **weekly** cadence, `board-organize` also consumes the `starving` rank
+`get_needs_attention` computes — a single list across cases, open reminders, and unanswered
+messages, aged by idle time (×1), overdue time (×2), and a passed-unactioned chase block
+(×3); an obligation with a linked *timed* event in the next 7 days is skipped as
+already-allocated, and an *all-day* event never counts. For the top 3 it researches the
+concrete next step (the vault first, a web search only as a fallback), writes it into the
+case's task (`detail`/`dueAt`), and places one *timed* block whose description is the
+researched payload via the board's own `place` (see
+[Calendar placement](../features/placement.md)). The end-of-run report leads with this list,
+worst-first.
+
 ## See also
 
 - [Prompt-injection guard](../security/guard.md) — the fail-closed scanner, trust model,
   and quarantine the guard-first step relies on.
-- [The vault agent](vault-agent.md) — `second-brain-ingest` and the knowledge half of the
-  loop these skills delegate to.
+- [The vault agent](vault-agent.md) — what happens server-side once `ingest` lands
+  (`second-brain-ingest`'s synthesis); the sweeps above reach it only through the vault
+  MCP's async `ingest`, never directly.
 - [Case hierarchy](hierarchy.md) — the Initiative ▸ Workstream ▸ Case model `board-organize`
   files into.
 - [Platform API](platform-api.md) — the single board HTTP write seam behind every `board`

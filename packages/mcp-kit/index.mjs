@@ -129,6 +129,17 @@ export function makeBoardApi(entityWord, crmBaseUrl) {
     const headers = {};
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (isWrite) headers["x-actor"] = "agent";
+    // x-device rides EVERY request (reads too) so the board can track which machine
+    // an agent is acting from — the multi-device Devices last-seen signal. It carries
+    // this machine's COS_DEVICE_ID (sanitized) + role; absent when unset (the board
+    // falls back to a hostname/"unknown" and labels the column honestly). Never a
+    // secret — just identity, like x-actor.
+    // The slug shape MIRRORS board/lib/cos-env.ts slugifyDeviceId (this .mjs is outside
+    // the Next root and cannot import it) — the board re-slugifies the header anyway.
+    const deviceId = (process.env.COS_DEVICE_ID || "").trim();
+    if (deviceId) headers["x-device"] = deviceId.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64);
+    const deviceRole = (process.env.COS_DEVICE_ROLE || "").trim();
+    if (deviceRole === "hub" || deviceRole === "spoke") headers["x-device-role"] = deviceRole;
 
     let res, data;
     try {

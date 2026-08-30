@@ -182,7 +182,7 @@ export function ReminderDrawer({
       <aside
         role="dialog"
         aria-label={isEdit ? `Edit reminder ${reminder?.id}` : "New reminder"}
-        className="fixed top-0 right-0 h-screen w-full sm:w-[460px] bg-white border-l border-ink-200 shadow-xl z-50 flex flex-col"
+        className="fixed top-0 right-0 h-dvh-fallback w-full sm:w-[460px] bg-white border-l border-ink-200 shadow-xl z-50 flex flex-col"
       >
         <div className="px-5 h-12 flex items-center border-b border-ink-100 gap-2">
           <span className="text-[13px] font-semibold text-ink-900">
@@ -317,7 +317,7 @@ export function ReminderDrawer({
         </div>
 
         {/* Footer — Save (create/patch) + Delete on an existing reminder. */}
-        <div className="px-5 h-14 flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
+        <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           {isEdit && (
             <button
               onClick={onDelete}

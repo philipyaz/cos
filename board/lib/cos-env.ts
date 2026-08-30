@@ -64,12 +64,32 @@ function machineEnv(): Record<string, string> {
   return _cosEnvCache;
 }
 
+// The standard machine-setting lookup for the board side: process.env > cos.env >
+// fallback. The ENV read is per-call (tests flip it); the cos.env parse is cached
+// (config is static per process — the boardapp restarts on redeploy). The device
+// getters + the Devices join-blob builder ALL resolve through this, so precedence
+// never drifts between them.
+export function machineValue(name: string, fallback: string): string {
+  const env = process.env[name];
+  if (env && env.trim()) return env;
+  const fromFile = machineEnv()[name];
+  return fromFile && fromFile.trim() ? fromFile : fallback;
+}
+
+// The canonical device-id slug shape (filename-safe; keys manifests, the lease, the
+// last-seen map). One owner inside the Next root — getDeviceId AND devices.ts's
+// header-input sanitizer both use it, so the shape can't diverge. (backup/config.mjs
+// + mcp-kit hold their own copies: they are .mjs OUTSIDE the Next root and cannot
+// import this — the shape is documented as MIRRORED there.)
+export function slugifyDeviceId(v: string): string {
+  return v.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64);
+}
+
 // "hub" runs the state machine; "spoke" is a stateless client of the hub. Any
 // value other than the two known roles degrades to hub (the loader validates
 // loudly at setup time — this read-side is deliberately tolerant).
 export function getDeviceRole(): "hub" | "spoke" {
-  const raw = (process.env.COS_DEVICE_ROLE || machineEnv().COS_DEVICE_ROLE || "hub").trim();
-  return raw === "spoke" ? "spoke" : "hub";
+  return machineValue("COS_DEVICE_ROLE", "hub").trim() === "spoke" ? "spoke" : "hub";
 }
 
 // The stable per-machine id (sanitized to a filename-safe slug; hostname fallback
@@ -78,9 +98,9 @@ export function getDeviceRole(): "hub" | "spoke" {
 // predicate) — keyed on the raw value so a test-time env override stays live.
 let _idCache: { raw: string; id: string } | null = null;
 export function getDeviceId(): string {
-  const raw = (process.env.COS_DEVICE_ID || machineEnv().COS_DEVICE_ID || os.hostname()).trim();
+  const raw = machineValue("COS_DEVICE_ID", os.hostname()).trim();
   if (_idCache && _idCache.raw === raw) return _idCache.id;
-  const id = raw.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64) || "unknown-device";
+  const id = slugifyDeviceId(raw) || "unknown-device";
   _idCache = { raw, id };
   return id;
 }

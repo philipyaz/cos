@@ -12,8 +12,8 @@ It does **three jobs**, each a small, deliberately basic slice:
 - **Pantry** — *what I have on hand.* A named item with optional quantity, a food category, a storage
   location, and an expiry / low-stock flag.
 - **Meal plan** — *what I'll cook.* A planned meal on a day + slot, with an optional recipe, an
-  optional pantry reference, and an **opt-in link to a calendar event** so a planned dinner can show
-  on the board's calendar.
+  optional pantry reference, and a link to a calendar event — **pushed onto the board's calendar by
+  default** (a reconciling, overlap-safe placement; see below).
 
 The division of labour mirrors the rest of Cos: the **human reads** the three views at a glance; the
 **agent writes** through the nutrition MCP. There is one piece of genuine intelligence in the
@@ -177,11 +177,29 @@ objective** (`set_body_objective`). The operator skill is
 [`nutrition-chef`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/nutrition-chef/SKILL.md);
 the goal/identity/weight live in [`body-profile`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/body-profile/SKILL.md).
 
-## The opt-in calendar link
+## Calendar placement — the default push, plus a manual explicit-time path
 
-The meal plan's one cross-link to the rest of the board is the optional **`eventId`**: a planned meal
-can **show up on the board's calendar** by pointing at a `CalendarEvent`. The order matters and is the
-contract:
+The meal plan's cross-link to the rest of the board is the optional **`eventId`** on
+`MealPlanEntry`: a planned meal shows up on the board's calendar by pointing at a `CalendarEvent`.
+There are two ways it gets set, and one is now the default.
+
+**The default — `POST /api/nutrition/push-plan-to-calendar`** (body `{ from?, to?, busyWindows? }`,
+ISO days, half-open `[from, to)`, defaulting to today through the next 7 days) or the
+**`push_meal_plan_to_calendar`** tool on the `nutrition` MCP. It is built on the same shared
+placement engine as the [Fitness](fitness.md) training-plan push — see
+**[Calendar placement](placement.md)** for the full engine contract, the optional `busyWindows`
+input, and the `workingHours` preference. In short: **reconciling** (idempotent by `entry.eventId`
+— a re-run creates/updates/skips rather than duplicating) and **overlap-safe** (a meal lands in a
+free slot within its slot's candidate window — breakfast 07:00–09:00, lunch 12:00–14:00, snack
+16:00–17:30, dinner 18:30–21:00 — and is never placed on top of an existing timed event or inside
+working hours, so a weekday breakfast/lunch/snack can come back `skipped`/`outside_working_hours`
+while dinner still places). `cooked`/`skipped` entries in the window are reported
+`skipped`/`not_planned` and left untouched. A meal time edited by hand is never moved back by a
+re-push; only its title/description refresh. The response mirrors the fitness push: `{ results:
+[{date, action, reason?, eventId?}], created, updated, skipped, version }`.
+
+**The manual path, for an explicit time** (*"put dinner on my calendar at 7"*) — the order is still
+a contract:
 
 1. **Create the calendar event first** — via the **calendar** MCP (`create_event`), which mints an
    `EVT-<n>`.
@@ -189,9 +207,10 @@ contract:
    `update_meal_plan(id, eventId: "EVT-7")`).
 
 Because the meal-plan POST/PATCH validate the `eventId` against `db.events` inside the store lock, you
-cannot store a link to an event that does not exist. This is deliberately the *only* way to put a meal
-on the calendar — the nutrition MCP never creates calendar events itself; it just holds the reference.
-See [Calendar](calendar.md) for the event side of the link.
+cannot store a link to an event that does not exist. The nutrition MCP itself still never creates a
+calendar event out of thin air on this manual path; the calendar push above is the one place events
+are minted, inside the nutrition route's own `mutate()`. See [Calendar](calendar.md) for the event
+side of the link.
 
 ## The API — `/api/nutrition/*` + the catalog
 
@@ -207,7 +226,11 @@ on every success body. Each prefix is a `GET` (list) + `POST` on the collection 
 |---|---|
 | `/api/nutrition/log` | food-log entries — `?from=&to=&slot=&date=` list filters |
 | `/api/nutrition/pantry` | pantry items — `?category=&location=&expiringBefore=&lowStock=true` list filters |
+| `/api/nutrition/pantry/reconcile` | bulk pantry reconcile — **POST only**, gated, upserts by normalised name |
 | `/api/nutrition/plan` | meal-plan entries — `?from=&to=&slot=&status=` list filters |
+| `/api/nutrition/status` | reconciliation status — **GET only**, ungated, computed fresh (never stored) |
+| `/api/nutrition/shopping` | shopping-list items — `?status=&category=` list filters (default: ALL rows) |
+| `/api/nutrition/shopping/candidates` | computed shopping candidates — **GET only**, ungated, computed fresh (never stored) |
 
 **The gate is the only thing that distinguishes these from a core route:** every **write** asserts the
 add-on is enabled **inside `mutate()`** (`assertAddonEnabled(db, "nutrition")`), so a disabled add-on
@@ -221,6 +244,140 @@ The framework adds two more routes the add-on shares with any future add-on:
 - **`PATCH /api/addons/[id]`** — flip an add-on on/off (`{ "enabled": <bool> }`). The flag persists in
   `db.settings.addons` and bumps `db.version`, so the sidebar's nav group flips **live** via SSE.
 
+### The status read — `/api/nutrition/status`
+
+One more route, and it deliberately breaks the vertical-per-prefix pattern above: **`GET
+/api/nutrition/status`** is a RECONCILIATION status — never stored, always recomputed from the food
+log, pantry, and meal plan already on the store. It returns:
+
+| Field | What it answers |
+|---|---|
+| `stalePlannedMeals` | `{ count, oldestDate, oldestAgeDays, ids }` — past-dated `planned` meal-plan entries. |
+| `provablyCooked` | `{ count, matches: { mealId, foodLogId }[] }` — the subset of stale meals with a same-date, same-slot food-log entry naming their `MEAL-<n>` id (see the proof convention below). |
+| `daysSinceLastFoodLog` / `daysSinceLastPantryWrite` | calendar-day gaps since the food log / pantry was last touched. |
+| `expiredPantryItems` | `{ count, ids }` — pantry items whose `expiresAt` is before today. |
+| `pantryLifecycle` | `{ fresh, likelyPastHorizon, excluded }` — a fresh/staple/spice scoping of the pantry (from `category`+`location` alone) plus a **computed** freshness horizon for the fresh class; see below. |
+| `hasNutritionTargets` / `daysSinceLastTargets` | whether any daily target has ever been saved, and how long ago the newest one was. |
+
+Like [`/api/body/status`](body.md), it is **ungated** (works with the add-on disabled, and from a
+spoke) and **`force-dynamic`** — the route reads the clock once (`toISODay(new Date())`) and hands
+`today` to a pure engine (`board/lib/nutrition-status.ts`) that never touches I/O. It is also reachable
+as **`get_nutrition_status`** on the `nutrition` MCP.
+
+**The proof convention.** `FoodLogEntry` has no structured link to a meal-plan entry — proving a stale
+meal was "cooked" is a **prose match**: the food log's `description` names the plan's `MEAL-<n>` id
+(with a digit boundary, so `MEAL-1` never matches inside `MEAL-10`), on the same date and in the same
+slot. This is a deliberate trade (a structured `mealId` field would be a schema migration for a link
+the agent can already write) — the
+[`nutrition-chef`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/nutrition-chef/SKILL.md)
+skill's food-logging jobs follow the convention so the provable set stays populated.
+
+### Lifecycle scoping & the computed freshness horizon
+
+`pantryLifecycle` sorts every pantry row into one of three classes from its stored `category` +
+`location` alone — no new field, no migration: **fresh** (`produce`/`dairy`, anything
+`location: fridge`, or `frozen`/freezer) is the routine reconciliation scope; **staple** (tinned
+goods, shelf-stable pantry items) and **spice** are counted *out* of it, surfaced only on an
+explicit stock-take (spices) or never asked about unattended. A hand-maintained, deliberately
+conservative shelf-life table (days, keyed `category` × `location`) gives the **fresh** class a
+computed horizon — an item with no printed `expiresAt` and an `updatedAt` older than its class's
+horizon lands in `likelyPastHorizon`.
+
+**A read `expiresAt` always wins.** The horizon is an *inference*, never a fact, and it never
+survives a real date — an item that carries an `expiresAt` is excluded from `likelyPastHorizon`
+even when it's old, because the fact path (`expiredPantryItems`) already owns it. Like every other
+field this route returns, the horizon is **computed on read and never stored** — the same
+computed-never-stored discipline the rest of this status read already follows; `SCHEMA_VERSION` is
+untouched by this feature. The `[2f]` test gate (`tests/nutrition-status-consumers.mjs`)
+makes this durable from the other side: every top-level field this engine returns must be consumed
+by a defined action (or an explicit state-and-move-on) in the skill's JOB 0, so a future field can't
+ship computed and unread again.
+
+### The bulk pantry reconcile — `/api/nutrition/pantry/reconcile`
+
+One more route that breaks the vertical-per-prefix pattern, alongside the status read above:
+**`POST /api/nutrition/pantry/reconcile`** applies a WHOLE shop or a photo extraction as **one**
+gated, attributed `mutate()` — the bulk twin of the single-item pantry `POST`. It takes a list of
+`{ name, quantity?, unit?, category?, location?, expiresAt? }` and returns a diff:
+
+| Field | What it means |
+|---|---|
+| `added` | new `PantryItem` rows minted this batch |
+| `updated` | existing rows whose submitted fields were applied |
+| `skipped` | `{ name, reason }` — a second submitted item mapping to a key already handled this batch (`"duplicate-in-batch"`) |
+| `version` | one `db.version` bump for the whole batch, however many items it carries |
+
+**Upsert key: a normalised name, not an id.** `normalizePantryName` (`board/lib/nutrition-format.ts`)
+strips accents, case, and whitespace noise, then drops one trailing plural — so `"Tomätoes"`,
+`"tomatoes "`, and `"TOMATOES"` all collide on one row. A resubmitted name **updates** the existing
+row's submitted fields (never its stored `name` — the submission was only the match key) rather than
+minting a duplicate. This deliberately does **not** resolve synonyms, translations, or pack-size math
+(the same food in two languages, or at two pack sizes, normalises to two different keys) — merging
+those stays the agent's judgement call, made by reading `read_pantry` before it submits.
+
+**Never deletes; fails closed.** The route has no delete branch of any kind — removal stays the
+explicit `DELETE /api/nutrition/pantry/{id}` path, so a bad photo extraction can never empty the
+pantry. Every item is validated **before** `mutate()` is ever entered: a single malformed item (a bad
+category, a non-ISO `expiresAt`, a missing `name`) rejects the **whole batch**, writing nothing — the
+same all-or-nothing contract a 400 gives anywhere else in this API, just applied to a batch instead of
+one record.
+
+Reachable as **`reconcile_pantry`** on the `nutrition` MCP — gated, like every other pantry write.
+
+## The shopping list (v16)
+
+A **persistent list** (`db.shoppingItems`, `ShoppingItem`, `SHOP-<n>`) — the state the brief asked
+for: *"a shopping list… not only about nutrition."* Store only what cannot be computed: a row
+exists because a human or an agent decided to buy the thing, never because the engine below
+inferred it.
+
+| Field | Notes |
+|---|---|
+| `name` | required, non-empty |
+| `category` | `produce \| protein \| dairy \| bakery \| frozen \| pantry \| household \| personal-care \| other` — deliberately includes NON-FOOD |
+| `quantity` / `unit` | optional |
+| `status` | `needed` (default) \| `bought` \| `dismissed` |
+| `source` | `manual` (default) \| `plan` \| `pantry` \| `channel` |
+| `sourceRef` | a SOFT ref (`MEAL-<n>` \| `PANTRY-<n>` \| `M-<n>`) — dangling tolerated, never validated, exactly like `MealPlanEntry.pantryItemIds` |
+| `note` | optional |
+| `boughtAt` | server-stamped ONLY — set when `status` flips to `bought`, cleared on any other status |
+
+**The category vocabulary deliberately includes non-food** — `household` and `personal-care` sit
+beside the food categories, so one list holds batteries next to bananas; a separate "household"
+add-on would have split the very thing the brief asked to unify. **The status lifecycle**:
+`needed` → `bought` (stamps `boughtAt`) or `dismissed` (keeps history, and is inert — see below).
+Both transitions are a single `PATCH` / `update_shopping_item` call, never a read-modify-write.
+
+### The computed candidates — `/api/nutrition/shopping/candidates`
+
+A **read**, never stored, composing signals the store already carries — the same computed-on-read
+discipline as the status read above:
+
+- **Plan-side** — an ingredient a `planned` meal in the window names, that no pantry row and no
+  live `needed` / bought-this-window list row already covers.
+- **Pantry-side** — `expiredPantryItems` (a FACT — a printed `expiresAt`) and
+  `pantryLifecycle.likelyPastHorizon` (an INFERENCE — no printed date), both read from the same
+  status engine above and never re-derived.
+
+Matching reuses the vertical's one declared name-identity key, `normalizePantryName` (the bulk
+reconcile's own upsert key, above), split into whole-word tokens: a pantry or list **row** matches
+a planned ingredient **line** when every token of the row's name is a whole token of the line —
+so `"Eggs"` matches `"2 eggs"` and an accented pantry name matches its unaccented ingredient line,
+but `"Eggplant"` does not match `"eggs"`, `"Rice vinegar"` does not match `"rice"`, `"Oat milk"`
+does not match `"milk"`. This is a deliberate **under-suppression bias** — a re-offered item costs
+one line in a batched question; a wrongly-suppressed one is a forgotten item, the exact failure
+this feature exists to prevent. The other half of the same bias: a pantry row that is **expired**
+or **likely past its freshness horizon** is not usable stock, so it never makes a planned
+ingredient read as "in pantry" — the ingredient stays a candidate. Both rules are pinned by unit
+tests rather than left to be rediscovered.
+
+**Fact vs. inference, never blurred.** An expired row states a fact (`expired <expiresAt>`); a
+freshness-horizon row carries the label **`(inferred — no printed date)`**, verbatim, at every hop
+that renders it — the engine's `reason` string, the MCP render, and the operator skill's prose.
+
+**Nothing routes through `db.pending`.** Confirmation is conversational, exactly like the bulk
+pantry reconcile above — never the board's propose/approve queue.
+
 ## The nutrition MCP — the agent's diary verbs
 
 A new **stdio MCP server** (registry name **`nutrition`**, bridge port **`8007`**,
@@ -229,16 +386,20 @@ is the agent's twin of the three nutrition views — a **thin `fetch` wrapper** 
 `/api/nutrition/*` routes on `CRM_BASE_URL` (default `http://localhost:3000`), exactly the calendar
 server's archetype. It never shells out to `curl`, makes **no LLM calls**, and attributes every write
 `actor: "agent"` (the `x-actor: agent` header **and** `{ actor: "agent" }` in the body). It exposes
-**14 diary tools** for the three verticals below (the read tools ungated and the write tools gated
-behind the add-on flag) plus the
+**16 diary tools** for the three verticals below (the read tools ungated and the write tools gated
+behind the add-on flag), the
 [5 v14 tools](#the-new-endpoints-mcp-tools) (the dietary profile + the agent-authored targets)
-documented above — **19 in all**:
+documented above, **`get_nutrition_status`** (the reconciliation status read, ungated — see
+above), and the **5 v16 shopping-list tools** (`list_shopping` / `get_shopping_candidates` ungated,
+the rest gated) — **27 in all**:
 
 | Vertical | Reads | Writes (gated) |
 |---|---|---|
+| **Status** | `get_nutrition_status` | — (read-only; no writes) |
 | **Food log** | `list_food_log`, `get_food_log` | `log_food`, `update_food_log`, `delete_food_log` |
-| **Pantry** | `read_pantry` | `add_pantry_item`, `update_pantry_item`, `remove_pantry_item` |
-| **Meal plan** | `list_meal_plan`, `get_meal_plan` | `plan_meal`, `update_meal_plan`, `remove_meal_plan` |
+| **Pantry** | `read_pantry` | `add_pantry_item`, `update_pantry_item`, `remove_pantry_item`, `reconcile_pantry` |
+| **Meal plan** | `list_meal_plan`, `get_meal_plan` | `plan_meal`, `update_meal_plan`, `remove_meal_plan`, `push_meal_plan_to_calendar` |
+| **Shopping list** | `list_shopping`, `get_shopping_candidates` | `add_shopping_item`, `update_shopping_item`, `remove_shopping_item` |
 
 A write on a **disabled** add-on returns the board's `404`, surfaced as a `Not found.` tool error —
 the tool descriptions tell the agent to enable the add-on from the `/addons` catalog and retry. The
@@ -276,6 +437,34 @@ The add-on is set up and operated by two skills, one per role:
   (a user-invoked skill, modelled on `board-organize`): the conversational front door for logging
   food, keeping the pantry, and planning meals. It is where the calorie/macro **estimation
   intelligence** lives — the MCP just stores what the skill computes.
+
+**The reconciliation sweep.** Every `nutrition-chef` run starts with a JOB 0, before any planning:
+read `get_nutrition_status`, state the standing picture across every field it returns (stale meals,
+food-log/pantry recency, the lifecycle-scoped pantry read, printed expiries, targets), auto-close
+only the `provablyCooked` set (citing the proof), and ask **at most one** priority-ordered question —
+never a prompt per meal. A clean surface (nothing stale) no-ops in one line. This is the same
+two-tier auto-vs-propose policy
+[`reminders-review`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/reminders-review/SKILL.md)
+uses for reminders, applied to the meal plan.
+
+**Bulk pantry capture.** A photo of a receipt or a fridge shelf becomes **one** `reconcile_pantry`
+write instead of many individual `add_pantry_item` calls: the agent extracts the items in its own
+context (the board never sees the image), `read_pantry`s, resolves the semantic aliases the route
+can't (the same food in another language, or at a different pack size), then proposes **one**
+collapsed diff — counts first, only the genuinely ambiguous items named — for a single confirmation.
+That confirmation fires **even in auto mode**, because a photo extraction is fallible; expired items
+are proposed for removal in the same confirmation, and `reconcile_pantry` itself never deletes.
+
+**The Friday shopping draft (JOB 6).** After JOB 0's reconcile, the skill reads `list_shopping` +
+`get_shopping_candidates` and splits the result into a **proven set** (`source: "plan"` — an
+ingredient this week's plan names that the pantry doesn't hold, written directly) and a
+**judgement set** (the pantry-side FACT/INFERENCE candidates, plus anything the skill knows from
+context the state can't see). Auto mode writes the proven set and asks **at most one** batched
+question for the judgement set; approval mode lays the whole proposed list out for **exactly one**
+yes. A clean list — nothing to add, nothing to ask — produces **no output at all**, the same
+don't-chase-silence contract `reminders-review` uses. Ticking an item off
+(`update_shopping_item(id, status: "bought")`) **offers** one `reconcile_pantry` for the bought
+food rows afterward, closing the loop back into the pantry without a second capture.
 
 ### Control model — transparency, not "fail-closed"
 

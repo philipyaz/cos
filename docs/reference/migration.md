@@ -66,18 +66,31 @@ on your own machine only if you no longer want them.)
 
 ## Board persistence — durability decision
 
-**Decision: accept single-machine durability for now.** The board persists to a **single JSON file**,
-`board/data/cases.json` (read/written by `board/lib/store.ts` at `process.cwd()/data/cases.json`). This
-is the simplest durable store for a local-first, single-machine product and is good enough today.
+**Decision: single-machine durability — the settled choice.** The board persists to a **single JSON
+file**, `board/data/cases.json` (read/written by `board/lib/store.ts` at `process.cwd()/data/cases.json`).
+This is the simplest durable store for a local-first product, and multi-device did NOT change it — it
+stays one store on the hub (see the resolved multi-device note below).
 
-**Trade-off accepted:** the data is local to one machine and is not multi-device synced; concurrent
+**Trade-off accepted:** the store lives on one machine (the hub) and is not multi-device *synced* —
+other machines are stateless clients, not replicas; concurrent
 writers are not coordinated beyond the single Next.js process.
 
-**Upgrade path (if/when multi-device is needed):** swap the file-backed store in `board/lib/store.ts`
-for a **durable store** (e.g. SQLite/Postgres) or place `cases.json` in a **synced location** (an
-iCloud/Dropbox-backed path, or the same git auto-sync pattern the vault uses). The HTTP API and case
-model stay the same; only the store implementation changes. Revisit this when a second device enters
-the picture.
+**Multi-device — decided: hub & spoke (not a synced store).** When the second device arrived, the
+answer was **not** to swap the store for SQLite/Postgres or a synced `cases.json` — every such design
+inherits merge conflicts and schema skew between two live stores. Instead the single file-backed store
+**stays on one machine (the hub)**, reached over a private Tailscale network; a machine that runs
+**agents** against it becomes a **spoke** (a stateless client whose board-facing wrappers point at the
+hub's `BOARD_URL`), while a device that only **views** the board installs nothing (see below). Nothing syncs
+because there is nothing to sync. The store implementation is unchanged; the HTTP API is the seam that
+already made this possible.
+
+A **spoke** is needed only where you want **agents** (Claude Code / Cowork) to act on the board — those
+clients accept only *local* stdio MCP servers, so the wrappers run locally and forward tool calls to the
+hub. To merely **view** the board from any other tailnet device you install nothing: the hub serves the
+production board behind `tailscale serve`, and you open the portless `https://<hub>.<tailnet>.ts.net` in a
+browser (full read/write UI — the browser writes through the same HTTP API). So a machine demoted in a hub
+swap (`hub-handover`) can stay a **pure browser viewer** of the new hub — add `spoke-setup` to it only if
+you also want agents there. See [Multi-device (hub & spoke)](../architecture/multi-device.md).
 
 ## Store schema versions (`schemaVersion`)
 
@@ -163,3 +176,45 @@ never the data: update the code (`git pull`) and restart the board.
   `bodyProfile`, weight/target on the body add-on). **New enums:** `TrainingStatus`,
   `NutritionTargetKind`; **removed:** `AthleteLevel`, `NutritionGoal`. Body **hard auto-enables** under
   Nutrition or Fitness. Full design: [Body](../features/body.md) + [Nutrition](../features/nutrition.md).
+- **v14 → v15 — the per-case vault-ingest RECEIPT.** Adds the optional
+  `CaseRecord.vaultIngestedAt?: string` — an ISO timestamp set **only** by
+  `POST /api/cases/vault-receipt`, after the agent confirms the vault MCP reports a
+  `completed` ingest that named the case (never on a `failed`/`cancelled`/`interrupted` job —
+  the field means *landed*, never *attempted*). **Purely additive + back-compatible:** old v14
+  files read unchanged — `migrate()` is a no-op for it (the optional rides through
+  `migrateCase`'s spread verbatim, exactly like `starred` (v7) and `MessageRecord.url` (v8)),
+  and an absent receipt reads as *the vault has never been told about this case* (fail-closed).
+  **No new enums.** The coverage read (`GET /api/cases/vault-coverage` / `get_vault_coverage`)
+  answers *"what has the vault never been told?"* — cases carrying `vaultLinks` whose receipt
+  is absent or older than the case's own `updatedAt` — the deterministic alarm for a capture
+  pipeline that fails silently. Full design: [vault-async](vault-async.md).
+- **v15 → v16 — `db.shoppingItems[]` (the persistent shopping list).** Adds the optional
+  `db.shoppingItems?: ShoppingItem[]` array (store-minted `SHOP-<n>` ids; `category` deliberately
+  includes non-food `household` / `personal-care`; `status` `needed` → `bought` stamps `boughtAt`
+  server-side on the transition, any other status clears it; `source` + a soft `sourceRef`). **Purely
+  additive + back-compatible:** old v15 files read unchanged — `migrate()` carries the array forward
+  when present and a missing key defaults to `[]`, no backfill. **New enums:** `ShoppingCategory`,
+  `ShoppingStatus`, `ShoppingSource`. The candidates read (`GET /api/nutrition/shopping/candidates`
+  / `get_shopping_candidates`) is computed on read, never persisted. Full design:
+  [Nutrition](../features/nutrition.md#the-shopping-list-v16).
+- **v16 → v17 — `db.triageDecisions[]` (the mail-triage drop record).** Adds the optional
+  `db.triageDecisions?: TriageDecision[]` array — the store's first **policy** collection: one row per
+  `(sender, source, reason)` (store-minted `TD-<n>` ids; the sender is normalised to its addr-spec), a
+  fact ("this sender's mail was judged noise") rather than a log of dropped emails; a repeat drop bumps
+  `count`, a human `confirm` stamps `reviewedAt` (sender-scoped: every reason row of that sender is
+  settled), a `reverse` sets `status: "reversed"` and fails every later drop of that sender closed
+  (403 `sender-reversed`). **Purely additive + back-compatible:** old v16 files read unchanged —
+  `migrate()` carries the array forward when present and a missing key defaults to `[]`, no backfill.
+  **New enums:** `TriageDropReason`, `TriageDecisionStatus`. The dropped:promoted ratio and the
+  first-time-dropped set are computed on read, never persisted. Full design:
+  [Triage skills](../architecture/triage-skills.md).
+
+!!! note "Payload-internal keys never bump the schema"
+    Some records carry a `payload` the board stores **verbatim** (a `CoachingArtifact`'s training plan,
+    for instance). Keys the board itself writes *inside* such a payload — `eventId` (the calendar-push
+    receipt, #81) and `status` / `movedTo` (the per-day outcome, #94) on a training plan's `days[i]` —
+    ride along without a `SCHEMA_VERSION` bump: an older board round-trips the payload unchanged on a
+    targeted write. The consequence the guard cannot catch: a **pre-#94 board that re-saves a whole
+    week** (`save_training_plan`) carries only `eventId` forward and silently drops every recorded
+    outcome, while the store's `schemaVersion` still reads current. The rule stays the same —
+    [never run older code against this store](upgrading.md) — the ledger just names the keys.

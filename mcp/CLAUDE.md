@@ -91,7 +91,7 @@ Pure declarative DATA — names/refs only, validated by `mcp/service-manifest.mj
 | `dir`/`app`/`host`/`uvExtras` | (runtime `uvicorn`) project dir, ASGI app (`sidecar:app`), bind host, `uv run --extra` list |
 | `exec` | (runtime `exec`) the raw argv, e.g. a Go binary or `["${NODE_BIN}", "…/jobs-runner.mjs"]` |
 | `env` | env map; values are `${VAR}` refs (resolved from the loader) or literals |
-| `secrets` | env keys (e.g. `ANTHROPIC_API_KEY`) sourced from `config/secrets.env`, never written into a descriptor/plist/`.mcp.json` |
+| `secrets` | env keys (e.g. `ANTHROPIC_API_KEY`) sourced from `config/secrets.env`, never written into a descriptor/plist/`.mcp.json`. **The one place a value IS persisted is the Cowork config** (it can't run `secretWrapper`) — which is why that write is validated; see the *"Cowork holds a COPY of every secret"* gotcha |
 | `secretWrapper` | macOS secret-sourcing wrapper script (only on secret services); Windows ignores it (injects via `loadSecrets()`) |
 | `idleExit` | `true` → add `COS_MCP_IDLE_EXIT_MS=300000` on the **bridge** spawn (never on Cowork, never on sidecars) |
 | `clients` | which clients get an entry: `["claude-code","cowork"]` for bridges; `[]` for sidecars/runner |
@@ -186,6 +186,25 @@ debug, but you don't hand-write them:
   (from `config/load-config.sh`/`cos.env`) — macOS `~/Library/Application Support/Claude/…`, Windows
   `%APPDATA%/Claude/…`. cos-setup detects + records it per OS and `gen-cowork-config.mjs` refuses a
   missing dir, so the path is *confirmed*, never assumed — fix it in `cos.env` if Cowork lives elsewhere.
+- **Cowork holds a COPY of every secret; Claude Code holds a REFERENCE.** The two clients bind
+  `secrets[]` at different times, and only one self-heals. Claude Code is **late-bound**: `secretWrapper`
+  (`launch.sh`) sources `config/secrets.env` on *every* bridge start, so an edit takes effect on the next
+  `kickstart`. Cowork can't run that wrapper, so `gen-cowork-config.mjs` **inlines the value** into
+  `claude_desktop_config.json` — an **early-bound snapshot** that nothing ever re-reads. Consequences,
+  both of which have bitten:
+    - **Rotation is TWO steps.** Editing `secrets.env` + `kickstart` fixes Claude Code and leaves Cowork
+      serving the OLD key. Also run `node scripts/gen-cowork-config.mjs <name>` + ⌘Q.
+    - **A placeholder snapshotted at setup time is permanent.** `secrets.env.example` ships a
+      *structurally plausible* filler (`sk-ant-` + `x`…), so a generator run between
+      `cp secrets.env.example secrets.env` and filling the key in freezes a dead credential in. Filling
+      `secrets.env` afterwards fixes Code and never fixes Cowork — it presents as `401 Invalid API key`
+      in Cowork **only**, which points debugging at the wrong layer.
+
+  So **any new secret-carrying service must validate before inlining.** `gen-cowork-config.mjs` refuses
+  atomically (before its backup+write) via `config/secret-validation.mjs`; that module hard-fails on
+  placeholders only — key *shape* is a soft warning, because a provider's key format isn't a contract we
+  control and a strict validator would break setup the day it changes. Audit both paths any time with
+  `node scripts/check-cowork-secrets.mjs` (compares SHA-256 fingerprints; never prints key material).
 - **Add-on double-gate.** An add-on needs BOTH its server supervised AND `Settings.addons.<id>.enabled`;
   a disabled add-on's **writes** 404 while reads stay open. See *"Add-ons: supervision is always on…"* above.
 - **Guard model is config, and an empty value fails loud.** `COS_GUARD_MODEL`/`COS_GUARD_THRESHOLD` come
@@ -234,8 +253,9 @@ manager (`cos-services.mjs`), the probes (`ensure-bridges.sh` reads `--probe-lis
 (`gen-cowork-config.mjs`). The setup **skills** install by calling those generators — they no longer
 sed a template or hand-merge Cowork. So a service's plist content is edited in exactly one place: its
 descriptor (+ `config/load-config.sh` for the port/path values). The macOS `gen-launchd --install`
-path itself has not yet been exercised end-to-end on a real machine — verify a full setup pass before
-relying on it.
+path has been validated end-to-end on a real machine (add-on bridge install); a descriptor-driven
+FULL setup pass on a fresh machine is still unverified — do one full pass before relying on it for
+first-run setup.
 
 For the actual runbooks — do **not** duplicate them here:
 

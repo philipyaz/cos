@@ -4,17 +4,16 @@ description: >
   The Fitness add-on OVERVIEW / router — the index that fires on GENERIC or
   ambiguous fitness requests and points you at the right FOCUSED skill. Use it
   when the user gestures at fitness without a specific ask — "help me with my
-  fitness", "what can the fitness add-on do", "I want to get fit / train better /
-  level up my training", "set me up for fitness", "where do I start with the
-  fitness coach" — i.e. when the intent is clear (fitness) but the JOB is not. Do
+  fitness", "what can the fitness add-on do", "I want to get fit / train better",
+  "set me up for fitness", "where do I start with the fitness coach" — i.e. when
+  the intent is clear (fitness) but the JOB is not. Do
   NOT use it when the request already names a job — those belong to the focused
-  skills and own their own triggers: a weekly plan → fitness-training-plan;
+  skills, which own their own triggers: a weekly plan → fitness-training-plan;
   today's readiness / "should I train today" → fitness-pre-workout-brief; "how was
   my week" → fitness-weekly-review; sleep-vs-performance → fitness-correlations;
-  pushing / logging / reading Apple Watch data → fitness-health-data; setting the
-  training focus / availability / equipment → fitness-athlete-profile; setting the
-  body goal / training status / weight / identity → body-profile. This skill
-  routes; it does not carry the procedures.
+  logging / reading Apple Watch data → fitness-health-data; the training focus /
+  availability / equipment → fitness-athlete-profile; the body goal / weight /
+  identity → body-profile. This skill routes; it does not carry the procedures.
 ---
 
 # Fitness (the add-on index / router)

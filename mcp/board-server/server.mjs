@@ -17,6 +17,7 @@
 // v3 toolset (the full case / task / message lifecycle + board ops):
 //   reads   : get_case, search, list_templates, list_pending, list_labels,
 //             list_label_bundles, get_tree, list_initiatives
+//   devices : get_device_status (multi-device: role / lease / last-seen)
 //   case    : create_case, update_case, update_cases (bulk), archive_case,
 //             restore_case, delete_case (soft → Trash), apply_template
 //   hierarchy: create_initiative, create_workstream, set_parent, regroup_cases
@@ -28,6 +29,10 @@
 //   priority: get_priorities, add_priority, update_priority, remove_priority, set_starred
 //   labels  : install_label_bundle, uninstall_label_bundle (configure the taxonomy)
 //   approval: propose, approve, reject
+//   vault   : get_vault_coverage, mark_vault_ingested (the vault-ingest receipt)
+//   attention: get_needs_attention (the four buckets + the starving rank)
+//   triage  : record_triage_decision, list_triage_decisions, resolve_triage_decision (the
+//             per-sender mail-triage editorial-drop decision record)
 //
 // v3.2: reminders are ENRICHED — create_reminder/update_reminder carry catalog
 // `labels` + a short `tasks` checklist, link_reminder_message attaches an email to
@@ -40,6 +45,33 @@
 // add/update/remove_priority), so the agent can ALIGN its work to the user's focus.
 // Priorities ride the board API (no new server/port); notes live at /api/priorities,
 // starring is PATCH /api/cases/{id} { starred }.
+//
+// v3.4: VAULT COVERAGE — the receipt half of the vault<->board bridge. A case's
+// `vaultLinks` is INTENT (it should be in the vault); `vaultIngestedAt` is the RECEIPT
+// (it landed). get_vault_coverage reads which vaultLinks cases have no/stale receipt —
+// the alarm for a capture pipeline that fails silently; mark_vault_ingested stamps the
+// receipt, called ONLY after the vault MCP confirms a `completed` ingest. Core (no
+// add-on gate); rides `/api/cases/vault-coverage` + `/api/cases/vault-receipt`.
+//
+// v3.5: NEEDS ATTENTION — the board's own "what needs attention" read, now agent-reachable
+// (cos-ops#20). get_needs_attention reads the four buckets the needsAttention selector computes
+// (overdue, agingWaiting, untriaged, unlinked — previously UI-only, board/components/board/
+// needs-attention.tsx); rides `/api/cases/needs-attention`.
+//
+// v3.6: STARVING RANK — get_needs_attention now leads with `starving` (cos-ops#24), a single
+// aging-ordered list across cases, open reminders, and unanswered messages computed by
+// starvingObligations (board/lib/selectors.ts); "already chased" is derived from a linked timed
+// calendar event within the next 7 days, never stored. Same route, no new tool.
+// v3.7: TRIAGE DECISIONS (cos-ops#41) — the mail-triage editorial-drop decision record. A drop
+// is a real, frequent branch of mail-to-board's five-test gate that used to leave zero state;
+// record_triage_decision now writes the one receipt (sender, source, reason) the moment a thread
+// is dropped — upserted per (sender, source, reason), so hundreds of drops compress into tens of
+// rows. list_triage_decisions reads the computed dropped:promoted ratio + the first-time-dropped
+// senders /reminders-review's digest reviews (ADR 0017 — computed on read, never stored).
+// resolve_triage_decision writes the human's keep-or-confirm answer; a "reverse" is enforced
+// fail-closed at the write (a further drop for that sender+source is refused, 403
+// `sender-reversed`) and is NEVER mirrored into the guard's sender-trust store — an editorial
+// verdict, not a security one. Core (no add-on gate); rides `/api/triage-decisions`.
 //
 // HIERARCHY (v3): the board is a strict 3-tier tree of MAX DEPTH 3, where ALL THREE
 // tiers are the SAME CaseRecord (id CASE-<n>) distinguished by a `kind` field:
@@ -77,13 +109,15 @@ import {
   MESSAGE_SOURCE,
   PRIORITY,
   CASE_KIND,
+  TRIAGE_DROP_REASON,
+  TRIAGE_DECISION_STATUS,
   TOOLS,
 } from "./tools.mjs";
 
 const CRM_BASE_URL = baseUrl("CRM_BASE_URL", "http://localhost:3000");
 
 const server = new Server(
-  { name: "board", version: "3.3.0" },
+  { name: "board", version: "3.4.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -805,6 +839,238 @@ async function handleListUnansweredMessages(args) {
   return text(lines.join("\n"));
 }
 
+// ── Vault coverage tools ─────────────────────────────────────────────────────
+// The receipt half of the vault<->board bridge (see board/.claude/skills/vault-operations
+// SKILL.md). get_vault_coverage reads which cases the vault has never (or stalely) heard
+// about; mark_vault_ingested writes the receipt after a confirmed completed ingest.
+
+// List cases carrying vaultLinks whose ingest receipt is absent or stale — the sweep's
+// end-of-run backlog line ("N matters the vault has not been told about").
+async function handleGetVaultCoverage(args) {
+  const qs = args.includeArchived ? "?includeArchived=1" : "";
+  const { data, errorResult } = await api("GET", `/api/cases/vault-coverage${qs}`);
+  if (errorResult) return errorResult;
+
+  const gaps = data.gaps ?? [];
+  const count = typeof data.count === "number" ? data.count : gaps.length;
+  if (count === 0) {
+    return text("0 matters the vault has not been told about — capture coverage is clean.");
+  }
+  const lines = [`${count} ${count === 1 ? "matter" : "matters"} the vault has not been told about.`];
+  for (const g of gaps) {
+    const links = Array.isArray(g.vaultLinks) ? g.vaultLinks.map((v) => `[[${v}]]`).join(", ") : "";
+    const receiptClause =
+      g.reason === "stale" && g.vaultIngestedAt ? ` · receipt ${g.vaultIngestedAt.slice(0, 10)}` : "";
+    lines.push(
+      `  - ${g.id} [${g.reason}] ${g.title} — vault: ${links} · updated ${g.updatedAt.slice(0, 10)}${receiptClause}`
+    );
+  }
+  return text(lines.join("\n"));
+}
+
+// Stamp the vault-ingest receipt on the given cases. Call ONLY after ingest_status
+// reports `completed` for an ingest that named them — see SKILL.md for the contract.
+async function handleMarkVaultIngested(args) {
+  const ids = Array.isArray(args.ids) ? args.ids.filter((x) => typeof x === "string" && x.trim() !== "") : [];
+  if (!ids.length) return err("'ids' must be a non-empty array of case ids.");
+
+  const { data, errorResult } = await api("POST", "/api/cases/vault-receipt", { ids });
+  if (errorResult) return errorResult;
+
+  const marked = data.marked ?? [];
+  const unknown = data.unknown ?? [];
+  const lines = [`Receipt stamped on ${marked.length} case(s): ${marked.join(", ")}.`];
+  if (unknown.length) lines.push(`Skipped ${unknown.length} unknown id(s): ${unknown.join(", ")}.`);
+  return text(lines.join("\n"));
+}
+
+// ── Triage decision tools ────────────────────────────────────────────────────
+// The mail-triage editorial-drop decision record (board/lib/triage-decisions.ts) — see the v3.7
+// changelog note above. record_triage_decision WRITES the receipt; list_triage_decisions READS
+// the computed summary + first-time senders; resolve_triage_decision WRITES the human's answer.
+
+// Record one editorial drop. A `sender-reversed` (403) refusal surfaces through `errorResult`
+// exactly like any other non-2xx (mcp-kit's api() renders `detail`) — the caller sees the full
+// "never drop this sender" guidance in the tool-call error text itself.
+async function handleRecordTriageDecision(args) {
+  const sender = str(args.sender);
+  if (!sender) return err("'sender' is required.");
+  if (!MESSAGE_SOURCE.includes(args.source)) {
+    return err(`'source' must be one of: ${MESSAGE_SOURCE.join(", ")}.`);
+  }
+  if (!TRIAGE_DROP_REASON.includes(args.reason)) {
+    return err(`'reason' must be one of: ${TRIAGE_DROP_REASON.join(", ")}.`);
+  }
+
+  const { data, errorResult } = await api("POST", "/api/triage-decisions", {
+    sender,
+    source: args.source,
+    reason: args.reason,
+  });
+  if (errorResult) return errorResult;
+
+  const d = data.decision;
+  const verb = data.created ? "Recorded new" : "Bumped existing";
+  return text(`${verb} drop: ${d.sender} [${d.source}/${d.reason}] — count ${d.count} (${d.id}).`);
+}
+
+// Read the decision record for ONE source (required — an unscoped ratio mixes gmail-only drops
+// against every source's promotions; see the tool description). Renders the summary line, the
+// first-time senders (the digest's review payload), then a compact row list.
+async function handleListTriageDecisions(args) {
+  if (!MESSAGE_SOURCE.includes(args.source)) {
+    return err(`'source' must be one of: ${MESSAGE_SOURCE.join(", ")}.`);
+  }
+  const qs = new URLSearchParams({ source: args.source });
+  if (args.status !== undefined) {
+    if (!TRIAGE_DECISION_STATUS.includes(args.status)) {
+      return err(`'status' must be one of: ${TRIAGE_DECISION_STATUS.join(", ")}.`);
+    }
+    qs.set("status", args.status);
+  }
+
+  const { data, errorResult } = await api("GET", `/api/triage-decisions?${qs.toString()}`);
+  if (errorResult) return errorResult;
+
+  const summary = data.summary ?? { dropped: 0, senders: 0, promoted: 0, firstTime: [] };
+  const decisions = data.decisions ?? [];
+  if (summary.dropped === 0 && decisions.length === 0) {
+    return text(`Nothing filtered yet for source '${args.source}'.`);
+  }
+
+  const lines = [
+    `Filtered ${summary.dropped} : promoted ${summary.promoted} (dropped:promoted), across ${summary.senders} sender(s).`,
+  ];
+  if (summary.firstTime.length === 0) {
+    lines.push("No first-time senders to review — nothing new was filtered.");
+  } else {
+    lines.push(`${summary.firstTime.length} sender(s) new since your last review:`);
+    for (const f of summary.firstTime) {
+      const reasons = f.reasons.map((r) => `${r.reason}×${r.count}`).join(", ");
+      lines.push(`  - ${f.sender} [${f.source}] ${reasons} — since ${f.firstSeen.slice(0, 10)} — ids: ${f.ids.join(", ")}`);
+    }
+  }
+  if (decisions.length) {
+    const shown = decisions.slice(0, 20);
+    lines.push(`${decisions.length} decision row(s):`);
+    for (const d of shown) {
+      const reviewed = d.reviewedAt ? `, reviewed ${d.reviewedAt.slice(0, 10)}` : "";
+      lines.push(`  - ${d.id} ${d.sender} [${d.source}/${d.reason}] ${d.status} ×${d.count}${reviewed}`);
+    }
+    if (decisions.length > 20) lines.push(`  … and ${decisions.length - 20} more.`);
+  }
+  return text(lines.join("\n"));
+}
+
+// Answer a first-time sender. "reverse" flips the row's status — every future
+// record_triage_decision for this sender+source is refused fail-closed from that point on.
+async function handleResolveTriageDecision(args) {
+  const id = str(args.id);
+  if (!id) return err("'id' is required, e.g. 'TD-3'.");
+  if (args.resolution !== "confirm" && args.resolution !== "reverse") {
+    return err("'resolution' must be 'confirm' or 'reverse'.");
+  }
+
+  const { data, errorResult } = await api("PATCH", `/api/triage-decisions/${encodeURIComponent(id)}`, {
+    resolution: args.resolution,
+  });
+  if (errorResult) return errorResult;
+
+  const d = data.decision;
+  const verb =
+    d.status === "reversed"
+      ? (args.resolution === "reverse" ? "Reversed — the sweep will stop dropping this sender." : "Row is already REVERSED — a confirm does not re-arm the filter; the sweep will not drop this sender.")
+      : "Confirmed — the sweep keeps filtering this sender.";
+  return text(`${d.id} ${d.sender} [${d.source}/${d.reason}] → ${d.status}. ${verb}`);
+}
+
+// ── Attention tools ──────────────────────────────────────────────────────────
+// The board's own "what needs attention" read (ADR 0017's compute-on-read family;
+// cos-ops#20 named the shared vocabulary — see board/lib/staleness.ts). The four
+// buckets OVERLAP (a case can be both overdue and unlinked), so the reply's total
+// comes from the route's own `counts.total` (a sum of bucket sizes), never a
+// re-derived distinct-case count.
+
+const NEEDS_ATTENTION_ENTRY_LIMIT = 8;
+
+// Render up to NEEDS_ATTENTION_ENTRY_LIMIT entries of one bucket, tagged with its
+// name (mirrors handleGetVaultCoverage's `[reason]` idiom above), plus an overflow
+// line when the bucket is bigger than the cap.
+function needsAttentionBucketLines(tag, cases, render) {
+  const shown = cases.slice(0, NEEDS_ATTENTION_ENTRY_LIMIT);
+  const lines = shown.map((c) => `  - ${c.id} [${tag}] ${c.title} — ${render(c)}`);
+  if (cases.length > NEEDS_ATTENTION_ENTRY_LIMIT) {
+    lines.push(`  … and ${cases.length - NEEDS_ATTENTION_ENTRY_LIMIT} more.`);
+  }
+  return lines;
+}
+
+// Read the four needsAttention buckets PLUS the starving rank (cos-ops#24). No args — the
+// selector excludes archived cases by definition in every bucket, so an includeArchived knob
+// would change what the buckets mean, not just their scope.
+async function handleGetNeedsAttention() {
+  const { data, errorResult } = await api("GET", "/api/cases/needs-attention");
+  if (errorResult) return errorResult;
+
+  const counts = data.counts ?? { overdue: 0, agingWaiting: 0, untriaged: 0, unlinked: 0, starving: 0, total: 0 };
+  const starving = data.starving ?? [];
+  // counts.total === 0 no longer implies nothing to say: a stale-idle in_progress case (or a
+  // starving reminder/message) lives in NONE of the four buckets, so it can be the ONLY thing
+  // this tool would otherwise go silent on.
+  if (counts.total === 0 && starving.length === 0) {
+    return text(
+      "Nothing needs attention — overdue, aging, untriaged and unlinked are all clear, and " +
+        "nothing is starving."
+    );
+  }
+
+  const lines = [
+    `Needs attention — ${counts.total} in the four buckets (overdue ${counts.overdue}, aging ` +
+      `${counts.agingWaiting}, untriaged ${counts.untriaged}, unlinked ${counts.unlinked}), ` +
+      `starving ${counts.starving}. Buckets overlap each other AND the starving rank, so neither ` +
+      `is a count of distinct cases.`,
+  ];
+  // Worst-first is the headline: the starving rank renders BEFORE the four buckets.
+  lines.push(
+    ...needsAttentionBucketLines("starving", starving, (s) => {
+      let line = `score ${s.score} · ${s.kind} · idle ${s.daysIdle} d`;
+      if (s.daysOverdue > 0) line += ` · overdue ${s.daysOverdue} d`;
+      if (s.passedBlock) line += ` · block passed ${s.passedBlock.daysSincePassed} d ago`;
+      if (s.kind === "message" && s.from) line += ` · from ${s.from}`;
+      return line;
+    })
+  );
+  lines.push(
+    ...needsAttentionBucketLines(
+      "overdue",
+      data.overdue ?? [],
+      (c) => `due ${(c.dueAt ?? "").slice(0, 10)} · updated ${(c.updatedAt ?? "").slice(0, 10)}`
+    )
+  );
+  lines.push(
+    ...needsAttentionBucketLines(
+      "agingWaiting",
+      data.agingWaiting ?? [],
+      (c) => `idle since ${(c.updatedAt ?? "").slice(0, 10)}`
+    )
+  );
+  lines.push(
+    ...needsAttentionBucketLines(
+      "untriaged",
+      data.untriaged ?? [],
+      (c) => `updated ${(c.updatedAt ?? "").slice(0, 10)}`
+    )
+  );
+  lines.push(
+    ...needsAttentionBucketLines(
+      "unlinked",
+      data.unlinked ?? [],
+      (c) => `updated ${(c.updatedAt ?? "").slice(0, 10)}`
+    )
+  );
+  return text(lines.join("\n"));
+}
+
 // ── Reminder tools ───────────────────────────────────────────────────────────
 // Reminders are lightweight nudges (CHECK/DO) that ride the board API at
 // /api/reminders. reminder.caseId optionally links to ANY tier (initiative/
@@ -1066,6 +1332,39 @@ function starredLine(c) {
   const kind = c.kind ?? "case";
   const tier = kind === "initiative" ? "Initiative" : kind === "workstream" ? "Workstream" : "Case";
   return `${c.id} [${tier}] ${c.title}` + (kind === "case" && c.status ? ` — ${c.status}` : "");
+}
+
+async function handleGetDeviceStatus() {
+  const { data, errorResult } = await api("GET", "/api/devices");
+  if (errorResult) return errorResult;
+
+  const lines = [`This machine: ${data.deviceId} (${data.role}), code schema v${data.schemaVersion}`];
+
+  if (data.lease) {
+    const who = data.lease.deviceId === data.deviceId ? `${data.lease.deviceId} (THIS machine)` : data.lease.deviceId;
+    lines.push(
+      `Hub lease: held by ${who}${data.lease.stale ? " — STALE (claimable)" : ""} ` +
+        `(epoch ${data.lease.epoch}, renewed ${data.lease.renewedAt})`,
+    );
+  } else {
+    lines.push("Hub lease: not armed (single-machine setup, or backup repo not configured).");
+  }
+
+  const devices = data.devices ?? [];
+  if (devices.length) {
+    lines.push(`\nDevices seen (${devices.length}, agent last-seen):`);
+    for (const d of devices) {
+      const tags = [d.deviceId === data.deviceId ? "this" : null, d.deviceId === data.lease?.deviceId ? "hub" : d.role]
+        .filter(Boolean)
+        .join(", ");
+      lines.push(`  ${d.deviceId}${tags ? ` [${tags}]` : ""} — last seen ${d.lastSeen}`);
+    }
+  } else {
+    lines.push("\nNo other devices seen yet.");
+  }
+
+  if (data.joinBlob) lines.push(`\nAdd a device (paste into spoke-setup): ${data.joinBlob}`);
+  return text(lines.join("\n"));
 }
 
 async function handleGetPriorities() {
@@ -1427,6 +1726,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleMarkMessageAnswered(args);
     case "list_unanswered_messages":
       return handleListUnansweredMessages(args);
+    // vault coverage
+    case "get_vault_coverage":
+      return handleGetVaultCoverage(args);
+    case "mark_vault_ingested":
+      return handleMarkVaultIngested(args);
+    // triage decisions
+    case "record_triage_decision":
+      return handleRecordTriageDecision(args);
+    case "list_triage_decisions":
+      return handleListTriageDecisions(args);
+    case "resolve_triage_decision":
+      return handleResolveTriageDecision(args);
+    // attention
+    case "get_needs_attention":
+      return handleGetNeedsAttention();
     // reminders
     case "create_reminder":
       return handleCreateReminder(args);
@@ -1444,6 +1758,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleUpdateReminder(args, { linkOnly: true });
     case "link_reminder_message":
       return handleLinkReminderMessage(args);
+    // priorities
+    // devices (multi-device status)
+    case "get_device_status":
+      return handleGetDeviceStatus();
     // priorities
     case "get_priorities":
       return handleGetPriorities();
@@ -1470,5 +1788,5 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 await start(
   server,
   new StdioServerTransport(),
-  `board MCP server v3.3 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
+  `board MCP server v3.7 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
 );

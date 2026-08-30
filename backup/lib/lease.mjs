@@ -9,7 +9,8 @@
 //     far more often) — a stale or absent lease is claimable (epoch + 1);
 //   - a FRESH lease held by another device means THIS machine must not produce
 //     (backup.mjs exits 4 after quarantining its stray state once);
-//   - a forced takeover (hub-handover --force, PR 5) bumps the epoch explicitly.
+//   - a forced takeover (`backup.mjs --claim`, the hub-handover ceremony) claims the
+//     lease with an epoch bump even when the current lease is still fresh.
 //
 // The lease has its OWN push discipline (see backup.mjs claimOrRenewLease):
 // commit ONLY HUB.json, push --force-with-lease pinned to the fetched remote

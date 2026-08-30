@@ -337,9 +337,28 @@ cp "$REPO_ROOT/config/secrets.env.example" "$REPO_ROOT/config/secrets.env"   # t
 node "$REPO_ROOT/scripts/gen-launchd.mjs" --install vault
 ```
 
-**Rotate** the key by editing `config/secrets.env` and `launchctl kickstart -k …/com.chiefofstaff.mcp-vault` —
-no plist edit. If the file is missing/empty the bridge still boots; the vault tools just return
-a clean auth error per call (fail-soft).
+**Rotate** the key by editing `config/secrets.env` — no plist edit. If the file is missing/empty the
+bridge still boots; the vault tools just return a clean auth error per call (fail-soft).
+
+!!! warning "Rotation is TWO steps — Cowork holds a *copy*, not a reference"
+    The clients bind the key at **different times**, so one command does not fix both:
+
+    | Client | Binding | Rotation step |
+    |---|---|---|
+    | Claude Code | `launch.sh` sources `secrets.env` on **every start** — late-bound | `launchctl kickstart -k gui/$(id -u)/com.chiefofstaff.mcp-vault` |
+    | Cowork | `gen-cowork-config.mjs` **inlined a copy** into `claude_desktop_config.json` — early-bound, never refreshed | `node scripts/gen-cowork-config.mjs vault`, then **⌘Q** + reopen |
+
+    Skip the second step and Cowork keeps serving the **old** key — surfacing as `401 Invalid API
+    key` in Cowork while Claude Code works perfectly, which sends you hunting in the wrong place.
+    The same asymmetry means a **placeholder** captured during first-run setup is permanent:
+    filling in `secrets.env` afterwards fixes Code and never fixes Cowork. `gen-cowork-config.mjs`
+    now refuses to snapshot a placeholder, but a config written before that guard can still carry one.
+
+    Verify the two agree at any time (prints fingerprints, never key material):
+
+    ```sh
+    node "$REPO_ROOT/scripts/check-cowork-secrets.mjs"
+    ```
 
 Because it spawns its own inner Agent SDK session, that session is **isolated** so it can't
 re-enter the repo's own tools/config: `strictMcpConfig: true`, `mcpServers: {}` (no nested

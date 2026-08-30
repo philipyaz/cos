@@ -20,7 +20,7 @@ The Cos Board is the action surface of a local-first, agent-native personal oper
 Any feature must respect these:
 
 - **Local-first.** Files on disk (JSON store + Obsidian vault). No cloud DB, no auth system, no realtime/websocket server, single user.
-- **One ingest path.** Everything inbound flows through `/second-brain-ingest`; classify → route → entity-resolve → dedupe → cross-link → watermark.
+- **One ingest path.** Everything inbound flows through the vault MCP's async `ingest` (driven per `/vault-operations`); classify → route → entity-resolve → dedupe → cross-link → watermark.
 - **Agent-native parity.** Every human gesture maps 1:1 to an existing board MCP verb. Human and agent mutate through one identical path; no human-only or agent-only mutation surfaces.
 - **Two surfaces, cross-linked bidirectionally.** Board cases ↔ vault entity pages, both directions.
 - **Deduplicate aggressively, entity-resolved.** Same input twice → one canonical record.
@@ -279,7 +279,7 @@ _Out of scope (critic): a generic public/3rd-party API. A single local webhook i
 
 ### Vault ↔ board bidirectional bridge
 
-The two-surface payoff made visible from the board. The router already maintains `case.vaultLinks` ↔ page `cases:` frontmatter.
+The two-surface payoff made visible from the board. The router already maintains `case.vaultLinks` ↔ page `cases:` frontmatter. The bridge also carries a **receipt** (`CaseRecord.vaultIngestedAt`) and a **coverage read** (`GET /api/cases/vault-coverage` / `get_vault_coverage`) — the inverse of the already-shipped `needsAttention().unlinked` lens (cases with **no** `vaultLinks`): coverage surfaces cases **with** `vaultLinks` the vault hasn't actually heard about (receipt absent or older than the case's own update). `needsAttention` itself now gets the same two-surface treatment this paragraph celebrates for coverage: it is served at `GET /api/cases/needs-attention` and the `get_needs_attention` MCP tool, so an agent can read all four buckets — not just the `unlinked` one — directly. See [vault-async](../reference/vault-async.md).
 
 | Feature | What | Why it matters | Data/Arch impact | Pri | Size |
 |---|---|---|---|---|---|
@@ -318,7 +318,11 @@ The foundation that makes agent-native real and keeps the JSON store trustworthy
 | Responsive / PWA | Mobile layout; installable; read-first offline | Triage from a phone | Responsive pass; service worker | P2 | L |
 | Dark mode | Theme toggle | Long sessions / preference | CSS vars + toggle | P3 | S |
 
-_Out of scope (critic): **auth/login** (single-user local; OS-level security suffices), **multi-device real-time sync / cloud DB** (revisit only at device #2 — keep the swappable store seam), **collaborative/multi-user** (single-user by design; no collaborator accounts)._
+_Out of scope (critic): **auth/login** (single-user local; OS-level security suffices — a spoke's
+reach is gated by the tailnet, not an app login), **collaborative/multi-user** (single-user by design;
+no collaborator accounts). **Multi-device** is now IN scope and shipped as **hub & spoke** — not
+real-time sync / a cloud DB, but a single hub store with stateless clients over Tailscale (the store
+seam stayed swappable and we chose not to swap it); see [Multi-device](../architecture/multi-device.md)._
 
 ## Phased roadmap
 
@@ -348,7 +352,7 @@ If only one slice ships, ship this (the critic's top-leverage set, all Phase 0�
 With the one-line reason each:
 
 - **Auth / login / accounts** — single-user local product; OS-level security is the boundary.
-- **Multi-device real-time sync / cloud DB** — revisit only when a second device appears; keep the store seam swappable until then.
+- **Multi-device** — DECIDED (device #2 arrived): **hub & spoke**, not real-time sync / a cloud DB. The single store stays on the hub; other machines are stateless Tailscale clients. See [Multi-device](../architecture/multi-device.md).
 - **Collaborative / multi-user** — single-user by design; no collaborator accounts, no identity system.
 - **Generic public/3rd-party API** — one local webhook into the router is the only inbound extension; a real API implies the auth/multi-tenant the product rejects.
 - **Heavy client state libs / SPA rewrite** — keep SSR + light client interactivity; don't trade local-first simplicity for a framework.

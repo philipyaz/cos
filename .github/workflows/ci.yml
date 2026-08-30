@@ -34,7 +34,7 @@ jobs:
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # CI never pushes; don't leave the token in the runner's git config.
           persist-credentials: false
@@ -42,7 +42,7 @@ jobs:
       # Node 22 is REQUIRED: the unit step uses node:test TS type-stripping,
       # which only exists on Node >= 22.6 (below 22 the unit suite self-skips).
       - name: Set up Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -63,6 +63,16 @@ jobs:
         run: |
           node mcp/service-manifest.mjs --json > /dev/null
           node scripts/gen-mcp-json.mjs --check
+
+      # The Cowork skill bundles (board/.claude/skill-bundles/*.zip) AND the automation catalog
+      # spliced into board/.claude/skills/README.md are both build artifacts of
+      # board/.claude/skills/ (+ automation.json). The bundles are what Cowork actually installs,
+      # so a skill edited without a rebuild ships a STALE procedure with nothing at runtime to
+      # flag it; the catalog is the only surface that says a skill can run on a timer. Deterministic
+      # zips + a byte-compared splice make both a straightforward diff. Same generated-file
+      # discipline as .mcp.json above.
+      - name: Check skill bundles + catalog are in sync
+        run: node scripts/pack-skills.mjs --check
 
       # Board deps so start_test_board finds node_modules/.bin/next and the
       # api-* integration steps RUN instead of silently skipping.
@@ -107,7 +117,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # CI never pushes; don't leave the token in the runner's git config.
           persist-credentials: false
@@ -115,7 +125,7 @@ jobs:
       # uv provisions its own interpreter and the venv on first `uv run`.
       # Pin Python to 3.12 (both sidecars require-python >= 3.11).
       - name: Set up uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.12"
 

@@ -2,21 +2,19 @@
 name: fitness-training-plan
 description: >
   The Fitness coach's HEADLINE skill — generate a personalised WEEKLY TRAINING
-  PLAN for the athlete with deliberate VARIETY / ROTATION (rotate sports, focus,
-  and intensity week to week; alternate hard/easy; progressive overload toward the
-  goal date), then PERSIST it via `save_training_plan` so it lands on the
-  /fitness/training-plan history feed. It reads the athlete profile (training
-  focus, goal date, days/week, max session, sports, equipment) AND the body add-on
-  (training status, current weight, the free-text body goal), the last ~4 weeks of
-  actual workouts, the recovery state (HRV / sleep / resting HR / form score), and
-  the LAST few plans — and deliberately varies the new week against
-  them so no two weeks look the same. Use when the user says "make me a training
-  plan", "plan my week of workouts", "generate this week's training plan", "build
-  my weekly training plan", "plan my training", "what should I train this week",
-  "I'm training for <an event>, plan my week", or otherwise asks for a forward
-  week of structured sessions. (For ingesting/reading watch data use
-  fitness-health-data; for the past week use fitness-weekly-review; for the daily
-  go/no-go brief use fitness-pre-workout-brief.)
+  PLAN for the athlete with deliberate VARIETY / ROTATION (rotate sports and
+  intensity; alternate hard/easy; progressive overload toward the goal date),
+  then PERSIST it via `save_training_plan` so it lands on the
+  /fitness/training-plan history feed. It reads the athlete profile (focus, goal
+  date, availability, sports, equipment), the body add-on (training status, weight,
+  the body goal), the last ~4 weeks of actual workouts, the recovery state (HRV /
+  sleep / resting HR / form score), and the LAST few plans — varying the new week
+  against them. Use when the user says "make me a training plan", "plan my week
+  of workouts", "generate this week's training plan", "what should I train this
+  week", "I'm training for a race, plan my week", or otherwise
+  asks for a forward week of structured sessions. (Watch data → fitness-health-data;
+  the past week → fitness-weekly-review; the daily go/no-go brief →
+  fitness-pre-workout-brief.)
 ---
 
 # Fitness — weekly training plan (the headline coaching skill)
@@ -58,6 +56,42 @@ Generate action **hands off to you**, it does not call a server-side model. So
 ---
 
 ## The procedure: FETCH → GENERATE → PERSIST
+
+### 0.5 CLOSE OUT last week (before authoring anything)
+
+Before generating anything new, reconcile what actually happened last week — an outcome is a
+fact only the user (or a proven workout) can supply, and skipping this step means STEP 4's
+rotation reads intentions instead of reality.
+
+- **Find the most recent prior plan.** `list_coaching_artifacts { kind:"training_plan", limit:4 }`,
+  take the most recent one whose week PRECEDES the week you're about to plan, then
+  `get_coaching_artifact { id }` and read its **`reconciliation`** — all three fields:
+  `sessionDays` (the batched line's "N planned"), `outcomes` (feeds STEP 4's rotation), and
+  `unresolvedDays`.
+- **Auto-resolve the proven subset, silently.** For every `unresolvedDays.days[]` entry with
+  `provenDone: true`, call `set_plan_day_outcome(artifact_id, date, "done")` — no need to ask,
+  a same-date workout entry already proves it happened. Cite the proving `healthEntryId` in your
+  run report.
+- **Batch everything else into one batched question.** For the remaining `unresolvedDays`, ask
+  ONE question — counts first, then the days: *"Last week: 3 planned, 1 proven done. Mon
+  strength + Wed stretch are unanswered — done, skipped, or move one into this week?"* **In
+  every mode**: an outcome is a fact only the user knows — **never guess, never mark an
+  unanswered day**; it simply stays `planned` (the issue's "Never fabricate" rule — the same
+  discipline JOB 0 uses for nutrition intake). **In an unattended (scheduled) run nobody can
+  answer:** put the batched question in the run report (and in the new plan's `weekly_notes`)
+  and **proceed to STEP 1 immediately** — the unanswered days stay `planned` and are re-asked
+  next run. Only a conversational run waits for the answer; the weekly plan is never skipped
+  because a question went unanswered.
+- **Answers.** "done" / "skipped" → `set_plan_day_outcome(artifact_id, date, status)`. "move it
+  [to \<date\>]" → `set_plan_day_outcome(artifact_id, date, "moved", moved_to:<chosen date>)`
+  **and** carry that session into the new week's plan you're about to author (place it on
+  `moved_to`'s date when you reach STEP 6) — that's the cross-week relocation; STEP 8's push
+  materialises it once you save. Two rules the board enforces on the re-save (400 otherwise):
+  **keep the old date's day entry** in the week you re-save (its `moved` status and its calendar
+  receipt carry forward by date — dropping the entry loses both), and **one entry per date** — a
+  session moved onto a date that already has one is MERGED into that single entry (or the
+  existing session is pushed to another free date), never a second entry on the same date.
+- **Nothing unresolved, or no prior plan** → say so in **one line** and go straight to STEP 1.
 
 ### 1. FETCH the goal + constraints — `get_athlete_profile {}` + the body add-on
 
@@ -129,6 +163,12 @@ prescribed recently** — then **DELIBERATELY VARY the new week against them.** 
 If there are **no prior plans**, this is week one — set a sensible **baseline** and
 note in `weekly_notes` that future weeks will rotate off it.
 
+**Rotate off outcomes, not intentions.** STEP 0.5's `reconciliation.outcomes` counts and each
+recent plan's per-day `status` are the real rotation input, not just what was originally
+scheduled — a session that was repeatedly `skipped` or `moved` must **change** next week
+(different slot, sport, duration, or dropped entirely), not be re-planned verbatim as if it had
+happened.
+
 ### 5. (soft) FETCH nutrition if weight is a goal — `list_food_log { ... }`
 
 **Only if** the body goal involves fat loss or a target weight (from `get_body_objective` — the
@@ -185,29 +225,66 @@ save_training_plan({
 malformed body, it does not repair it. A bad `sport` string or a missing day will be
 refused.
 
-### 8. (optional, cross-add-on) Offer the calendar — `create_event`
+**When re-saving a week, never include `status`, `movedTo`, or `eventId` keys in the days you
+send** — the board carries them forward; sending one overwrites the recorded fact.
 
-Once the plan is saved, **offer** to put the sessions on the calendar — **one
-`create_event` (the `calendar` MCP) per training day**, the session in the
-description (write rest days as a "Rest" marker or skip them). This is **cross-add-on
-and optional** — don't do it unless the user asks. It's a **bulk** write (a whole
-week of events), so in **approval mode** lay it out and confirm before firing.
-(The /fitness/training-plan page also has its own "add to calendar" action that does
-the same server-side; either path works.)
+### 8. Push the week to the calendar — `push_plan_to_calendar`
+
+Once the plan is saved, put the sessions on the calendar **by default**. **First, read
+the user's REAL calendar** (your own Google Calendar connector) for the week's date
+range and collect the busy times — **only** `{date, start, end}`, never a title,
+attendee, or any other content. Then call the `fitness` MCP's
+**`push_plan_to_calendar({ period_key: "<the week>", busy_windows: [...] })`** —
+`busy_windows` is optional (omit it if you can't read the real calendar), but pass it
+whenever you can, so a session never lands on top of a real meeting the board's own
+`db.events` doesn't know about. **Never ask Cos to store this calendar data** — the
+tool uses it for this one call only and discards it; it is not a sync.
+
+The push is also **idempotent and overlap-safe**: a session lands in a free slot
+within its day's candidate windows and is never placed on top of an existing timed
+event or inside the user's **working hours** (Mon–Fri 09:00–18:00 by default, or
+whatever the board has stored — this happens automatically, you don't set it here);
+rest / active-recovery days are always skipped, never placed. Re-running it after the
+plan changes **reconciles** the week (creates new sessions, refreshes changed ones,
+never duplicates) instead of re-creating it — safe to call every time this skill
+runs. A session time you or Philip edited by hand is **never moved back** by a
+re-push; only its title/description refresh.
+
+This is a **bulk** write (a whole week of events), so in **approval mode** it is the
+ONE confirmation STEP 0 reserves for the whole run — lay the week out and get a
+single yes before calling it. In auto mode, call it and report.
+
+**Relay every `skipped` result with its reason** — `rest_day` (expected, no action
+needed), `resolved` (the day was already marked done/skipped/moved by STEP 0.5's close-out or
+the training-plan view; expected), `no_free_slot` (the day was genuinely
+fully booked; tell the user which day), or `outside_working_hours` (every candidate slot fell
+inside working hours — this is a policy skip, not congestion; tell the user their working day
+left no margin). When a skipped result — a rest day OR a `resolved` day — carries an
+`eventId`, a session is still on the calendar for a slot that no longer holds one (the plan
+changed since that day was last pushed, or the day was **moved** and its original slot is now
+stale) — tell the user and offer to remove it via the `calendar` MCP's delete tool (the board
+itself never deletes it). A `resolved` result without an `eventId` needs no action. (The `/fitness/training-plan` page's own "Add to calendar"
+button calls the same route server-side; either path works, but only this skill's
+path can supply `busy_windows`.)
 
 ### 9. Tell the user
 
 Confirm the plan is **saved** and **visible in the `/fitness/training-plan` history
 feed** (latest-by-default). Call out the **week's focus**, the **`recovery_status`**
 driving the intensity, the **rest/recovery days**, and — explicitly — **how this week
-rotates/progresses vs. last** (the variety is the value; make it legible). Offer the
-calendar push (STEP 8) and the **weekly review / pre-workout brief** (fitness-coach)
-as follow-ups. Carry the **not-medical-advice** framing.
+rotates/progresses vs. last** (the variety is the value; make it legible). Report
+what STEP 8's calendar push did (created / updated / skipped, with reasons) and
+offer the **weekly review / pre-workout brief** (fitness-coach) as follow-ups. Carry
+the **not-medical-advice** framing.
 
 ---
 
 ## Guardrails recap
 
+- **Close out last week FIRST** (STEP 0.5) — before authoring anything new, auto-resolve the
+  proven subset silently and batch the rest into one question.
+- **Rotation reads outcomes, not intentions; never fabricate one** — an unanswered day stays
+  `planned`; only the user (or a proven workout) can confirm what actually happened.
 - **The board does NOT generate — YOU do.** No board-side LLM; you author the plan
   and `save_training_plan` it. Never say "click Generate and wait" — that button
   hands off to you, and the result lands on the `/fitness/training-plan` feed.
@@ -227,8 +304,12 @@ as follow-ups. Carry the **not-medical-advice** framing.
 - **Gate + mode** — `save_training_plan` 404s if the add-on is off (flip on at
   /addons). Saving one plan is low-stakes in any mode; confirm only the **bulk**
   calendar push in approval mode.
-- **Calendar is cross-add-on + optional** — only on request; one `create_event` per
-  training day; bulk, so confirm in approval mode.
+- **Calendar push is the DEFAULT, not an offer** — `push_plan_to_calendar` runs
+  after every save; it's idempotent + overlap-safe, rest/active-recovery days are
+  always skipped, and a human-edited event time is never moved back. Bulk, so
+  confirm once in approval mode. Read the user's real calendar first and pass its
+  busy times as `busy_windows` (date/start/end only — never store the content);
+  working hours are protected automatically either way.
 - **NOT MEDICAL ADVICE** — informational estimate; defer injuries / pain / symptoms /
   medical conditions / pregnancy / under-18 to a professional; don't push hard
   training on poor recovery.

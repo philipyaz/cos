@@ -14,12 +14,14 @@ import {
   groupCases,
   todayCases,
   needsAttention,
+  selectVaultCoverage,
   isStale,
   dueStatus,
   slaStatus,
   type BoardQuery,
 } from "../../board/lib/selectors.ts";
 import type { CaseRecord, CaseStatus, Priority } from "../../board/lib/types.ts";
+import { STALE_AFTER_DAYS } from "../../board/lib/staleness.ts";
 
 // A frozen reference instant used everywhere. 12:00 UTC keeps us mid-day so
 // date-only (UTC-midnight) dues land unambiguously relative to it.
@@ -453,12 +455,12 @@ test("needsAttention", async (t) => {
     assert.deepEqual(needsAttention(cases, NOW).overdue.map((c) => c.id), ["od"]);
   });
 
-  await t.test("agingWaiting: waiting_for_input idle > 3 days only", () => {
+  await t.test("agingWaiting: waiting_for_input idle > STALE_AFTER_DAYS days only", () => {
     const stale = mkCase({ id: "stale", status: "waiting_for_input", updatedAt: "2026-05-20T00:00:00.000Z", vaultLinks: ["v"] }); // ~11d idle
     const fresh = mkCase({ id: "fresh", status: "waiting_for_input", updatedAt: "2026-05-31T00:00:00.000Z", vaultLinks: ["v"] }); // 12h idle
-    const exactly3 = mkCase({ id: "exactly3", status: "waiting_for_input", updatedAt: new Date(NOW.getTime() - 3 * DAY).toISOString(), vaultLinks: ["v"] }); // == 3d, NOT > 3d
+    const exactlyThreshold = mkCase({ id: "exactlyThreshold", status: "waiting_for_input", updatedAt: new Date(NOW.getTime() - STALE_AFTER_DAYS * DAY).toISOString(), vaultLinks: ["v"] }); // == threshold, NOT > threshold
     const notWaiting = mkCase({ id: "notWaiting", status: "todo", updatedAt: "2026-05-01T00:00:00.000Z", vaultLinks: ["v"] });
-    const ids = needsAttention([stale, fresh, exactly3, notWaiting], NOW).agingWaiting.map((c) => c.id);
+    const ids = needsAttention([stale, fresh, exactlyThreshold, notWaiting], NOW).agingWaiting.map((c) => c.id);
     assert.deepEqual(ids, ["stale"]);
   });
 
@@ -495,15 +497,120 @@ test("needsAttention", async (t) => {
   });
 });
 
+// ── selectVaultCoverage ───────────────────────────────────────────────────────
+test("selectVaultCoverage", async (t) => {
+  await t.test("never: vaultLinks present, no receipt at all", () => {
+    const c = mkCase({ id: "a", vaultLinks: ["Acme"] });
+    const { gaps } = selectVaultCoverage([c], NOW);
+    assert.deepEqual(gaps.map((g) => g.id), ["a"]);
+    assert.equal(gaps[0].reason, "never");
+  });
+
+  await t.test("stale: receipt older than updatedAt", () => {
+    const c = mkCase({
+      id: "a",
+      vaultLinks: ["Acme"],
+      updatedAt: "2026-05-31T00:00:00.000Z",
+      vaultIngestedAt: "2026-05-20T00:00:00.000Z",
+    });
+    const { gaps } = selectVaultCoverage([c], NOW);
+    assert.deepEqual(gaps.map((g) => g.id), ["a"]);
+    assert.equal(gaps[0].reason, "stale");
+  });
+
+  await t.test("equal stamps read as covered (strict <, not <=)", () => {
+    const c = mkCase({
+      id: "a",
+      vaultLinks: ["Acme"],
+      updatedAt: "2026-05-20T00:00:00.000Z",
+      vaultIngestedAt: "2026-05-20T00:00:00.000Z",
+    });
+    assert.deepEqual(selectVaultCoverage([c], NOW).gaps, []);
+  });
+
+  await t.test("no vaultLinks: never a gap, receipted or not", () => {
+    const noLinks = mkCase({ id: "noLinks" });
+    const receipted = mkCase({ id: "receipted", vaultIngestedAt: "2020-01-01T00:00:00.000Z" });
+    assert.deepEqual(selectVaultCoverage([noLinks, receipted], NOW).gaps, []);
+  });
+
+  await t.test("empty vaultLinks array: never a gap", () => {
+    const c = mkCase({ id: "a", vaultLinks: [] });
+    assert.deepEqual(selectVaultCoverage([c], NOW).gaps, []);
+  });
+
+  await t.test("archived: excluded by default, included via includeArchived", () => {
+    const c = mkCase({ id: "a", vaultLinks: ["Acme"], archivedAt: "2026-05-30T00:00:00.000Z" });
+    assert.deepEqual(selectVaultCoverage([c], NOW).gaps, []);
+    const withArchived = selectVaultCoverage([c], NOW, { includeArchived: true }).gaps;
+    assert.deepEqual(withArchived.map((g) => g.id), ["a"]);
+  });
+
+  await t.test("future-snoozed: excluded by default (parity with applyBoardQuery's default)", () => {
+    const c = mkCase({ id: "a", vaultLinks: ["Acme"], snoozeUntil: "2026-12-01T00:00:00.000Z" });
+    assert.deepEqual(selectVaultCoverage([c], NOW).gaps, []);
+  });
+
+  await t.test("unparseable vaultIngestedAt reads as never (fail-closed)", () => {
+    const c = mkCase({ id: "a", vaultLinks: ["Acme"], vaultIngestedAt: "not-a-date" });
+    const { gaps } = selectVaultCoverage([c], NOW);
+    assert.equal(gaps[0]?.reason, "never");
+  });
+
+  await t.test("unparseable updatedAt with a valid receipt reads as stale, never silently covered", () => {
+    const c = mkCase({
+      id: "a",
+      vaultLinks: ["Acme"],
+      updatedAt: "not-a-date",
+      vaultIngestedAt: "2026-05-20T00:00:00.000Z",
+    });
+    const { gaps } = selectVaultCoverage([c], NOW);
+    assert.equal(gaps[0]?.reason, "stale");
+  });
+
+  await t.test("the gap projection carries exactly the documented fields", () => {
+    const c = mkCase({
+      id: "a",
+      title: "Acme renewal",
+      domain: "work",
+      status: "waiting_for_input",
+      vaultLinks: ["Acme", "Jane Doe"],
+      updatedAt: "2026-05-31T00:00:00.000Z",
+    });
+    const { gaps } = selectVaultCoverage([c], NOW);
+    assert.deepEqual(gaps, [
+      {
+        id: "a",
+        title: "Acme renewal",
+        domain: "work",
+        status: "waiting_for_input",
+        kind: undefined,
+        vaultLinks: ["Acme", "Jane Doe"],
+        updatedAt: "2026-05-31T00:00:00.000Z",
+        vaultIngestedAt: undefined,
+        reason: "never",
+      },
+    ]);
+  });
+});
+
+// ── STALE_AFTER_DAYS ─────────────────────────────────────────────────────────
+// Pins the ratified unified idle threshold (cos-ops#20). A boundary test alone
+// can't catch a silent policy change (a typo'd constant would still pass every
+// boundary-relative assertion below) — this is the guard that would fail.
+test("STALE_AFTER_DAYS is ratified at 3", () => {
+  assert.equal(STALE_AFTER_DAYS, 3);
+});
+
 // ── isStale ────────────────────────────────────────────────────────────────────
 test("isStale", async (t) => {
   await t.test("exactly at the threshold is NOT stale (strictly greater)", () => {
-    const c = mkCase({ updatedAt: new Date(NOW.getTime() - 5 * DAY).toISOString() });
+    const c = mkCase({ updatedAt: new Date(NOW.getTime() - STALE_AFTER_DAYS * DAY).toISOString() });
     assert.equal(isStale(c, NOW), false);
   });
 
   await t.test("just over the threshold is stale", () => {
-    const c = mkCase({ updatedAt: new Date(NOW.getTime() - 5 * DAY - 1).toISOString() });
+    const c = mkCase({ updatedAt: new Date(NOW.getTime() - STALE_AFTER_DAYS * DAY - 1).toISOString() });
     assert.equal(isStale(c, NOW), true);
   });
 
@@ -572,14 +679,14 @@ test("slaStatus", async (t) => {
     assert.deepEqual(slaStatus(c, NOW), { days: 2, breached: false });
   });
 
-  await t.test("5 days idle is NOT breached (boundary: days > 5)", () => {
+  await t.test("5 days idle IS breached (well past the STALE_AFTER_DAYS threshold)", () => {
     const c = mkCase({ status: "waiting_for_input", updatedAt: new Date(NOW.getTime() - 5 * DAY).toISOString() });
-    assert.deepEqual(slaStatus(c, NOW), { days: 5, breached: false });
+    assert.deepEqual(slaStatus(c, NOW), { days: 5, breached: true });
   });
 
-  await t.test("just under 6 days still floors to 5 → not breached", () => {
+  await t.test("just under 6 days still floors to 5 → breached", () => {
     const c = mkCase({ status: "waiting_for_input", updatedAt: new Date(NOW.getTime() - (6 * DAY - 1)).toISOString() });
-    assert.deepEqual(slaStatus(c, NOW), { days: 5, breached: false });
+    assert.deepEqual(slaStatus(c, NOW), { days: 5, breached: true });
   });
 
   await t.test("6 days idle IS breached", () => {
@@ -590,5 +697,15 @@ test("slaStatus", async (t) => {
   await t.test("zero idle → 0 days, not breached", () => {
     const c = mkCase({ status: "waiting_for_input", updatedAt: NOW.toISOString() });
     assert.deepEqual(slaStatus(c, NOW), { days: 0, breached: false });
+  });
+
+  await t.test("exactly STALE_AFTER_DAYS idle is NOT breached (boundary: days > STALE_AFTER_DAYS)", () => {
+    const c = mkCase({ status: "waiting_for_input", updatedAt: new Date(NOW.getTime() - STALE_AFTER_DAYS * DAY).toISOString() });
+    assert.deepEqual(slaStatus(c, NOW), { days: STALE_AFTER_DAYS, breached: false });
+  });
+
+  await t.test("STALE_AFTER_DAYS + 1 idle IS breached", () => {
+    const c = mkCase({ status: "waiting_for_input", updatedAt: new Date(NOW.getTime() - (STALE_AFTER_DAYS + 1) * DAY).toISOString() });
+    assert.deepEqual(slaStatus(c, NOW), { days: STALE_AFTER_DAYS + 1, breached: true });
   });
 });

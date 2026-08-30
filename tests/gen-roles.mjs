@@ -125,6 +125,15 @@ async function main() {
   );
   check(r.code === 0 && r.out.trim() === "0.0.0.0", "an EXPLICIT host passes through untouched");
 
+  // ── [6] the cos-join:// blob CLI (join-blob.mjs) ──────────────────────────
+  r = run("node", ["scripts/join-blob.mjs"], { COS_HUB_PUBLIC_URL: "" });
+  check(r.code !== 0 && /No hub URL/.test(r.out), "join-blob refuses with no hub URL / COS_HUB_PUBLIC_URL");
+  r = run("node", ["scripts/join-blob.mjs", "https://mini.example.ts.net"]);
+  check(r.code === 0 && /^cos-join:\/\/v1\?/.test(r.out.trim()), "join-blob emits a cos-join:// string for an explicit hub URL");
+  check(/hub=https%3A%2F%2Fmini\.example\.ts\.net/.test(r.out) && /schema=\d+/.test(r.out), "the blob carries the (url-encoded) hub URL + schema, no secret");
+  r = run("node", ["scripts/join-blob.mjs", "notaurl"]);
+  check(r.code !== 0 && /http/.test(r.out), "join-blob rejects a non-http hub value");
+
   if (failures > 0) {
     console.error(`gen-roles: ${failures} check(s) failed`);
     process.exit(1);

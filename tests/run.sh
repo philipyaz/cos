@@ -8,10 +8,59 @@
 #      (selectors/store/format) via the zero-dep TS resolve hook in tests/unit/.
 #      HARD gate. Needs Node >= 22 (TS type-stripping for `node --test`); SKIPped
 #      (not failed) on older Node so the rest of the suite still runs.
+#   1b. board-starving-obligations — cos-ops#24's aging rank over the pure
+#      selector (Node >= 22).
 #   2. board-lint.mjs  — board invariants (HARD gate: any violation => FAIL).
+#   2b. skill-reachability.mjs — a skill under board/.claude/skills/ may only
+#      delegate to a slash-skill that has a Cowork bundle in
+#      board/.claude/skill-bundles/ (HARD gate). Static, read-only, no board
+#      needed — catches the class of bug where a sweep hands work to a skill
+#      Cowork never installed (cos-ops#1).
+#   2c. viewport-lint.mjs — no `h-screen`/`min-h-screen`/raw `100vh` in board
+#      app/components outside the one declared dvh fallback (HARD gate;
+#      static, node-only — the class of bug where a new drawer puts its Save
+#      button under the iOS toolbar).
+#   2d. mobile-nav.mjs — every href in the shared nav model (board/lib/nav.ts)
+#      is rendered by a below-`md` navigation surface (HARD gate; static — the
+#      class of bug where an add-on's pages are phone-invisible).
+#   2e. skill-frontmatter.mjs — every SKILL.md's frontmatter `description` must
+#      load: parseable YAML, <= 1024 chars folded, no XML-tag-shaped
+#      <placeholder> spans (HARD gate). Static, read-only, no board needed —
+#      catches a skill that packs fine but is REJECTED at install/load time.
+#   2f. nutrition-status-consumers.mjs — every top-level field the nutrition status
+#      engine returns must be CONSUMED (a defined action, or an explicit
+#      state-and-move-on) by JOB 0 of nutrition-chef/SKILL.md (HARD gate; the ADR
+#      0014 gate for cos-ops#18). Static, read-only, no board needed — catches the
+#      board computing an answer nobody reads. Also runs
+#      fitness-outcome-consumers.mjs in the same step (ADR 0022 — a parser-grade
+#      gate rides an EXISTING step id rather than minting a new one): every
+#      top-level field of the fitness PlanReconciliation engine must be consumed by
+#      the weekly + daily close-out sections of the two fitness skills (cos-ops#19).
+#      Also runs shopping-list-consumers.mjs (cos-ops#37) — the ADR 0014 gate's shopping
+#      twin: every ShoppingCandidatesResult field + every server.mjs shopping tool must
+#      be named inside JOB 6 of nutrition-chef/SKILL.md, a small set of load-bearing
+#      phrases must hold, the engine defines no new threshold constant, the shopping
+#      routes never reference `pending`, and the route-vs-tool wiring matches. Rides the
+#      SAME [2f] step id (ADR 0022: a new parser-grade gate rides an existing id) as its
+#      own file with its own echo + fail_reasons token.
+#      [2f] also rides
+#      triage-decisions-consumers.mjs (cos-ops#41) — the same ADR 0014 shape for
+#      TriageDecisionSummary's fields + the three triage MCP tools, consumed by
+#      mail-to-board's drop region (which also records BEFORE it watermarks) and
+#      reminders-review's digest STEP — a parser-grade gate rides an existing id
+#      rather than minting a new one.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
-#      target; reported as WARN so the harness is usable mid-migration).
+#      target; reported as WARN so the harness is usable mid-migration), plus
+#      three HARD sub-checks: (3c) the board-assertion guardrail phrases must be
+#      present in every second-brain-query/SKILL.md under vault/ and in the
+#      caller-side vault-operations skill (cos-ops#3); (3d) the vault-ingest
+#      receipt contract — vault-operations must carry the exact "stamp the
+#      receipt only on `completed`" phrases, so a future skill edit can't
+#      silently drop the only-on-completed rule (cos-ops#2); (3e) the releasing
+#      docs must never claim an owner bypass — the main ruleset's bypass_actors
+#      is deliberately empty, and this exact claim hid a 45-day release outage
+#      (cos-ops#23).
 # NOTE ON THE api-* STEPS (4-12): they drive a REAL board over HTTP, but against an
 # AUTO-STARTED, ISOLATED THROWAWAY board — an own-.next `next dev` on port 3999, its
 # store pointed at a sandbox seeded from tests/fixtures/board-seed.json (synthetic),
@@ -74,6 +123,15 @@
 #      date filters, GET-by-id, PATCH persist (an x-actor:agent write round-trips),
 #      the missing-date/slot/description + non-number-calories + bad-slot/bad-health
 #      400s, and delete. Snapshots+restores cases.json. Skipped when no board is up.
+#  10e2. api-nutrition-pantry-reconcile — ONLY if a board is running: the v14 bulk pantry
+#      RECONCILE write (POST /api/nutrition/pantry/reconcile). A fresh name ADDS a row; a
+#      resubmit of a normalised variant (case/whitespace/plural/accent) UPDATES that same row
+#      instead of minting a duplicate; a batch of N new items bumps db.version exactly ONCE
+#      with N distinct ids; an in-batch duplicate is reported SKIPPED, not double-added; a
+#      malformed item (or an empty items array) rejects the WHOLE batch with nothing written;
+#      the pantry count never reduces; and the GATE mirrors api-nutrition-gate (a DISABLED
+#      add-on 404s the write while GET stays 200). Snapshots+restores cases.json. Skipped when
+#      no board is up.
 #  10g. api-body-weight — ONLY if a board is running: the v14 weigh-in lifecycle
 #      (/api/body/weight[/:id]) after enabling the "body" add-on:
 #      create→WEIGHT-<n>+version bump (weightKg + note persist), body-composition
@@ -91,6 +149,30 @@
 #      404 while its GETs stay 200; PATCH /api/addons/fitness flips the gate live + bumps db.version;
 #      unknown-id 404 + non-boolean-enabled 400. Snapshots+restores cases.json (settings.addons +
 #      healthEntries + athleteProfile live there). Skipped when no board.
+#  10h3. api-nutrition-status — ONLY if a board is running: the v14 RECONCILIATION status contract
+#      (GET /api/nutrition/status + get_nutrition_status). All seven fields present + typed; an empty
+#      store returns zeroes/nulls/false (asserted only after observing the store is actually empty);
+#      a past-dated planned meal-plan entry with a same-date+slot food log naming its MEAL-<n> id is
+#      counted in provablyCooked and NOT double-counted; a decoy log naming the WRONG id does not
+#      prove that meal; a future-dated planned entry is counted in neither stale nor provable; an
+#      expired pantry item is surfaced; a fresh nutrition-targets save flips hasNutritionTargets; the
+#      read stays 200 with the add-on DISABLED (ungated). Snapshots+restores cases.json. Skipped when
+#      no board is up.
+#  10h4. api-nutrition-shelf-life — ONLY against the auto-started sandbox board (needs FILE access,
+#      like 13d): the v18 pantry LIFECYCLE + computed freshness-horizon contract (cos-ops#18).
+#      pantryLifecycle present + typed; the fresh/staple/spice scoping split; a fresh row aged past
+#      its shelf life via STORE-FILE surgery fires in likelyPastHorizon with the right horizonDays,
+#      while a same-aged spice/staple never does; no write path persists a lifecycle/horizon field or
+#      a guessed expiresAt; schemaVersion unchanged. Snapshots+restores cases.json. Skipped when no
+#      board, or under an external COS_TEST_BOARD_URL board (no file access to its store).
+#  10h5. api-nutrition-shopping — ONLY if a board is running: the v16 shopping-list + candidates
+#      contract (cos-ops#37). A `household` NON-FOOD item round-trips (create/list/get); PATCH
+#      status:"bought" stamps boughtAt, status:"needed" clears it; a stale expectedVersion 409s; a
+#      dangling sourceRef POSTs + reads fine (a soft ref); a planned in-window meal naming an
+#      invented ingredient surfaces as a candidate, is suppressed once added to the list, and two
+#      back-to-back candidate GETs return the SAME version (persists nothing); the GATE mirrors
+#      api-nutrition-gate; delete removes it. Plus an in-file route-vs-tool check (always-run home:
+#      shopping-list-consumers.mjs). Snapshots+restores cases.json. Skipped when no board is up.
 #  10i. api-fitness-push — ONLY if a board is running: a push INGEST → SUMMARIZE round-trip that
 #      kills the split-brain-taxonomy bug — POST /api/fitness/push a realistic HAE payload (sleep +
 #      heart_rate_variability metrics + a workout), then assert GET /api/fitness/summary returns
@@ -162,6 +244,31 @@
 #      (GET /api/healthz): 200 {ok:true}, role defaults to hub, deviceId slug,
 #      code schemaVersion vs raw diskSchemaVersion with degradedRead === disk>code,
 #      appVersion, lease null-or-well-formed. Read-only (net-zero).
+#  13d3. api-devices — ONLY if a board is running: the multi-device Devices surface
+#      (GET /api/devices): the identity envelope (role/deviceId/schemaVersion/
+#      leaseStaleHours), the x-device ephemeral last-seen tracker (a header registers +
+#      bumps a device, a header-less request invents nothing, a malformed id is
+#      sanitized, a write path records via resolveActor), and the null join blob when
+#      COS_HUB_PUBLIC_URL is unset. In-memory + read-only (net-zero).
+#  13d4. api-vault-coverage — ONLY if a board is running: the v15 vault-ingest RECEIPT +
+#      coverage-read contract (GET /api/cases/vault-coverage + POST /api/cases/vault-receipt):
+#      a case with vaultLinks and no receipt is a gap (reason "never"); a case with NO
+#      vaultLinks is never a gap; POST vault-receipt stamps the receipt (server-stamped,
+#      EQUAL to updatedAt — the equal-stamp invariant) and the case drops out of coverage;
+#      updating the case past its receipt makes it a gap again (reason "stale"); a mixed
+#      known/unknown receipt POST marks the known id and reports the unknown one back
+#      (never fails the batch) while an empty `ids` array 400s; an archived gap is hidden
+#      by default and shown under ?includeArchived=1. Snapshots+restores cases.json. Skipped
+#      when no board is up.
+#  13d5. api-needs-attention — ONLY if a board is running: the cos-ops#20 board-attention
+#      read contract (GET /api/cases/needs-attention): four bucket arrays (overdue/
+#      agingWaiting/untriaged/unlinked) + per-bucket counts + counts.total (the sum) +
+#      version; an overdue fixture (todo, past dueAt) carries the documented projection
+#      and a future-due one is excluded; a bare todo fixture is untriaged until it carries
+#      a priority; a fixture with no vaultLinks is unlinked until it carries one;
+#      agingWaiting is asserted present/array-shaped only (its membership math is owned by
+#      tests/unit/selectors.test.ts — updatedAt is server-stamped, so no HTTP sequence here
+#      can seed idle membership). Snapshots+restores cases.json. Skipped when no board is up.
 #  13e. backup-hardening — hermetic multi-producer backup pipeline test (NO board,
 #      NO Keychain, NO network, NO live data: synthetic repo-root skeleton + a local
 #      BARE git "remote" + per-device clones in a mktemp sandbox, HOME sandboxed).
@@ -180,6 +287,8 @@
 #      plists (+ its REAL bind behavior via a throwaway http server), scheduled
 #      backup plist, spoke install-set scoping + loud role errors, the loader's
 #      spoke/localhost + invalid-role hard-fails. Run UNCONDITIONALLY (node only).
+#   13g. upgrade-check.mjs — the post-pull planner (scripts/upgrade-check.mjs): path → step
+#      contract + a CLI smoke test on a throwaway git repo. Hermetic; HARD gate.
 #  14. search-sidecar — headless python tests for the semantic search sidecar
 #      (search/test_search.py): index/topk/batch/determinism over BOTH backends,
 #      offline (COS_SEARCH_EMBEDDER=hash, no network). uv-GATED — skipped (not
@@ -218,8 +327,14 @@ TEST_BOARD_PORT="${COS_TEST_BOARD_PORT:-3999}"
 BASE=""
 BOARD_UP=0
 # Set only for the AUTO-STARTED board (empty under COS_TEST_BOARD_URL): the
-# sandbox data dir, for the one test (api-schema-guard) that must rewrite the
-# store FILE to stage its scenario. Never points at live data.
+# sandbox data dir. Once the sandbox board is UP it is exported to every api-*
+# step as COS_BOARD_DATA (the store file the tests snapshot, restore, and read
+# raw). Every api-*.mjs falls back to the literal board/data/cases.json when the
+# variable is absent — so before this export the 33 steps that were invoked
+# without it snapshotted + restored the LIVE file while the sandbox board wrote
+# elsewhere: their raw-store assertions were vacuous (cos#93's red api-events),
+# and on a dev hub the restore could overwrite a live write made mid-run. Never
+# points at live data.
 TEST_BOARD_DATA_DIR=""
 HTTP_CODE="test-board"
 # Shared by the test board AND the test processes so trust-derivation agrees on
@@ -278,6 +393,8 @@ start_test_board() {
     code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "${url}/api/cases" 2>/dev/null || echo 000)"
     if [ "${code}" -ge 200 ] && [ "${code}" -lt 300 ]; then
       BASE="${url}"; BOARD_UP=1
+      # Every api-* step inherits the sandbox store path (see TEST_BOARD_DATA_DIR above).
+      export COS_BOARD_DATA="${TEST_BOARD_DATA_DIR}/cases.json"
       echo "test board UP at ${BASE} (seeded synthetic sandbox; the live store is never touched)."
       return 0
     fi
@@ -351,6 +468,26 @@ else
   echo "SKIP: Node ${NODE_MAJOR}.x lacks TS type-stripping for \`node --test\` (need >= 22)."
 fi
 
+# --- 1b. starving-obligations ranking (pure logic — hard gate) ---------------
+# cos-ops#24: the aging rank (starvingObligations) over cases + open reminders +
+# unanswered messages — tests/board-starving-obligations.mjs, the file the issue
+# names. Same node:test + TS-resolve mechanism as [1]; Node >= 22 or SKIP.
+echo
+echo "--- [1b] starving-obligations ranking (aging unit) ----------"
+if [ "${NODE_MAJOR}" -ge 22 ]; then
+  if ( cd "${REPO_ROOT}" && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+        --experimental-strip-types --import ./tests/unit/ts-resolve.mjs \
+        --test tests/board-starving-obligations.mjs ); then
+    echo "starving-obligations: PASS"
+  else
+    echo "starving-obligations: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} starving-obligations"
+  fi
+else
+  echo "SKIP: Node ${NODE_MAJOR}.x lacks TS type-stripping for \`node --test\` (need >= 22)."
+fi
+
 # --- 2. board lint (hard gate) ----------------------------------------------
 echo
 echo "--- [2] board-lint (invariants) -----------------------------"
@@ -362,11 +499,143 @@ else
   fail_reasons="${fail_reasons} board-lint"
 fi
 
-# --- 3. vault property checks (grep; WARN-level) -----------------------------
+# --- 2b. skill-reachability (hard gate) --------------------------------------
+# A skill may only delegate to a slash-skill that exists in its own runtime:
+# every `/skill` named under board/.claude/skills/ must have a Cowork bundle in
+# board/.claude/skill-bundles/. Static, read-only, node-only — the class of bug
+# where a sweep hands work to a skill Cowork never installed (cos-ops#1).
+echo
+echo "--- [2b] skill-reachability (delegation targets) ------------"
+if node "${SCRIPT_DIR}/skill-reachability.mjs"; then
+  echo "skill-reachability: PASS"
+else
+  echo "skill-reachability: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} skill-reachability"
+fi
+
+# --- 2c. viewport-lint (mobile viewport units) -------------------------------
+# board/app/ + board/components/ chrome must size to the DYNAMIC viewport: no
+# h-screen/min-h-screen/raw 100vh outside the one declared dvh fallback in
+# globals.css. Static, read-only, node-only — the class of bug where a new
+# drawer puts its Save button under the iOS Safari toolbar (cos-ops#9).
+echo
+echo "--- [2c] viewport-lint (mobile viewport units) ---------------"
+if node "${SCRIPT_DIR}/viewport-lint.mjs"; then
+  echo "viewport-lint: PASS"
+else
+  echo "viewport-lint: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} viewport-lint"
+fi
+
+# --- 2d. mobile-nav (below-md navigation reachability) -----------------------
+# Every href in the shared nav model (board/lib/nav.ts) must be reachable from a
+# below-md navigation surface, and the sidebar must scroll its own overflow.
+# Static, read-only, node-only — the class of bug where an add-on's pages are
+# phone-invisible (cos-ops#10).
+echo
+echo "--- [2d] mobile-nav (below-md navigation reachability) --------"
+if node "${SCRIPT_DIR}/mobile-nav.mjs"; then
+  echo "mobile-nav: PASS"
+else
+  echo "mobile-nav: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} mobile-nav"
+fi
+
+# --- 2e. skill-frontmatter (hard gate) ---------------------------------------
+# Every SKILL.md's frontmatter `description` must load: valid YAML, <= 1024 chars
+# (measured folded), and free of XML-tag-shaped <placeholder> spans. Static,
+# read-only, node-only — catches the class of bug where a skill packs fine and
+# is then REJECTED at install/load time by the client.
+echo
+echo "--- [2e] skill-frontmatter (description contract) -----------"
+if node "${SCRIPT_DIR}/skill-frontmatter.mjs"; then
+  echo "skill-frontmatter: PASS"
+else
+  echo "skill-frontmatter: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} skill-frontmatter"
+fi
+
+# --- 2f. nutrition-status-consumers + fitness-outcome-consumers (hard gate) --
+# The ADR 0014 gate (cos-ops#18): every top-level field the nutrition status engine
+# (`NutritionStatus` in board/lib/nutrition-status.ts) returns must be CONSUMED — a
+# defined action, or an explicit state-and-move-on — by JOB 0 of nutrition-chef/SKILL.md,
+# the job that reads the status first on every invocation. Static, read-only, node-only —
+# catches the class of bug where the board computes an answer nobody reads.
+echo
+echo "--- [2f] nutrition-status-consumers (JOB 0 field contract) ---"
+if node "${SCRIPT_DIR}/nutrition-status-consumers.mjs"; then
+  echo "nutrition-status-consumers: PASS"
+else
+  echo "nutrition-status-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} nutrition-status-consumers"
+fi
+
+# The same ADR 0014 gate for the fitness per-day close-out (cos-ops#19): every
+# top-level field of `PlanReconciliation` (board/lib/fitness-plan-status.ts) must be
+# consumed by fitness-training-plan/SKILL.md's "### 0.5 CLOSE OUT last week" section
+# AND `unresolvedDays` by fitness-pre-workout-brief/SKILL.md's "## STEP 1.5" section;
+# also pins the route-vs-tool check (the PATCH .../day route and the fitness-client /
+# MCP server both reference it) as an ALWAYS-RUN static check, since the live-board
+# api test's own copy of that assertion silently SKIPs when no board is up. Rides
+# THIS existing step id rather than minting a new one (ADR 0022 — the static [2*]
+# family already hit its five-in-eight-days revisit trigger).
+echo "--- [2f] fitness-outcome-consumers (close-out field contract) ---"
+if node "${SCRIPT_DIR}/fitness-outcome-consumers.mjs"; then
+  echo "fitness-outcome-consumers: PASS"
+else
+  echo "fitness-outcome-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} fitness-outcome-consumers"
+fi
+
+# --- 2f. shopping-list-consumers (hard gate; rides the [2f] step id — cos-ops#37) --
+# The ADR 0014 gate's shopping twin: every top-level field the shopping-candidates
+# engine (`ShoppingCandidatesResult` in board/lib/shopping-candidates.ts) returns, and
+# every shopping tool mcp/nutrition-server/server.mjs's TOOLS array registers, must be
+# CONSUMED — by name — inside JOB 6 of nutrition-chef/SKILL.md. Also enforces a small
+# set of load-bearing phrases, that the engine defines no new threshold constant, that
+# the shopping routes never reference `pending`, and the route-vs-tool wiring. Static,
+# read-only, node-only.
+echo
+echo "--- [2f] shopping-list-consumers (JOB 6 field + tool contract) ---"
+if node "${SCRIPT_DIR}/shopping-list-consumers.mjs"; then
+  echo "shopping-list-consumers: PASS"
+else
+  echo "shopping-list-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} shopping-list-consumers"
+fi
+
+# --- 2f. triage-decisions-consumers (hard gate; rides [2f] — cos-ops#41) -----
+# The ADR 0014 gate: every top-level field TriageDecisionSummary (board/lib/triage-decisions.ts)
+# returns, and every triage tool the board MCP server registers, must be CONSUMED — by name —
+# by mail-to-board (which also records BEFORE it watermarks) and reminders-review's digest
+# STEP. Rides this existing [2f] id with its own echo line + fail_reasons token rather than
+# minting a new [2*] id — a parser-grade gate needs no new test step (cos-ops#21's direction;
+# #94's fitness-outcome-consumers and #98's shopping-list-consumers do the same). Static,
+# read-only, node-only.
+echo
+echo "--- [2f] triage-decisions-consumers (drop-record + digest field contract) ---"
+if node "${SCRIPT_DIR}/triage-decisions-consumers.mjs"; then
+  echo "triage-decisions-consumers: PASS"
+else
+  echo "triage-decisions-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} triage-decisions-consumers"
+fi
+
+# --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --
 # Post-migration the vault holds knowledge only: no task checkboxes in wiki/,
 # and reminders are drained to the board (no open "- [ ]" left). These are the
 # migration *target*; flagged as WARN so the suite is runnable while the
-# vault-migration streams are still finishing.
+# vault-migration streams are still finishing. Sub-check 3c is different: it
+# is a HARD gate — the board-assertion guardrail (cos-ops#3) must be present
+# in every query skill and in vault-operations, or the suite FAILs.
 echo
 echo "--- [3] vault property checks (grep) ------------------------"
 
@@ -375,7 +644,7 @@ echo "--- [3] vault property checks (grep) ------------------------"
 # "- [ ]" syntax (e.g. a changelog line in wiki/log.md).
 CHECKBOX_RE='^[[:space:]]*- \[ \]'
 
-# 2a. No stray task checkboxes inside wiki/ pages.
+# 3a. No stray task checkboxes inside wiki/ pages.
 if grep -RIlqE -- "${CHECKBOX_RE}" "${COPY_VAULT}"/*/wiki 2>/dev/null; then
   echo "WARN: stray '- [ ]' task checkbox(es) found inside wiki/ (knowledge-only):"
   grep -RInE -- "${CHECKBOX_RE}" "${COPY_VAULT}"/*/wiki 2>/dev/null | sed 's#'"${TMP}"'#<sandbox>#' | sed 's/^/    /'
@@ -384,7 +653,7 @@ else
   echo "OK: no '- [ ]' checkboxes inside wiki/."
 fi
 
-# 2b. No open "- [ ]" item left under life/reminders or work/reminders.
+# 3b. No open "- [ ]" item left under life/reminders or work/reminders.
 # README.md is the transient-buffer note (it documents the "- [ ]" format with an
 # example line) — exclude it; a real undrained item only ever lives in a topic file.
 if grep -RIlqE --exclude=README.md -- "${CHECKBOX_RE}" "${COPY_VAULT}"/*/life/reminders "${COPY_VAULT}"/*/work/reminders 2>/dev/null; then
@@ -394,6 +663,151 @@ if grep -RIlqE --exclude=README.md -- "${CHECKBOX_RE}" "${COPY_VAULT}"/*/life/re
   warn=1
 else
   echo "OK: no open '- [ ]' items under life|work/reminders (all drained to board)."
+fi
+
+# 3c. HARD GATE — board-assertion guardrail (cos-ops#3). A vault query answer is
+# knowledge-as-recorded, never board state: every vault's second-brain-query skill
+# AND the caller-side vault-operations skill must carry the exact guardrail
+# phrases, so a future skill edit cannot silently drop the rule. Unlike 3a/3b
+# (WARN — migration targets), a miss here FAILS the suite.
+guardrail_fail=0
+
+# every vault's query skill (sandbox copy; CI has example-vault only)
+sbq_found=0
+for f in "${COPY_VAULT}"/*/.claude/skills/second-brain-query/SKILL.md; do
+  [ -f "${f}" ] || continue
+  sbq_found=1
+  for p in \
+    "Never assert what the board does or does not contain" \
+    "the board is authoritative" \
+    "as-of the page's \`updated:\` date"; do
+    if ! grep -qF -- "${p}" "${f}"; then
+      echo "FAIL: ${f#"${TMP}"/} is missing the guardrail phrase: ${p}"
+      guardrail_fail=1
+    fi
+  done
+done
+if [ "${sbq_found}" -eq 0 ]; then
+  echo "FAIL: no second-brain-query/SKILL.md under vault/*/.claude/skills — path drift?"
+  guardrail_fail=1
+fi
+
+# the caller-side vault-operations skill (repo tree, read-only; either home —
+# repo root today, board/.claude/skills after cos-ops#1 moves it)
+vo_found=0
+for f in "${REPO_ROOT}/.claude/skills/vault-operations/SKILL.md" \
+         "${REPO_ROOT}/board/.claude/skills/vault-operations/SKILL.md"; do
+  [ -f "${f}" ] || continue
+  vo_found=1
+  for p in \
+    "knowledge as recorded, not board state" \
+    "verified against the \`board\` MCP" \
+    "the board is authoritative" \
+    "as-of the page's \`updated:\` date"; do
+    if ! grep -qF -- "${p}" "${f}"; then
+      echo "FAIL: ${f#"${REPO_ROOT}"/} is missing the guardrail phrase: ${p}"
+      guardrail_fail=1
+    fi
+  done
+done
+if [ "${vo_found}" -eq 0 ]; then
+  echo "FAIL: vault-operations/SKILL.md at neither .claude/skills/ nor board/.claude/skills/."
+  guardrail_fail=1
+fi
+
+if [ "${guardrail_fail}" -ne 0 ]; then
+  echo "vault-board-guardrail: FAIL"
+  echo "  hint: the guardrail text lives in vault/example-vault/.claude/skills/second-brain-query/SKILL.md"
+  echo "  and the vault-operations skill — live-vault copies are updated by hand (no re-sync path)."
+  fail=1
+  fail_reasons="${fail_reasons} vault-board-guardrail"
+else
+  echo "OK: board-assertion guardrail present in every query skill + vault-operations."
+fi
+
+# 3d. HARD GATE — vault-ingest receipt contract (cos-ops#2). The board can only
+# answer "what has the vault never been told?" if the receipt is stamped ONLY on a
+# `completed` ingest — a receipt on a failed/attempted job would make coverage lie
+# (ADR 0014: a load-bearing rule is a gate, not prose alone — mirrors 3c).
+receipt_gate_fail=0
+vo_file="${REPO_ROOT}/board/.claude/skills/vault-operations/SKILL.md"
+if [ -f "${vo_file}" ]; then
+  for p in \
+    "stamp the receipt only on \`completed\`" \
+    "the field means *landed*, never *attempted*"; do
+    if ! grep -qF -- "${p}" "${vo_file}"; then
+      echo "FAIL: ${vo_file#"${REPO_ROOT}"/} is missing the receipt-contract phrase: ${p}"
+      receipt_gate_fail=1
+    fi
+  done
+else
+  echo "FAIL: vault-operations/SKILL.md not found at board/.claude/skills/."
+  receipt_gate_fail=1
+fi
+
+if [ "${receipt_gate_fail}" -ne 0 ]; then
+  echo "vault-receipt-contract: FAIL"
+  echo "  hint: the receipt-only-on-completed rule lives in vault-operations/SKILL.md's"
+  echo "  \"The board-side receipt\" section — a future edit must keep both exact phrases."
+  fail=1
+  fail_reasons="${fail_reasons} vault-receipt-contract"
+else
+  echo "OK: vault-ingest receipt contract present in vault-operations."
+fi
+
+# 3e. HARD GATE — releasing docs truth (cos-ops#23). The releasing docs must never
+# again claim an owner bypass: ruleset 17526068's `bypass_actors` is deliberately
+# empty, and this exact claim hid a 45-day release outage (ADR 0014: a load-bearing
+# rule is a gate, not prose alone — mirrors 3c/3d). Like 3c/3d it is a PRESENCE
+# check on the load-bearing phrase ("no owner bypass exists" must be stated in both
+# files), plus a case-insensitive guard against the three retired claims (a repo test
+# cannot observe the ruleset itself, only what the docs say about it). If a bypass
+# actor is ever legitimately added, update the docs and this sub-check in the same PR.
+releasing_truth_fail=0
+releasing_md="${REPO_ROOT}/docs/reference/releasing.md"
+release_please_yml="${REPO_ROOT}/.github/workflows/release-please.yml"
+
+if [ -f "${releasing_md}" ]; then
+  if ! grep -qiF -- "no owner bypass exists" "${releasing_md}"; then
+    echo "FAIL: ${releasing_md#"${REPO_ROOT}"/} no longer states that no owner bypass exists."
+    releasing_truth_fail=1
+  fi
+  for p in \
+    "Owner bypass (default)" \
+    "lets the repository owner bypass" \
+    "owner can bypass"; do
+    if grep -qiF -- "${p}" "${releasing_md}"; then
+      echo "FAIL: ${releasing_md#"${REPO_ROOT}"/} still claims an owner bypass: ${p}"
+      releasing_truth_fail=1
+    fi
+  done
+else
+  echo "FAIL: docs/reference/releasing.md not found."
+  releasing_truth_fail=1
+fi
+
+if [ -f "${release_please_yml}" ]; then
+  if ! grep -qiF -- "no owner bypass exists" "${release_please_yml}"; then
+    echo "FAIL: ${release_please_yml#"${REPO_ROOT}"/} no longer states that no owner bypass exists."
+    releasing_truth_fail=1
+  fi
+  if grep -qiF -- "merge via owner bypass" "${release_please_yml}"; then
+    echo "FAIL: ${release_please_yml#"${REPO_ROOT}"/} still claims an owner bypass: merge via owner bypass"
+    releasing_truth_fail=1
+  fi
+else
+  echo "FAIL: .github/workflows/release-please.yml not found."
+  releasing_truth_fail=1
+fi
+
+if [ "${releasing_truth_fail}" -ne 0 ]; then
+  echo "releasing-docs-truth: FAIL"
+  echo "  hint: ruleset 17526068's bypass_actors is [] and stays []; describe the removed"
+  echo "  claim without quoting it (\"no owner bypass exists\" is fine)."
+  fail=1
+  fail_reasons="${fail_reasons} releasing-docs-truth"
+else
+  echo "OK: releasing docs make no owner-bypass claim."
 fi
 
 # --- start the throwaway TEST board (api steps [4]-[12] drive THIS, never live)
@@ -686,6 +1100,27 @@ else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
+# --- 10e2. api-nutrition-pantry-reconcile (only when a board is healthy) -----
+# The v14 bulk pantry RECONCILE write (board/app/api/nutrition/pantry/reconcile): upsert by a
+# normalised name (case/whitespace/plural/accent), one version bump per batch with distinct
+# minted ids, in-batch duplicates skipped (not double-added), fail-closed on any malformed item
+# (incl. an empty items array), never reduces the pantry count, and the GATE (a DISABLED add-on
+# 404s the write while GET stays 200). Snapshots + restores board/data/cases.json (pantryItems +
+# settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10e2] api-nutrition-pantry-reconcile (live board) ------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-pantry-reconcile.mjs"; then
+    echo "api-nutrition-pantry-reconcile: PASS"
+  else
+    echo "api-nutrition-pantry-reconcile: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-pantry-reconcile"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
 # --- 10f. api-nutrition-mealplan (only when a board is healthy) --------------
 # The v9 meal-plan API (board/app/api/nutrition/plan[/:id]) with the add-on ENABLED:
 # create bumps version + mints a MEAL-<n> id (date/slot/title persist; status defaults
@@ -706,6 +1141,31 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-nutrition-mealplan: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-nutrition-mealplan"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10f2. api-nutrition-push-plan (only when a board is healthy) -----------
+# The meal-plan twin of api-fitness-push-plan.mjs — the RECONCILING calendar push
+# (POST /api/nutrition/push-plan-to-calendar + board/lib/placement.ts) with the "nutrition"
+# add-on ENABLED: a planned dinner (+ a same-day weekend lunch) is placed inside its slot's
+# window with an eventId receipt written back onto the meal-plan entry; a re-push is idempotent
+# (created:0, updated on the window's already-placed entries; the event count is unchanged); a
+# `cooked` entry in the window is reported skipped/not_planned and never reaches the engine; the
+# event's description carries the recipe/ingredients/servings/note; the GATE (a DISABLED add-on
+# 404s the push). Dinner + weekend fixtures ONLY (a weekday lunch/breakfast/snack's placement
+# changes once ops#25 lands). Snapshots + restores board/data/cases.json (mealPlanEntries +
+# events + settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10f2] api-nutrition-push-plan (live board) -------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-push-plan.mjs"; then
+    echo "api-nutrition-push-plan: PASS"
+  else
+    echo "api-nutrition-push-plan: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-push-plan"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
@@ -796,6 +1256,77 @@ else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
+# --- 10h3. api-nutrition-status (only when a board is healthy) ---------------
+# The v14 RECONCILIATION status contract (GET /api/nutrition/status + get_nutrition_status): all
+# seven fields present + typed; empty-store zeroes (observed, not assumed); a past-dated planned
+# meal proven by a same-date+slot food log naming its MEAL-<n> id (and NOT double-counted); a decoy
+# naming the wrong id does not prove it; a future-dated planned entry counts in neither; an expired
+# pantry item surfaces; saving a target flips hasNutritionTargets; ungated while the add-on is
+# disabled. Snapshots + restores cases.json. Skipped when no board.
+echo
+echo "--- [10h3] api-nutrition-status (live board) ----------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-status.mjs"; then
+    echo "api-nutrition-status: PASS"
+  else
+    echo "api-nutrition-status: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-status"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10h4. api-nutrition-shelf-life (sandbox board + store file) -------------
+# The v18 pantry LIFECYCLE + computed freshness-horizon contract (cos-ops#18):
+# pantryLifecycle present + typed (empty-store zeroes observed, not assumed); the
+# fresh/staple/spice scoping split; a fresh row aged past its class's shelf life via
+# STORE-FILE surgery (the API never lets a test set updatedAt) fires in
+# likelyPastHorizon with the right horizonDays, while a same-aged spice/staple never
+# does; no write path ever persists a lifecycle/horizon field or a guessed expiresAt,
+# and schemaVersion is unchanged. Needs FILE access to the running board's store (like
+# [13d]), so the horizon-firing + nothing-persisted checks only run against the
+# auto-started sandbox (skipped, not failed, under COS_TEST_BOARD_URL — no local path
+# is known). Snapshots + restores cases.json (net-zero).
+echo
+echo "--- [10h4] api-nutrition-shelf-life (sandbox board + store file) --"
+if [ "${BOARD_UP}" -eq 1 ] && [ -n "${TEST_BOARD_DATA_DIR}" ]; then
+  if CRM_BASE_URL="${BASE}" COS_BOARD_DATA="${TEST_BOARD_DATA_DIR}/cases.json" node "${SCRIPT_DIR}/api-nutrition-shelf-life.mjs"; then
+    echo "api-nutrition-shelf-life: PASS"
+  else
+    echo "api-nutrition-shelf-life: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-shelf-life"
+  fi
+elif [ "${BOARD_UP}" -eq 1 ]; then
+  echo "SKIP: external test board (COS_TEST_BOARD_URL) — no file access to its store; shelf-life e2e needs the auto-started sandbox."
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10h5. api-nutrition-shopping (live board) --------------------------------
+# The v16 shopping-list + candidates contract (cos-ops#37): a `household` NON-FOOD item
+# round-trips; PATCH status:"bought" stamps boughtAt, status:"needed" clears it; a stale
+# expectedVersion 409s; a dangling sourceRef POSTs + reads fine (a soft ref); a planned
+# in-window meal naming an invented ingredient surfaces as a candidate, is suppressed once
+# added to the list, and two back-to-back candidate GETs return the SAME version (persists
+# nothing); the GATE mirrors api-nutrition-gate; delete removes it. Plus an in-file
+# route-vs-tool check (the always-run home is shopping-list-consumers.mjs — this copy can
+# SKIP). Snapshots+restores cases.json. Skipped when no board.
+echo
+echo "--- [10h5] api-nutrition-shopping (live board) ---------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-nutrition-shopping.mjs"; then
+    echo "api-nutrition-shopping: PASS"
+  else
+    echo "api-nutrition-shopping: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-nutrition-shopping"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
 # --- 10i. api-fitness-push (only when a board is healthy) --------------------
 # A round-trip through the fitness-push INGEST → SUMMARIZE pipeline that kills the bug the old
 # test masked: with the add-on ENABLED, POST /api/fitness/push a realistic Health-Auto-Export
@@ -837,6 +1368,98 @@ if [ "${BOARD_UP}" -eq 1 ]; then
     echo "api-fitness-coaching: FAIL"
     fail=1
     fail_reasons="${fail_reasons} api-fitness-coaching"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10j2. api-fitness-push-plan (only when a board is healthy) -------------
+# The RECONCILING calendar push (POST /api/fitness/push-plan-to-calendar + board/lib/placement.ts)
+# with the "fitness" add-on ENABLED, over an open-enum plan (endurance/strength/tempo/long/
+# technique — deliberately never the literal "training", so an allow-list predicate on that one
+# string would be caught): idempotent (a re-push creates nothing new; the week's event count is
+# unchanged); per-day eventId receipts land on the artifact's payload.days[i]; rest AND
+# active_recovery days create nothing; a pre-seeded evening conflict pushes a session into the
+# morning window instead of double-booking, and a day fully booked in BOTH windows is
+# skipped/no_free_slot with nothing created; the event description carries the day's own prose +
+# duration; a manually-edited event time is NEVER moved back by a re-push; re-saving the SAME
+# week (upsert) then pushing still yields one event per placed day (carry-forward proven over
+# HTTP); flipping an already-placed day to rest in a regenerated plan reports skipped/rest_day
+# WITH the stale eventId and leaves the event untouched; the GATE (a DISABLED add-on 404s the
+# push). Snapshots + restores board/data/cases.json (coachingArtifacts + events + settings.addons
+# live there → net-zero). Skipped when no board.
+echo
+echo "--- [10j2] api-fitness-push-plan (live board) ---------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-push-plan.mjs"; then
+    echo "api-fitness-push-plan: PASS"
+  else
+    echo "api-fitness-push-plan: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-push-plan"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10j3. api-fitness-plan-outcome (only when a board is healthy) ----------
+# The per-day training-plan OUTCOME channel (cos-ops#19: PATCH /api/fitness/coaching/<id>/day
+# + the computed `reconciliation` on GET .../coaching/<id>) with the "fitness" add-on ENABLED:
+# a targeted PATCH changes exactly one day's status, byte-identical elsewhere; SCHEMA_VERSION
+# is untouched (the outcome rides the verbatim payload); `reconciliation.unresolvedDays`
+# reflects the write on the very next GET; a same-date healthEntries workout PROVES exactly
+# one day (provenDone:true + healthEntryId), never the others; an unanswered day stays
+# `planned` and is never written by a mere read; validation (bad status, moved without
+# moved_to, moved_to on a non-moved status, an unknown date, a rest-day date) 400s; the
+# add-on GATE closes the write while the read stays open; the route-vs-tool regex pair
+# (also duplicated, always-run, in fitness-outcome-consumers.mjs — this step SKIPs when no
+# board is up); and push-plan-to-calendar reports a resolved future day as skipped/resolved
+# with no event created. Snapshots + restores board/data/cases.json (coachingArtifacts +
+# healthEntries + settings.addons live there → net-zero). Skipped when no board.
+echo
+echo "--- [10j3] api-fitness-plan-outcome (live board) -------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-fitness-plan-outcome.mjs"; then
+    echo "api-fitness-plan-outcome: PASS"
+  else
+    echo "api-fitness-plan-outcome: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-fitness-plan-outcome"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 10k. api-triage-decisions (only when a board is healthy) ----------------
+# The mail-triage editorial-drop decision record (cos-ops#41, v17): a drop writes a receipt
+# keyed (sender, source, reason) — a repeat drop bumps `count`, adds no row; the sender is
+# NORMALIZED (a display-name+parenthetical form collapses to the bare address). The
+# dropped:promoted ratio + the first-time-dropped set are computed on read (ADR 0017): seeding
+# a second sender moves them immediately, confirming one excludes it from `firstTime` on the
+# very next read, and a further drop of an already-confirmed sender bumps its count without
+# resurrecting it. Reversing a sender's row is enforced FAIL-CLOSED — a further drop for that
+# sender (any reason) is refused 403 `code:"sender-reversed"`. Like [10h4]/[13d], the
+# "nothing computed is ever persisted to the store FILE" sub-check needs FILE access to the
+# running board's store, but (unlike them) this step still runs its HTTP-only checks under an
+# external COS_TEST_BOARD_URL board — only that one sub-check SKIPs without a local path
+# (architect finding 4: TEST_BOARD_DATA_DIR is shell-local and must be passed per-command).
+# Snapshots + restores board/data/cases.json (net-zero). Skipped entirely when no board.
+echo
+echo "--- [10k] api-triage-decisions (live board) ------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if [ -n "${TEST_BOARD_DATA_DIR}" ]; then
+    RUN_TRIAGE_OK=1
+    CRM_BASE_URL="${BASE}" COS_BOARD_DATA="${TEST_BOARD_DATA_DIR}/cases.json" node "${SCRIPT_DIR}/api-triage-decisions.mjs" || RUN_TRIAGE_OK=0
+  else
+    RUN_TRIAGE_OK=1
+    CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-triage-decisions.mjs" || RUN_TRIAGE_OK=0
+  fi
+  if [ "${RUN_TRIAGE_OK}" -eq 1 ]; then
+    echo "api-triage-decisions: PASS"
+  else
+    echo "api-triage-decisions: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-triage-decisions"
   fi
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
@@ -1045,6 +1668,61 @@ else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
 
+# --- 13d3. api-devices (only when a board is healthy) ------------------------
+# The multi-device Devices surface (GET /api/devices + the x-device ephemeral
+# last-seen tracker + the join blob). Read-only / in-memory — net-zero.
+echo
+echo "--- [13d3] api-devices (sandbox board) ----------------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-devices.mjs"; then
+    echo "api-devices: PASS"
+  else
+    echo "api-devices: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-devices"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 13d4. api-vault-coverage (only when a board is healthy) -----------------
+# The v15 vault-ingest RECEIPT + coverage-read contract (never/stale/covered,
+# equal-stamp invariant, mixed known/unknown receipt ids, archive visibility).
+# Snapshots+restores cases.json — net-zero.
+echo
+echo "--- [13d4] api-vault-coverage (sandbox board) ----------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-vault-coverage.mjs"; then
+    echo "api-vault-coverage: PASS"
+  else
+    echo "api-vault-coverage: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-vault-coverage"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
+# --- 13d5. api-needs-attention (only when a board is healthy) ---------------
+# The cos-ops#20 board-attention read contract (GET /api/cases/needs-attention):
+# four bucket arrays + counts + version; overdue/untriaged/unlinked membership +
+# transitions; agingWaiting asserted present/array-shaped only (its membership
+# math is owned by tests/unit/selectors.test.ts). Snapshots+restores cases.json —
+# net-zero.
+echo
+echo "--- [13d5] api-needs-attention (sandbox board) ---------------"
+if [ "${BOARD_UP}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-needs-attention.mjs"; then
+    echo "api-needs-attention: PASS"
+  else
+    echo "api-needs-attention: FAIL"
+    fail=1
+    fail_reasons="${fail_reasons} api-needs-attention"
+  fi
+else
+  echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
+fi
+
 # --- 13e. backup-hardening (hermetic; no board/Keychain/network/live data) ---
 # The multi-producer backup pipeline contract: per-device manifests, fetch-before-
 # push convergence, producer admission (wrong-key refusal), manifest-union restore,
@@ -1074,6 +1752,23 @@ else
   echo "gen-roles: FAIL"
   fail=1
   fail_reasons="${fail_reasons} gen-roles"
+fi
+
+# --- 13g. upgrade-check (hermetic; the post-pull planner's path → step contract) ----
+# scripts/upgrade-check.mjs turns a git range into the ordered post-pull checklist for
+# an EXISTING install (rebuild the board, kickstart the bridges whose code moved, upload
+# the rebuilt Cowork bundles, create the new scheduled triggers, add new config keys,
+# back up before a schema bump). Every one of those is a SILENT no-op when forgotten, so
+# the mapping is pinned here. Pure-function tests + a CLI smoke test on a throwaway git
+# repo in $TMPDIR: no board, no launchd, no config, no live data.
+echo
+echo "--- [13g] upgrade-check (hermetic post-pull planner) --------"
+if node "${SCRIPT_DIR}/upgrade-check.mjs"; then
+  echo "upgrade-check: PASS"
+else
+  echo "upgrade-check: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} upgrade-check"
 fi
 
 # --- 13. search sidecar (python, headless, deterministic) --------------------
