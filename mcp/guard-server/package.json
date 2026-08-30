@@ -6,6 +6,6 @@
   "description": "MCP server (registry name 'guard') that runs untrusted incoming content through the prompt-injection / jailbreak guard sidecar BEFORE the agent loads it into context. FAIL-CLOSED: an unreachable gate means UNTRUSTED.",
   "bin": { "guard-mcp": "server.mjs" },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.30.0"
   }
 }
