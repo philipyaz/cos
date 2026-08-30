@@ -4,9 +4,10 @@
 // the board through these so filtering/sorting/grouping stays consistent and
 // deep-linkable. URL state round-trips through parseBoardQuery/encodeBoardQuery.
 
-import type { CaseRecord, CaseStatus, CaseDomain, CaseKind, CalendarEvent, Reminder, ReminderStatus, PriorityNote, MessageRecord, CaseActivity, Actor, DBShape } from "./types";
+import type { CaseRecord, CaseStatus, CaseDomain, CaseKind, CalendarEvent, Reminder, ReminderStatus, PriorityNote, MessageRecord, CaseActivity, Actor, DBShape, Priority } from "./types";
 import { VALID_CASE_STATUS, VALID_DOMAIN, VALID_PRIORITY, VALID_CASE_KIND, VALID_REMINDER_STATUS, caseKind } from "./types";
-import { STALE_AFTER_DAYS } from "./staleness";
+import { STALE_AFTER_DAYS, wholeDaysBetween } from "./staleness";
+import { selectUnansweredMessages } from "./inbox";
 
 export type BoardSort =
   | "updated"
@@ -149,7 +150,10 @@ function doneRatio(c: CaseRecord): number {
 
 // P0 sorts "highest"; cases with no priority sort lowest. Returns a rank where
 // a larger number = more important, so the comparator can treat it like a date.
-function priorityRank(c: CaseRecord): number {
+// Takes just `{ priority }` (not a full CaseRecord) so starvingObligations below can
+// reuse it for reminder/message entries, which carry a priority-shaped tie-break but
+// no other CaseRecord field.
+function priorityRank(c: { priority?: Priority }): number {
   if (!c.priority) return -1;
   return VALID_PRIORITY.length - 1 - VALID_PRIORITY.indexOf(c.priority);
 }
@@ -429,6 +433,199 @@ export function isStale(c: CaseRecord, now: Date = new Date(), days = STALE_AFTE
   if (c.archivedAt || c.status === "done") return false;
   const cutoff = days * 24 * 60 * 60 * 1000;
   return now.getTime() - ms(c.updatedAt) > cutoff;
+}
+
+// One entry in the starving-obligations rank (cos-ops#24) — a trimmed projection, not a
+// record dump (mirrors VaultCoverageGap / the needs-attention route's NeedsAttentionRef).
+export interface StarvingObligation {
+  kind: "case" | "reminder" | "message";
+  id: string;
+  title: string; // case/reminder title; message subject
+  domain?: CaseDomain;
+  status?: CaseStatus; // the lane — cases only
+  priority?: Priority; // cases only (tie-break, never a score input)
+  dueAt?: string; // case/reminder due, echoed when present
+  from?: string; // messages only
+  daysIdle: number;
+  daysOverdue: number; // 0 when no/unparseable/future dueAt
+  score: number;
+  passedBlock?: { eventId: string; date: string; daysSincePassed: number }; // cases only
+}
+
+// The starving-obligations rank: a SINGLE ordered list across cases, open reminders, and
+// unanswered messages, where rank RISES the longer an obligation has been starved — aging,
+// borrowed from OS scheduling (https://en.wikipedia.org/wiki/Aging_(scheduling)) — instead of
+// sitting flat at a static priority. That inversion is the point: a fresh P0 must lose to a
+// starved P2, so priority enters only as a tie-break, never a score input.
+//
+// Membership reuses the pinned predicates BY CALL, never by copy: needsAttention's overdue/
+// untriaged buckets (computed once below), isStale, and inbox's selectUnansweredMessages are
+// each their one home — a drift there moves this selector with it. This function mints NO new
+// staleness threshold; STALE_AFTER_DAYS (./staleness) is the only idle constant it consumes.
+//
+// Two frames, never mixed in one predicate (per staleness.ts's own warning): daysIdle/
+// daysOverdue are ROLLING MILLISECONDS over ISO timestamps; the allocation read below is
+// CALENDAR-DAY ("YYYY-MM-DD") arithmetic — except the one deliberate passed-block boundary
+// comparison, which crosses from a day string to a timestamp and is commented at the point it
+// happens. Allocation ("already chased") is DERIVED from db.events, never stored (ADR 0017): a
+// case with a linked TIMED event within the next 7 days (the board's existing `upcomingEvents`
+// "upcoming" convention, reused inline — an allocation window, not a staleness threshold) is
+// skipped as already-allocated; an ALL-DAY linked event never allocates, past or future (a
+// deadline marker, not a work block — the EVT-1/EVT-2 shape). The horizon is bounded on
+// purpose: without it, a recurring series of far-future timed events would mute a case for
+// months however long it idles, inverting ADR 0016's over-report direction.
+//
+// The per-entry daysIdle/daysOverdue/passedBlock fields are the score's explainability
+// breakdown — the computeFormScore (./fitness-score) house pattern: a weighted score ships its
+// breakdown.
+export function starvingObligations(
+  db: Pick<DBShape, "cases" | "events" | "reminders" | "messages">,
+  now: Date = new Date(),
+): StarvingObligation[] {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const t = now.getTime();
+  const events = db.events ?? [];
+  const today = todayISO(now);
+  // The inclusive far edge of the allocation horizon — the SAME UTC-anchored +7-day
+  // computation upcomingEvents' default daysAhead uses, reused inline (not a new constant).
+  const horizon = todayISO(
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 7)),
+  );
+
+  // Computed ONCE — overdue/untriaged membership is derived from these id-sets, never
+  // re-stated inline (one logic, one home: needsAttention).
+  const at = needsAttention(db.cases, now);
+  const overdueIds = new Set(at.overdue.map((c) => c.id));
+  const untriagedIds = new Set(at.untriaged.map((c) => c.id));
+
+  const out: StarvingObligation[] = [];
+
+  // ── Cases ────────────────────────────────────────────────────────────────
+  for (const c of db.cases) {
+    // Visibility: stricter than the four buckets on purpose — a snoozed case is a human
+    // saying "not now" (the buckets themselves ignore snooze; do NOT change them).
+    if (c.archivedAt) continue;
+    if (c.snoozeUntil && ms(c.snoozeUntil) > t) continue;
+    if (c.status === "done") continue;
+    // Untriaged raw intake counts only once it has sat for a day: a dozen cards the mail sweep
+    // filed this morning are not starving (they'd all enter at score 0 and swamp the tail);
+    // the same cards untouched by tomorrow are.
+    const daysIdle = Math.max(0, Math.floor((t - ms(c.updatedAt)) / DAY_MS));
+    const isMember = overdueIds.has(c.id) || isStale(c, now) || (untriagedIds.has(c.id) && daysIdle > 0);
+    if (!isMember) continue;
+
+    // Allocation: a linked TIMED event within [today, horizon] suppresses the case entirely;
+    // an all-day event never counts, past or future. Among linked timed events strictly in
+    // the past, the most recent one is a candidate for "passed unactioned" escalation.
+    // HONESTY NOTE: a CalendarEvent carries no origin, so "passed block" means ANY past linked
+    // timed event — a chase block the lens placed OR a meeting the human linked by hand — and
+    // ANY later write to the case (a mail sweep linking a thread, too) clears it. The escalation
+    // is a heuristic over "a slot was on the calendar for this and the case was not touched
+    // after it", nothing narrower; the tool description says the same.
+    let allocated = false;
+    let mostRecentPastEvent: CalendarEvent | undefined;
+    for (const e of eventsByCaseId(events, c.id)) {
+      if (e.allDay || !e.startTime) continue; // deadline marker, never allocation
+      if (e.date >= today && e.date <= horizon) {
+        allocated = true;
+        break;
+      }
+      if (e.date < today && (!mostRecentPastEvent || e.date > mostRecentPastEvent.date)) {
+        mostRecentPastEvent = e;
+      }
+    }
+    if (allocated) continue;
+
+    let passedBlock: StarvingObligation["passedBlock"];
+    if (mostRecentPastEvent) {
+      // The one deliberate frame-crossing comparison: mostRecentPastEvent.date (a calendar
+      // day string) becomes a UTC end-of-day timestamp, compared against c.updatedAt (an ISO
+      // timestamp) — "was the case touched any time after that block's day ended?"
+      const [y, mo, d] = mostRecentPastEvent.date.split("-").map((s) => parseInt(s, 10));
+      const dayEnd = Date.UTC(y, mo - 1, d) + DAY_MS;
+      if (ms(c.updatedAt) < dayEnd) {
+        passedBlock = {
+          eventId: mostRecentPastEvent.id,
+          date: mostRecentPastEvent.date,
+          daysSincePassed: wholeDaysBetween(mostRecentPastEvent.date, today),
+        };
+      }
+    }
+
+    const dueMs = ms(c.dueAt);
+    const daysOverdue = !Number.isNaN(dueMs) && dueMs < t ? Math.floor((t - dueMs) / DAY_MS) : 0;
+    const daysSincePassed = passedBlock?.daysSincePassed ?? 0;
+
+    out.push({
+      kind: "case",
+      id: c.id,
+      title: c.title,
+      domain: c.domain,
+      status: c.status,
+      priority: c.priority,
+      dueAt: c.dueAt,
+      daysIdle,
+      daysOverdue,
+      score: daysIdle + 2 * daysOverdue + 3 * daysSincePassed,
+      passedBlock,
+    });
+  }
+
+  // ── Reminders (no event links: never allocated, never escalated) ───────────
+  for (const r of db.reminders ?? []) {
+    if (r.status !== "open" || r.archivedAt) continue;
+    const daysIdle = Math.max(0, Math.floor((t - ms(r.updatedAt)) / DAY_MS));
+    const dueMs = ms(r.dueAt);
+    const hasParseableDue = r.dueAt !== undefined && !Number.isNaN(dueMs);
+    let isMember: boolean;
+    let daysOverdue = 0;
+    if (hasParseableDue) {
+      // A dated reminder is already time-anchored — the reminder twin of the allocation
+      // skip: a FUTURE dueAt is excluded, a PAST one is a member (and ages it).
+      isMember = dueMs < t;
+      if (isMember) daysOverdue = Math.floor((t - dueMs) / DAY_MS);
+    } else {
+      isMember = daysIdle > STALE_AFTER_DAYS;
+    }
+    if (!isMember) continue;
+
+    out.push({
+      kind: "reminder",
+      id: r.id,
+      title: r.title,
+      dueAt: r.dueAt,
+      daysIdle,
+      daysOverdue,
+      score: daysIdle + 2 * daysOverdue,
+    });
+  }
+
+  // ── Messages (no event links: never allocated, never escalated) ────────────
+  for (const m of selectUnansweredMessages(db.messages)) {
+    const daysIdle = Math.max(0, Math.floor((t - ms(m.receivedAt)) / DAY_MS));
+    if (daysIdle <= STALE_AFTER_DAYS) continue; // unanswered for an hour isn't starving
+    out.push({
+      kind: "message",
+      id: m.id,
+      title: m.subject,
+      from: m.from,
+      daysIdle,
+      daysOverdue: 0,
+      score: daysIdle,
+    });
+  }
+
+  // Total, deterministic order: score desc -> priorityRank desc (reminders/messages carry
+  // no priority, so they rank as no-priority) -> daysIdle desc -> id asc.
+  out.sort((a, b) => {
+    if (a.score !== b.score) return b.score - a.score;
+    const pr = priorityRank({ priority: b.priority }) - priorityRank({ priority: a.priority });
+    if (pr !== 0) return pr;
+    if (a.daysIdle !== b.daysIdle) return b.daysIdle - a.daysIdle;
+    return a.id.localeCompare(b.id);
+  });
+
+  return out;
 }
 
 // ── Due / SLA classification ─────────────────────────────────────────────────

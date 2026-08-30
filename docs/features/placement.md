@@ -1,9 +1,10 @@
-# Calendar placement — the shared engine behind the fitness + meal-plan pushes
+# Calendar placement — the shared engine behind every calendar push
 
-[Fitness](fitness.md)'s training-plan push and [Nutrition & Chef](nutrition.md)'s meal-plan push
-both need the same primitive: turn a list of things that want a slot into decisions — create,
-update, or skip — without ever double-booking. Rather than two copies of that logic, both routes
-share **one pure engine**,
+[Fitness](fitness.md)'s training-plan push, [Nutrition & Chef](nutrition.md)'s meal-plan push, and
+the generic `POST /api/events` route's `place` mode (cos-ops#24's chase-block allocation) all need
+the same primitive: turn a list of things that want a slot into decisions — create, update, or
+skip — without ever double-booking. Rather than a copy of that logic per caller, every placement
+caller shares **one pure engine**,
 [`board/lib/placement.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/placement.ts), and
 this page documents its contract, its two inputs from outside the board's own data, and the limits
 worth knowing before you rely on it.
@@ -104,11 +105,13 @@ different depending on what's being placed:
   the working window is **added to the busy set**, so a training session or a meal can never land
   inside it — working hours are protected *margins*, and training/meal windows are expected to sit
   in the morning/evening/weekend around them. Non-working days are left unprotected.
-- **`within`** — reserved for a future caller that places *work itself*, a sibling capability to
-  this one: candidate windows are **clamped** to the working window, and a non-working weekday or a
-  weekend is refused outright. This mode ships now, unit-tested, with no product caller yet — the
-  smallest honest way to satisfy *"placement never proposes a slot outside the configured working
-  window, and never on a weekend"* ahead of the caller that needs it.
+- **`within`** — the mode for a caller that places *work itself*, a sibling capability to
+  `margins`: candidate windows are **clamped** to the working window, and a non-working weekday or a
+  weekend is refused outright. It shipped unit-tested with no product caller (the smallest honest
+  way to satisfy *"placement never proposes a slot outside the configured working window, and never
+  on a weekend"* ahead of the caller that needed it), and cos-ops#24's chase-block allocation on
+  `POST /api/events` is its first: an admin/work chase (*"call the clinic, they open 08:00"*) wants
+  business hours, not the fitness/meal-plan pushes' evening margins.
 - **No `policy` at all** ⇒ exactly the engine's pre-`workingHours` behaviour — the additive
   guarantee that let this ship without touching either existing push route's other tests.
 
@@ -118,6 +121,31 @@ window on a non-working day, in `within` mode) is reported `outside_working_hour
 `no_free_slot`. Reporting a policy skip as "fully booked" would tell the agent a false story about
 *why* nothing was placed. `no_free_slot` is reserved for the case where a window really did have a
 chance and lost it to real congestion (an actual event, or the caller's own `busyWindows`).
+
+## Third consumer — chase blocks (cos-ops#24)
+
+The generic `POST /api/events` route (and the `calendar` MCP's `create_event`) accept the same
+optional `place` parameter as the two pushes above — `{ durationMin, windows, busyWindows?, policy?
+}` — as an alternative to explicit `startTime`/`endTime`. This is the placement engine's **third**
+consumer, and the first product caller of its `within` policy mode (see [Working
+hours](#working-hours-a-shipped-default-not-a-setup-step) above): the `board-organize` skill's weekly staleness lens (see [Triage
+skills](../architecture/triage-skills.md#board-organize-the-housekeeper)) uses it to place a timed
+chase block for a starving obligation, choosing the day and candidate windows (typically a wide
+business-hours window with `policy: "within"`) while the board finds the actual free gap.
+
+Unlike the two pushes, this consumer has no persisted artifact to carry an `eventId` receipt
+forward across a re-plan — there is no "day 3 of this week's plan" to re-target. So
+`existingEventId`/update reconciliation is **not exposed** on this path: the route only ever
+`create`s or `skip`s (409, with a machine-readable `reason`: `no_free_slot` |
+`outside_working_hours` | `past`). An already-placed chase block is never edited in place by this
+surface — the calling skill deletes and re-places it if the timing needs to change.
+
+`busyWindows` follows the same [busy-set contract](#the-busy-set-input-per-call-never-persisted)
+as the pushes — per-call, used-and-discarded, never persisted. The HTTP field is camelCase on
+every route (`busyWindows` for the pushes, `place.busyWindows` here); the **MCP tool** spelling
+differs deliberately: the fitness/nutrition push tools spell theirs `busy_windows` (their own
+servers' convention), while the `calendar` MCP spells it `place.busyWindows` — camelCase, matching
+that server's existing `startTime`/`endTime`/`allDay`/`caseId` argument style.
 
 ## Receipts and idempotency
 
@@ -154,20 +182,24 @@ would duplicate every session, because the fresh payload would arrive with no re
   never to do on a live board. The shipped default is the intended answer for now; a real settings
   surface can pick the field up later without any migration (it is additive and optional).
 
-## Reachable from both surfaces
+## Reachable from every surface
 
-Neither push route nor the placement engine is UI-only — both are equally reachable over HTTP and
-MCP, closing what would otherwise be an agent-invisible feature:
+None of the three callers nor the placement engine is UI-only — all are equally reachable over
+HTTP and MCP, closing what would otherwise be an agent-invisible feature:
 
 | Caller | Route | MCP tool |
 |---|---|---|
 | Fitness training plan | `POST /api/fitness/push-plan-to-calendar` | `push_plan_to_calendar` (`fitness` MCP) |
 | Nutrition meal plan | `POST /api/nutrition/push-plan-to-calendar` | `push_meal_plan_to_calendar` (`nutrition` MCP) |
+| Chase blocks (cos-ops#24) | `POST /api/events` (`place`) | `create_event` (`place`) (`calendar` MCP) |
 
-Both accept the same two additions from this page: an optional `busyWindows` array (`busy_windows`
-on the MCP tools) and the `workingHours` preference, resolved server-side from `db.settings` — the
-caller never has to supply the working-hours window itself, only what it alone can see: the real
-calendar's busy times. See [Fitness](fitness.md) (the coaching-artifacts section covers its push in
-full) and [Nutrition & Chef](nutrition.md#calendar-placement-the-default-push-plus-a-manual-explicit-time-path)
-for each surface's own request/response shape, and [Calendar](calendar.md) for the `CalendarEvent`
-records both routes create.
+All three accept a caller-supplied busy set (an optional array of `{date,start,end}` — camelCase
+`busyWindows` on every HTTP route; `busy_windows` on the fitness/nutrition MCP tools,
+`place.busyWindows` on the calendar MCP tool) and the `workingHours` preference, resolved
+server-side from `db.settings` — the caller never has to supply the working-hours window itself,
+only what it alone can see: the real calendar's busy times. See [Fitness](fitness.md) (the
+coaching-artifacts section covers its push in full),
+[Nutrition & Chef](nutrition.md#calendar-placement-the-default-push-plus-a-manual-explicit-time-path)
+for each push surface's own request/response shape, [Triage skills](../architecture/triage-skills.md#board-organize-the-housekeeper)
+for the chase-block caller, and [Calendar](calendar.md) for the `CalendarEvent` records every
+route creates.

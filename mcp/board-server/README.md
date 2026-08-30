@@ -1,4 +1,4 @@
-# board MCP server (v3.5)
+# board MCP server (v3.7)
 
 A stdio MCP server (registry name **`board`**) that opens and maintains cases on the
 Cos board — the single to-do surface for both **work** and **life**. Every
@@ -43,9 +43,13 @@ The server exposes the full v3 case / task / message lifecycle plus board ops, t
 **priorities** family (`get_priorities` reads the user's starred nodes + free-text priority notes;
 `add`/`update`/`remove_priority` manage the notes; `set_starred` pins any node), the **v3.4**
 **vault coverage** pair (`get_vault_coverage` reads which `vaultLinks` cases the vault has no/stale
-receipt for; `mark_vault_ingested` stamps the receipt after a confirmed ingest), and the **v3.5**
+receipt for; `mark_vault_ingested` stamps the receipt after a confirmed ingest), the **v3.5**
 **attention** read (`get_needs_attention` reads the board's four needs-attention buckets, now
-agent-reachable). `[x]` marks optional args.
+agent-reachable), and the **v3.6 starving rank** (the same tool now leads with `starving`, a
+single aging-ordered list across cases, open reminders, and unanswered messages). 
+and the **v3.7 triage decisions** triple (`record_triage_decision` writes the
+per-sender mail-drop receipt, `list_triage_decisions` reads the computed ratio + first-time senders,
+`resolve_triage_decision` writes a keep-or-confirm answer). `[x]` marks optional args.
 
 ### Reads
 
@@ -306,21 +310,71 @@ cases. Call this **only** after the vault MCP's `ingest_status` reports `complet
 named them — the receipt means the knowledge **landed**, never that it was attempted. Unknown ids
 (e.g. merged/deleted between submit and completion) are skipped and reported back, not a batch failure.
 
+### Triage decisions
+
+The mail-triage **editorial-drop decision record** (cos-ops#41) — a per-`(sender, source, reason)`
+**fact** ("this sender's mail was judged noise"), deliberately not a log of dropped emails: hundreds
+of drops compress into tens of rows whose `count` bumps. `record_triage_decision` is the receipt
+`mail-to-board`'s five-test gate writes the moment it drops a thread — **before** the
+`cos/processed` watermark, so a failed write cannot produce a watermarked thread with no receipt.
+`list_triage_decisions` reads the computed dropped:promoted ratio and the first-time-dropped senders
+`/reminders-review`'s digest reviews (ADR 0017 — computed on read, never persisted).
+`resolve_triage_decision` writes the human's keep-or-confirm answer; a **reverse** is enforced
+fail-closed at the write — the board REFUSES a further drop for that sender+source (403
+`sender-reversed`) — and is never mirrored into the guard's sender-trust store: an editorial
+verdict, not a security one. Core (no add-on gate).
+
+#### `record_triage_decision(sender, source, reason)`
+`POST /api/triage-decisions` `{ sender, source, reason }`. Upserts by `(sender, source, reason)`: a
+repeat drop bumps `count` (200) rather than adding a row (201, new key). `reason` is which of the
+five reminder tests the thread failed: `notification` · `watch` · `no_stakes` · `open_loop` ·
+`want_courtesy`. A `sender-reversed` refusal (403) means the human reversed this sender via the
+digest — never drop their mail; surface the thread instead, and do not watermark.
+
+#### `list_triage_decisions(source, [status])`
+`GET /api/triage-decisions?source=&status=`. `source` is **required** on this tool (the raw HTTP GET
+allows an unscoped read for generality, but an unscoped ratio would divide gmail-only drops by an
+all-source message count). Read-only. Renders the dropped:promoted summary line, the first-time
+senders (each with its reasons×counts and the `TD-<n>` ids to resolve), then a compact row list.
+`status` (`active` | `reversed`) narrows the row list only — the summary always spans both.
+
+#### `resolve_triage_decision(id, resolution)`
+`PATCH /api/triage-decisions/{id}` `{ resolution }`. `resolution: "confirm"` stamps the review time
+only (the sender leaves the first-time set, the sweep keeps filtering); `"reverse"` also flips the
+row to `status: "reversed"` (every future drop attempt for that sender+source is refused). A sender
+dropped for more than one reason needs **every** one of its ids resolved the same way
+(`list_triage_decisions`' `firstTime[].ids`). 404 on a stale id, 400 on a bad resolution.
+
 ### Attention
 
 The board's own "what needs attention" read, now agent-reachable (cos-ops#20 named the shared
 staleness vocabulary — see `board/lib/staleness.ts`). Four buckets, computed live and never
 persisted (ADR 0017): `overdue`, `agingWaiting`, `untriaged`, `unlinked` — the same read
 `board/components/board/needs-attention.tsx` renders, and `get_vault_coverage` above is the
-documented complement of its `unlinked` bucket.
+documented complement of its `unlinked` bucket. Since cos-ops#24 the same read also serves
+`starving` — see below.
 
 #### `get_needs_attention()`
 `GET /api/cases/needs-attention`. No args — every bucket excludes archived cases by definition.
-Returns the four bucket arrays (trimmed case projections), a `counts` object per bucket plus
-`counts.total`, and `version`. Read-only. **Buckets overlap** (a case can be both `overdue` and
-`unlinked`), so `counts.total` is a sum of bucket sizes, not a count of distinct cases. Call this
-first in any "where is Philip at / what needs a nudge" sweep — the reconciliation entry point for
-detecting drift without waiting on his prompt.
+Returns the four bucket arrays (trimmed case projections), `starving` (see below), a `counts`
+object per bucket plus `counts.starving` and `counts.total`, and `version`. Read-only. **Buckets
+overlap** (a case can be both `overdue` and `unlinked`), and the `starving` rank overlaps the
+buckets too — so `counts.total` is a sum of the FOUR BUCKET sizes only, never a count of distinct
+cases and never inclusive of `starving`. Call this first in any "where is Philip at / what needs a
+nudge" sweep — the reconciliation entry point for detecting drift without waiting on his prompt.
+
+**`starving` (cos-ops#24)** — a single list across cases, open reminders, and unanswered messages,
+ranked **worst-first** by an **aging** score that rises with `daysIdle` (×1), `daysOverdue` (×2),
+and a passed-unactioned linked timed block's `daysSincePassed` (×3 — *any* past linked timed event
+the case was not touched after: the board cannot tell a chase block from a meeting the human
+linked, and any later write to the case clears it) — so a long-idle low-priority
+obligation eventually outranks a fresh high-priority one (static `priority` is a tie-break only,
+never a score input). An obligation with a linked **TIMED** calendar event in the next 7 days is
+excluded as **already-allocated**; an **all-day** linked event never allocates, past or future (a
+deadline marker, not a work block). Each entry carries `kind` (`case` | `reminder` | `message`),
+`id`, `title`, `daysIdle`, `daysOverdue`, `score`, and — for a case whose most recent past linked
+block passed with the case still untouched — `passedBlock: { eventId, date, daysSincePassed }`.
+This is the entry point of the `board-organize` skill's weekly staleness lens.
 
 ### Reminders
 
