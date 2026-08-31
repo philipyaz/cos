@@ -95,6 +95,7 @@ const NUTRITION_ADDON: AddonManifest = {
     { href: "/nutrition/log", label: "Food Log", icon: "IconChef" },
     { href: "/nutrition/pantry", label: "Pantry", icon: "IconFridge" },
     { href: "/nutrition/plan", label: "Meal Plan", icon: "IconMealPlan" },
+    { href: "/nutrition/shopping", label: "Shopping", icon: "IconCart" },
   ],
   apiPrefixes: ["/api/nutrition"],
   // Owned db ARRAYS only. db.dietProfile (v14 dietary singleton) is a bare object, not an array,

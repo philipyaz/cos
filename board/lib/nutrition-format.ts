@@ -5,11 +5,16 @@
 // "SSR `today` must match the client's Today" coupling, with no behaviour change.
 //
 // This module is I/O-free and clock-free except `toISODay(new Date())` at the explicit
-// call sites — it imports nothing app-specific, so it is safe to use from server components,
-// route handlers, AND client components alike. As of v14 it is ALSO the home for the small
-// shared calendar/trend helpers + the adherence/guardrail value types that used to live in the
-// retired weight-loss engine (lib/nutrition-targets.ts) — re-homed here so the surviving views
-// (weight-chart, food-log-view, weight-loss panel) and the new body-baseline read ONE source.
+// call sites — it imports only pure type/constant definitions from ./types (no I/O, no
+// framework code), so it is safe to use from server components, route handlers, AND client
+// components alike. As of v14 it is ALSO the home for the small shared calendar/trend helpers +
+// the adherence/guardrail value types that used to live in the retired weight-loss engine
+// (lib/nutrition-targets.ts) — re-homed here so the surviving views (weight-chart, food-log-view,
+// weight-loss panel) and the new body-baseline read ONE source. As of v16/cos-ops#38 it is also
+// the home for the shopping-list grouping helper (below) — pulled out of the view so the
+// type-stripping unit runner (tests/unit/*.test.ts) can import it.
+
+import { VALID_SHOPPING_CATEGORY, type ShoppingItem } from "./types";
 
 // ── Calendar-day formatting ─────────────────────────────────────────────────────
 // "YYYY-MM-DD" for a Date in LOCAL time — the user's wall-calendar day (NOT UTC). Used to
@@ -103,4 +108,46 @@ export function normalizePantryName(name: string): string {
   return collapsed.length >= 4 && collapsed.endsWith("s") && !collapsed.endsWith("ss")
     ? collapsed.slice(0, -1)
     : collapsed;
+}
+
+// ── Shopping-list category grouping (v16 UI, cos-ops#38) ───────────────────────────────────────
+// Groups shopping items by category in the fixed VALID_SHOPPING_CATEGORY (aisle) order, with an
+// "uncategorized" bucket LAST for items whose category is unset — the shopping-view.tsx analogue
+// of pantry-view.tsx's local groupByCategory (pantry-view.tsx:331-352), generalised to
+// ShoppingItem and pulled into this lib module (not the .tsx) so the type-stripping unit runner
+// can import it directly. Returns bare category KEYS, not display strings — display labels
+// (SHOPPING_CATEGORY_LABEL) are a component concern and stay in shopping-view.tsx, matching the
+// pantry CATEGORY_LABEL idiom.
+export interface ShoppingCategoryGroup {
+  key: string; // a ShoppingCategory, or "uncategorized" for items with no category
+  items: ShoppingItem[]; // sorted by name, case-insensitive
+}
+
+const SHOPPING_UNCATEGORIZED = "uncategorized"; // bucket key for items with no category (sorts last)
+
+export function groupShoppingByCategory(items: ShoppingItem[]): ShoppingCategoryGroup[] {
+  const byCat = new Map<string, ShoppingItem[]>();
+  for (const it of items) {
+    const key = it.category ?? SHOPPING_UNCATEGORIZED;
+    const bucket = byCat.get(key);
+    if (bucket) bucket.push(it);
+    else byCat.set(key, [it]);
+  }
+  // Build groups in the canonical aisle order, then the Uncategorized bucket last.
+  const ordered: ShoppingCategoryGroup[] = [];
+  for (const cat of VALID_SHOPPING_CATEGORY) {
+    const bucket = byCat.get(cat);
+    if (bucket && bucket.length > 0) {
+      ordered.push({ key: cat, items: sortShoppingByName(bucket) });
+    }
+  }
+  const uncat = byCat.get(SHOPPING_UNCATEGORIZED);
+  if (uncat && uncat.length > 0) {
+    ordered.push({ key: SHOPPING_UNCATEGORIZED, items: sortShoppingByName(uncat) });
+  }
+  return ordered;
+}
+
+function sortShoppingByName(items: ShoppingItem[]): ShoppingItem[] {
+  return [...items].sort((a, b) => a.name.localeCompare(b.name));
 }

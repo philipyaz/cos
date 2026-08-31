@@ -78,6 +78,8 @@ export function recordDevice(req: NextRequest): void {
 // GRAMMAR MIRROR: scripts/join-blob.mjs emits the SAME `cos-join://v1?hub=&schema=&
 // backup=` shape from the CLI (it is a .mjs outside the Next root and cannot import
 // this) — keep the two in lockstep; spoke-setup parses whichever produced the blob.
+// Pinned by tests/unit/device-mirrors.test.ts (an exact string-equality assertion
+// on both builders' output) — edit one, edit both, or the test will tell you.
 export function buildJoinBlob(): string | null {
   // env > cos.env (machineValue), matching getDeviceRole/getDeviceId.
   const hubUrl = machineValue("COS_HUB_PUBLIC_URL", "").trim().replace(/\/$/, "");

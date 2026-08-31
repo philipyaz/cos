@@ -244,8 +244,8 @@ suggest."
 #### `add_shopping_item(name, [category], [quantity], [unit], [note], [source], [sourceRef])`
 `POST /api/nutrition/shopping`. **Gated.** `name` **(required)** — food OR non-food (e.g.
 "AA batteries"). `source` defaults `manual`. `sourceRef` is a **soft** reference
-(`MEAL-<n>` / `PANTRY-<n>` / `M-<n>`) — never validated relationally. Returns the minted
-`SHOP-id`.
+(`MEAL-<n>` / `PANTRY-<n>` / `whatsapp:<message id>`) — never validated relationally.
+Returns the minted `SHOP-id`.
 
 #### `update_shopping_item(id, [name], [category], [quantity], [unit], [status], [source], [sourceRef], [note])`
 `PATCH /api/nutrition/shopping/{id}`. **Gated.** Pass only the fields to change. The
