@@ -136,6 +136,8 @@ export function makeBoardApi(entityWord, crmBaseUrl) {
     // secret — just identity, like x-actor.
     // The slug shape MIRRORS board/lib/cos-env.ts slugifyDeviceId (this .mjs is outside
     // the Next root and cannot import it) — the board re-slugifies the header anyway.
+    // Pinned by tests/unit/device-mirrors.test.ts — edit one, edit both, or the
+    // test will tell you.
     const deviceId = (process.env.COS_DEVICE_ID || "").trim();
     if (deviceId) headers["x-device"] = deviceId.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64);
     const deviceRole = (process.env.COS_DEVICE_ROLE || "").trim();

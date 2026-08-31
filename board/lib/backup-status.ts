@@ -131,7 +131,9 @@ function isLocalEntry(s: BackupSummary): boolean {
 // 26h without renewal (daily runs + top-ups renew far more often).
 // MIRRORS backup/lib/lease.mjs (readLease + coerceLease + leaseIsStale + the 26h
 // LEASE_STALE_HOURS) — that .mjs is outside the Next root and cannot be imported;
-// keep the constant + field coercion in lockstep with it.
+// keep the constant + field coercion in lockstep with it. Pinned by
+// tests/unit/device-mirrors.test.ts — edit one, edit both, or the test will
+// tell you.
 export const LEASE_STALE_HOURS = 26;
 
 // HubLease is defined in ./types (the canonical home) so the Devices envelope can
@@ -221,6 +223,8 @@ function parseManifestText(file: string): ManifestEntryWire[] {
 // run-gate's isFresh() can reuse it (one parse path). MIRRORS
 // backup/lib/manifests.mjs readAllManifests (the .mjs/.ts sides can't
 // cross-import — same duplication contract as the cos.env reader above).
+// Pinned by tests/unit/device-mirrors.test.ts — edit one, edit both, or the
+// test will tell you.
 export function readManifest(): BackupSummary[] {
   const entries: ManifestEntryWire[] = [];
   try {
@@ -423,6 +427,11 @@ function computeOverall(args: {
 // checks the SAME item the real key reader resolves: -s <service> -a <account>, both
 // env-overridable (default account = the current user). A key under a DIFFERENT account
 // must not read as "present" (resolveKey would fail to find it → unrecoverable backups).
+// This block (module-private — import-both is impossible without exporting it, and
+// its only consumer spawns the real `security` binary) is pinned by anchored
+// source-literal extraction in tests/unit/device-mirrors.test.ts, which also
+// documents a live divergence from backup/config.mjs on a whitespace-only account
+// override — see that test file's header and the plan's Follow-ons.
 const KEYCHAIN_SERVICE = process.env.COS_BACKUP_KEYCHAIN_SERVICE || "cos-backup-key";
 const KEYCHAIN_ACCOUNT = ((): string => {
   const env = process.env.COS_BACKUP_KEYCHAIN_ACCOUNT;

@@ -24,6 +24,9 @@ export const REPO_ROOT =
 // (board/lib/backup-status.ts) re-implements this same reader — the two can't
 // cross-import (this .mjs lives outside the Next root), so the logic is duplicated.
 // Every read is wrapped so a missing/unreadable/garbage file degrades to {} — never throws.
+// The device id/role chain each parser feeds is pinned by
+// tests/unit/device-mirrors.test.ts (mirror #2) — edit one, edit both, or the
+// test will tell you.
 function parseCosEnv(repoRoot) {
   const out = {};
   try {
@@ -112,7 +115,9 @@ export const VAULT_NAME_CONFIGURED = Boolean(
 // This machine's device role — "hub" produces backups (and runs the state machine);
 // "spoke" never produces (it holds no state worth archiving and must not touch the
 // lease). Tolerant read (the loader validates loudly at setup time). MIRRORED (not
-// imported) by board/lib/cos-env.ts getDeviceRole().
+// imported) by board/lib/cos-env.ts getDeviceRole(). Pinned by
+// tests/unit/device-mirrors.test.ts — edit one, edit both, or the test will
+// tell you.
 export const DEVICE_ROLE = envOrCosEnv("COS_DEVICE_ROLE", "hub") === "spoke" ? "spoke" : "hub";
 
 // The stable per-machine identity that keys this producer's manifests/<id>.json.
@@ -124,6 +129,9 @@ export const DEVICE_ROLE = envOrCosEnv("COS_DEVICE_ROLE", "hub") === "spoke" ? "
 // backup.mjs keys on a MACHINE-LOCAL marker + key fingerprint, never on this id.
 // Sanitized to a filename-safe slug so a hostname can never traverse out of
 // manifests/. MIRRORED (not imported) by board/lib/cos-env.ts getDeviceId().
+// Pinned (both this chain and the slice(0,64) cap) by
+// tests/unit/device-mirrors.test.ts — edit one, edit both, or the test will
+// tell you.
 const rawDeviceId = envOrCosEnv("COS_DEVICE_ID", os.hostname());
 export const DEVICE_ID = rawDeviceId.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64) || "unknown-device";
 
