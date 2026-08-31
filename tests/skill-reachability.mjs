@@ -1,4 +1,4 @@
-// tests/skill-reachability.mjs — this file owns TWO reachability contracts, in both directions:
+// tests/skill-reachability.mjs — this file owns THREE reachability contracts, in both directions:
 //
 // SCAN 1 (delegation -> target): a skill may only delegate to a slash-skill that exists in ITS
 // OWN runtime (board/.claude/CLAUDE.md: "a skill may only compose tools that already exist").
@@ -14,6 +14,17 @@
 // scope with a reason. That is exactly how cos-ops#35 happened: `fitness-mcp-setup` and
 // `body-mcp-setup` were both declared in the registry and both silently absent from cos-setup,
 // and `setupSkill` had zero code consumers to notice the drift.
+//
+// SCAN 3 (fetch -> screen, cos-ops#26): a skill SECTION that instructs an external web fetch must
+// also contain the literal `classify_text` — the untrusted-content contract stated once in
+// board/.claude/CLAUDE.md ("Screens untrusted content"). That is exactly how cos-ops#26 happened:
+// `classify_text` shipped as the guard's generic lane and sat at zero callers while ops#24's
+// research step shipped a web-search fallback with no screening step at all. Matching runs over
+// each file's WHOLE content string, not per line, so a phrase wrapped across a line break (these
+// bodies wrap at ~72 columns) still matches — ADR 0014 names this exact near-miss. The pairing is
+// checked per SECTION, not per file: a whole-file check would go permanently green the moment ANY
+// section anywhere mentions `classify_text`, which is the exact insufficiency
+// tests/triage-decisions-consumers.mjs:20-23 documents for its own sibling gates.
 //
 //   node tests/skill-reachability.mjs
 //
@@ -156,6 +167,53 @@ if (setupSkills.size === 0) {
 
 const scan2Count = violations.length - scan1Count
 
+// SCAN 3 (fetch -> screen, cos-ops#26): a skill section that instructs an external web fetch
+// (WebSearch/WebFetch, or prose naming a web/internet search) must also reference the guard's
+// `classify_text` tool in that SAME section. Deliberately excludes `browse` and bare `web` — both
+// false-positive on the live tree today (fitness-training-plan's "browse prior plans"; the
+// generated README's "web only as fallback" row) with zero additional true positives — do not
+// widen either without re-measuring.
+const FETCH_RE = /\bWebSearch\b|\bWebFetch\b|\bweb[\s-]+search(?:es)?\b|\bsearch(?:es|ing)?\s+the\s+(?:web|internet)\b/gi
+
+/** Split content into sections at markdown headings; a file with no heading is one section. */
+function sectionsOf(content) {
+  const starts = [...content.matchAll(/^#{1,6}\s/gm)].map((m) => m.index)
+  if (starts.length === 0) return [{ start: 0, text: content }]
+  const out = []
+  if (starts[0] > 0) out.push({ start: 0, text: content.slice(0, starts[0]) })
+  for (let i = 0; i < starts.length; i++) {
+    const end = i + 1 < starts.length ? starts[i + 1] : content.length
+    out.push({ start: starts[i], text: content.slice(starts[i], end) })
+  }
+  return out
+}
+
+// Scoped deliberately to board/.claude/skills/ — the same `files` list SCAN 1 walks. The root
+// .claude/skills/ and the vault/*/.claude/skills/ trees are unscanned; zero detector hits there
+// today — widening is a future decision, not an accident of this regex.
+let filesWithFetch = 0
+for (const file of files) {
+  const rel = relative(REPO_ROOT, file)
+  const content = readFileSync(file, 'utf8')
+  if ([...content.matchAll(FETCH_RE)].length === 0) continue
+  filesWithFetch++
+  for (const { start, text } of sectionsOf(content)) {
+    const sectionMatches = [...text.matchAll(FETCH_RE)]
+    if (sectionMatches.length === 0) continue
+    if (text.includes('classify_text')) continue // rewording is for an INCIDENTAL mention only —
+    // never a way to launder an actual unscreened fetch (mirrors the NON_SKILL_TOKENS discipline).
+    const line = content.slice(0, start + sectionMatches[0].index).split('\n').length
+    violations.push(
+      `${rel}:${line} — instructs an external fetch with no \`classify_text\` screening step in ` +
+        "the same section (add one per the untrusted-content guarantee in board/.claude/CLAUDE.md, " +
+        "or reword the mention if it is incidental — for the generated README.md, reword " +
+        "automation.json and re-run scripts/pack-skills.mjs instead)",
+    )
+  }
+}
+
+const scan3Count = violations.length - scan1Count - scan2Count
+
 if (violations.length) {
   console.error('[skill-reachability] reachability violation(s):')
   for (const v of violations) console.error(`  ${v}`)
@@ -172,12 +230,19 @@ if (violations.length) {
         'setupSkill in board/lib/addons.ts must be reachable from cos-setup (see cos-ops#35).',
     )
   }
+  if (scan3Count > 0) {
+    contracts.push(
+      `${scan3Count} across ${files.length} file(s) scanned — a skill section that instructs an ` +
+        'external web fetch must also reference classify_text (see cos-ops#26).',
+    )
+  }
   console.error(`[skill-reachability] ${violations.length} violation(s) total. ${contracts.join(' ')}`)
   process.exit(1)
 }
 
 console.log(
   `[skill-reachability] ${files.length} file(s) scanned, ${refsChecked} delegation ref(s) checked, ` +
-    `${setupSkills.size} registry setup skill(s) reachable from cos-setup — all reachable.`,
+    `${setupSkills.size} registry setup skill(s) reachable from cos-setup, ` +
+    `${filesWithFetch} fetch-instructing file(s) screened — all reachable.`,
 )
 process.exit(0)
