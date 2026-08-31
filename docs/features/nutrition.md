@@ -373,10 +373,50 @@ tests rather than left to be rediscovered.
 
 **Fact vs. inference, never blurred.** An expired row states a fact (`expired <expiresAt>`); a
 freshness-horizon row carries the label **`(inferred — no printed date)`**, verbatim, at every hop
-that renders it — the engine's `reason` string, the MCP render, and the operator skill's prose.
+that renders it — the engine's `reason` string, the MCP render, the operator skill's prose, and
+the board page's Suggested section (below).
 
 **Nothing routes through `db.pending`.** Confirmation is conversational, exactly like the bulk
 pantry reconcile above — never the board's propose/approve queue.
+
+### The shopping surface — `/nutrition/shopping`
+
+The board's first HUMAN surface over `db.shoppingItems` — before this page the list existed only
+as MCP JSON, with no board surface rendering it at all. One page, one component
+(`board/components/nutrition/shopping-view.tsx`), no new route, tool, status shape or store
+field: every interaction below drives the same three `/api/nutrition/shopping*` routes the five
+MCP tools already wrap (see Parity rule).
+
+- **Aisle-order grouping.** Items render in the fixed `ShoppingCategory` order (produce → protein
+  → dairy → bakery → frozen → pantry → household → personal-care → other), each group carrying a
+  count; an **Uncategorized** bucket sorts last. `household` and `personal-care` render exactly
+  like the food groups — one list, batteries next to bananas.
+- **One-tap tick, undoable.** Tapping a row (`status: "needed"` → `"bought"`) is the whole
+  gesture — no drawer, no confirmation — and the row moves into a collapsed **Bought &
+  dismissed** pile at the bottom. A **Dismiss** control (distinct from bought) sends
+  `status: "dismissed"` the same way. The pile is collapsed by default with an always-visible
+  header + live count, so a mis-tap is never silent; expanding it and tapping a row restores
+  `status: "needed"`.
+- **Always-visible quick-add.** One input, pinned above the list — type, Enter, done. It leaves
+  `category` **unset** rather than defaulting to `other`: unset renders the row in Uncategorized
+  (last, visible) and doubles as the agent's cue to categorise it on its next JOB 6 pass; `other`
+  would fake a human decision and bury the row mid-list.
+- **Suggested — a pure read, never a write until tapped.** Renders
+  `GET /api/nutrition/shopping/candidates` (the engine above) verbatim, including the
+  `(inferred — no printed date)` label where it applies — the fourth hop that label must
+  survive. Nothing in this section writes on its own; tapping **Add** on a candidate `POST`s it
+  onto the list (with the candidate's own `source`/`sourceRef`), which the engine then
+  suppresses on the next read — the state half was built for exactly this handoff. Loading the
+  page never advances `db.version`: the engine computes on read, and `readDB()` never writes.
+- **Live, like the other three views.** `useLiveBoard` refetches the list and the candidates read
+  whenever `db.version` advances past what the page last saw — an item the agent adds (via
+  `nutrition-chef`, or any other MCP write) appears on an open page without a reload.
+- **On the phone.** `/nutrition/shopping` is three taps deep — More → the Nutrition group →
+  Shopping; the tab bar (`MOBILE_TAB_HREFS`) is untouched, since an add-on page is never a phone
+  tab. The in-shop path stays the agent (*"what's on my list"*, *"got the milk"*); this page is
+  the **at-home visualise-and-edit** moment — reviewing a draft, adding what you thought of,
+  ticking items off one-handed as you shop. It inherits the shipped `dvh` + safe-area treatment
+  and the `pb-tabbar` clearance, so nothing sits under the iOS Safari toolbar.
 
 ## The nutrition MCP — the agent's diary verbs
 
@@ -408,8 +448,9 @@ pantry against plans — that judgement is the operator skill's.
 
 ## The read-only views
 
-Enabling the add-on reveals a **Nutrition** nav group with three pages, plus a reachable **Add-ons**
-catalog link:
+Enabling the add-on reveals a **Nutrition** nav group with four pages, plus a reachable **Add-ons**
+catalog link. Three are read-only; the fourth — Shopping — is the vertical's first deliberately
+**write-capable** human surface (inline tick / quick-add / dismiss, detailed above):
 
 - **`/addons`** — the catalog: per-add-on **enable/disable toggle** + the **MCP-bridge reachability
   hint** (so you can see at a glance whether the agent's bridge is up on `:8007`). This link stays
@@ -417,8 +458,12 @@ catalog link:
 - **`/nutrition/log`**, **`/nutrition/pantry`**, **`/nutrition/plan`** — three **read-only** views
   (the human reads at a glance; the **agent writes** via the MCP). They subscribe to SSE, so an MCP
   write lands without a reload.
+- **`/nutrition/shopping`** — the shopping-list surface (above): grouped by aisle, one-tap
+  tick/dismiss, an always-visible quick-add, and a read-only **Suggested** section over the
+  candidates read. Unlike the three views above, taps here **write** — through the same
+  `/api/nutrition/shopping*` routes the MCP already used (see Parity rule).
 
-A **disabled** add-on **`404`s its three pages and hides its nav** — but the **Add-ons** catalog link
+A **disabled** add-on **`404`s its four pages and hides its nav** — but the **Add-ons** catalog link
 stays reachable so you can turn it back on. (Disabling never deletes data; the views simply gate on
 the same flag the writes do.)
 
@@ -488,8 +533,10 @@ in the skill, not the platform:
 ## Parity rule
 
 Nutrition obeys the board's founding tenet: **every human gesture is the visual twin of an MCP verb,
-through one mutation path.** The (read-only) views and the agent's tools resolve to the **same
-`/api/nutrition/*` routes**, every mutation flows through the single atomic, version-guarded
-`mutate()` store path with the gate inside it, and every write is attributed `human` (UI) or `agent`
-(MCP) on the same append-only basis as any board write. One store, one write path, two faces — gated
-by one flag.
+through one mutation path.** The views and the agent's tools resolve to the **same
+`/api/nutrition/*` routes** — the shopping page's tick / quick-add / dismiss are human **gestures**
+over the very `/api/nutrition/shopping*` routes the MCP's `update_shopping_item` /
+`add_shopping_item` tools already wrap, not a parallel path — every mutation flows through the
+single atomic, version-guarded `mutate()` store path with the gate inside it, and every write is
+attributed `human` (UI) or `agent` (MCP) on the same append-only basis as any board write. One
+store, one write path, two faces — gated by one flag.

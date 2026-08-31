@@ -654,6 +654,23 @@ else
   fail_reasons="${fail_reasons} triage-decisions-consumers"
 fi
 
+# --- 2f. shopping-surface (hard gate; rides [2f] — cos-ops#38) --------------
+# The ADR 0014 gate for the shopping-list BOARD SURFACE (cos-ops#38, the UI half of cos-ops#37's
+# state): /nutrition/shopping is reachable from the shared nav model, the page SSR-seeds
+# computeShoppingCandidates on the SAME default window the candidates route defaults to, and
+# shopping-view.tsx wires all three statuses (bought/needed/dismissed), the always-visible
+# quick-add, and the collapsed pile — with no drawer import. Static, read-only, node-only. Rides
+# this existing [2f] id (ADR 0022) rather than minting a new [2*] id.
+echo
+echo "--- [2f] shopping-surface (JOB 6 board surface contract) ---"
+if node "${SCRIPT_DIR}/shopping-surface.mjs"; then
+  echo "shopping-surface: PASS"
+else
+  echo "shopping-surface: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} shopping-surface"
+fi
+
 # --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --
 # Post-migration the vault holds knowledge only: no task checkboxes in wiki/,
 # and reminders are drained to the board (no open "- [ ]" left). These are the
