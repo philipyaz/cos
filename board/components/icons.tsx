@@ -474,6 +474,18 @@ export function IconMealPlan(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconCart(props: SVGProps<SVGSVGElement>) {
+  // A shopping cart — the Shopping nav glyph: a handle leading into an open basket frame on
+  // two wheels, same 1.5-stroke / currentColor convention as the set.
+  return (
+    <svg {...base} {...props}>
+      <path d="M1.5 2h1.3l1.6 7.8a1 1 0 0 0 1 .8h5.6a1 1 0 0 0 1-.8L13 5H3.7" />
+      <circle cx="6" cy="13" r="1" />
+      <circle cx="10.5" cy="13" r="1" />
+    </svg>
+  );
+}
+
 export function IconScale(props: SVGProps<SVGSVGElement>) {
   // A balance scale — the weigh-in / weight-loss glyph. A central pillar on a base, a
   // crossbeam, and a hanging pan on each side. Reads as a "scale" distinct from the

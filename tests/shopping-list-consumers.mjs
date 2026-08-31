@@ -166,6 +166,25 @@ check(
   "mcp/nutrition-server/server.mjs carries the '(inferred — no printed date)' label literally (the MCP render hop)",
 );
 
+// --- the board-page hop — ADR 0025 condition 4's fourth site (cos-ops#38) ------------------------
+// board/components/nutrition/shopping-view.tsx renders candidate.reason verbatim — the fourth
+// hop after JOB 6 prose (above) and the MCP render (above). A missing view file must FAIL this
+// check, not blank it (mirrors the "must break this gate, not silently blank it" pattern used
+// for JOB 6's own section above), so the read goes through a try/catch rather than a bare
+// readFileSync that would crash the whole gate.
+const VIEW_FILE = join(REPO_ROOT, "board", "components", "nutrition", "shopping-view.tsx");
+let viewSrc = null;
+try {
+  viewSrc = readFileSync(VIEW_FILE, "utf8");
+} catch {
+  // missing file — falls through to the failing check below
+}
+check(
+  viewSrc !== null && viewSrc.includes(".reason"),
+  `${relative(REPO_ROOT, VIEW_FILE)} exists and renders 'candidate.reason' verbatim (the board-page ` +
+    "ADR 0025 hop — carries '(inferred — no printed date)' to the human surface)",
+);
+
 // --- job 4: two source-level rule gates (prose rules from the AC, turned into greps) ------------
 check(
   !/const\s+\w+\s*=\s*\d/.test(engineSrc),
