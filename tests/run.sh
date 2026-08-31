@@ -49,6 +49,13 @@
 #      mail-to-board's drop region (which also records BEFORE it watermarks) and
 #      reminders-review's digest STEP — a parser-grade gate rides an existing id
 #      rather than minting a new one.
+#      [2f] also rides
+#      whatsapp-shopping-capture.mjs (cos-ops#39) — the same ADR 0014 shape for
+#      whatsapp-triage's STEP 4.5 (explicit purchase statements → the shopping list):
+#      both shopping tools + a small set of load-bearing phrases must be named inside
+#      the STEP 4.5 section, the sweep stays read-only on the whatsapp MCP, and the
+#      nutrition-server render + call-time narration must carry the whatsapp: form —
+#      a parser-grade gate rides an existing id rather than minting a new one.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -611,6 +618,24 @@ else
   fail_reasons="${fail_reasons} shopping-list-consumers"
 fi
 
+# --- 2f. whatsapp-shopping-capture (hard gate; rides [2f] — cos-ops#39) -----
+# The ADR 0014 gate: whatsapp-triage's STEP 4.5 (explicit purchase statements → the
+# shopping list) must exist, be reachable from STEP 4's routing table, name both
+# shopping tools it calls, state every load-bearing rule as a fixed pinned phrase,
+# stay read-only on the whatsapp MCP, and the nutrition-server render + call-time
+# narration must both carry the whatsapp: form. Rides this existing [2f] id with its
+# own echo line + fail_reasons token rather than minting a new [2*] id (ADR 0022).
+# Static, read-only, node-only.
+echo
+echo "--- [2f] whatsapp-shopping-capture (STEP 4.5 contract) ---"
+if node "${SCRIPT_DIR}/whatsapp-shopping-capture.mjs"; then
+  echo "whatsapp-shopping-capture: PASS"
+else
+  echo "whatsapp-shopping-capture: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} whatsapp-shopping-capture"
+fi
+
 # --- 2f. triage-decisions-consumers (hard gate; rides [2f] — cos-ops#41) -----
 # The ADR 0014 gate: every top-level field TriageDecisionSummary (board/lib/triage-decisions.ts)
 # returns, and every triage tool the board MCP server registers, must be CONSUMED — by name —
@@ -627,6 +652,23 @@ else
   echo "triage-decisions-consumers: FAIL"
   fail=1
   fail_reasons="${fail_reasons} triage-decisions-consumers"
+fi
+
+# --- 2f. shopping-surface (hard gate; rides [2f] — cos-ops#38) --------------
+# The ADR 0014 gate for the shopping-list BOARD SURFACE (cos-ops#38, the UI half of cos-ops#37's
+# state): /nutrition/shopping is reachable from the shared nav model, the page SSR-seeds
+# computeShoppingCandidates on the SAME default window the candidates route defaults to, and
+# shopping-view.tsx wires all three statuses (bought/needed/dismissed), the always-visible
+# quick-add, and the collapsed pile — with no drawer import. Static, read-only, node-only. Rides
+# this existing [2f] id (ADR 0022) rather than minting a new [2*] id.
+echo
+echo "--- [2f] shopping-surface (JOB 6 board surface contract) ---"
+if node "${SCRIPT_DIR}/shopping-surface.mjs"; then
+  echo "shopping-surface: PASS"
+else
+  echo "shopping-surface: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} shopping-surface"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --

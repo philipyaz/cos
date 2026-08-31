@@ -108,10 +108,16 @@ deltas blobs itself, which works on a mostly-plain-text stored zip and barely at
 
 `mail-to-board` and `whatsapp-triage` are the same machine wearing two envelopes. Both
 reconcile a channel's **state** onto the board: link each message to a case, advance or
-close tasks, move the lane, set catalog labels. Both are **board-only writers** — they
-drive the board exclusively through the `board` MCP (Cowork's sandbox blocks outbound
-HTTP, which is the whole reason the MCP exists) — and at the end of a run they compose
-the run's knowledge into one payload and submit it through the vault MCP's async
+close tasks, move the lane, set catalog labels. Both drive the board primarily through
+the `board` MCP (Cowork's sandbox blocks outbound HTTP, which is the whole reason the
+MCP exists) — `whatsapp-triage` also writes confirmed appointments via the `calendar`
+MCP and, as of cos-ops#39, an explicit purchase statement (*"we're out of coffee"*) via
+the `nutrition` MCP: it lands on the nutrition add-on's shopping list, fail-closed and
+never inferred from a food mention, a restaurant, or a recipe, and skipped honestly
+(with the loss reported) when the add-on is off. `mail-to-board` doesn't capture
+shopping yet — it's the named follow-on, sequenced after this rule has swept WhatsApp
+clean for a week. At the end of a run both compose the run's knowledge into one
+payload and submit it through the vault MCP's async
 `ingest`, driving the job to a terminal state per the
 [`vault-operations`](../reference/vault-async.md) skill — which, on `completed`, also
 stamps the per-case receipt (`mark_vault_ingested`) on the cases the payload named. The
@@ -148,6 +154,7 @@ Where the two diverge is only in their channel primitives, all traceable to one 
 | Entity quirk | sender address → vault entity via alias map | collapse `@s.whatsapp.net` phone **and** `@lid` anonymous form to **one** person |
 | Direction signal | thread head direction | per-message `is_from_me` (returned as `1`/`0` from SQLite — test truthy, not `=== true`) |
 | Scope | inbox + sent | DMs + groups, inbound + sent |
+| Shopping capture | no (named follow-on, cos-ops#39) | yes — STEP 4.5, explicit statements only |
 
 Read the full procedures in
 [`mail-to-board/SKILL.md`](https://github.com/philipyaz/cos/blob/main/board/.claude/skills/mail-to-board/SKILL.md)
