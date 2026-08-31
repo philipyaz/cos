@@ -11,7 +11,7 @@
   },
   "whatsapp-triage": {
     "class": "scheduled",
-    "summary": "The same reconciliation for **WhatsApp** (DMs **and** groups), turning chats into tracked cases on the board.",
+    "summary": "The same reconciliation for **WhatsApp** (DMs **and** groups), turning chats into tracked cases on the board — and capturing explicit \"we're out of X\" purchase statements onto the **shopping list** (fail-closed, with per-message provenance).",
     "schedules": [{ "trigger": "Run /whatsapp-triage", "cadence": "~15 min" }]
   },
   "board-organize": {

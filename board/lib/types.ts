@@ -54,8 +54,9 @@ export const VALID_SHOPPING_CATEGORY: ShoppingCategory[] = ["produce", "protein"
 export type ShoppingStatus = "needed" | "bought" | "dismissed";
 export const VALID_SHOPPING_STATUS: ShoppingStatus[] = ["needed", "bought", "dismissed"];
 
-// Where a shopping-list row came from — "channel" is the WhatsApp-feed seam (cos-ops#39
-// ships the producer; this vertical only reserves the value + the soft M-<n> sourceRef).
+// Where a shopping-list row came from — "channel" is the WhatsApp-feed seam;
+// whatsapp-triage's STEP 4.5 (cos-ops#39) is the producer, writing a
+// `whatsapp:<message id>` sourceRef (see ShoppingItem below).
 export type ShoppingSource = "manual" | "plan" | "pantry" | "channel";
 export const VALID_SHOPPING_SOURCE: ShoppingSource[] = ["manual", "plan", "pantry", "channel"];
 
@@ -458,8 +459,9 @@ export interface MealPlanEntry {
 // cannot be computed (ADR 0017); computeShoppingCandidates (board/lib/shopping-candidates.ts)
 // derives suggestions on read and persists nothing. `sourceRef` is a SOFT ref, exactly
 // like MealPlanEntry.pantryItemIds — dangling tolerated, never validated: "MEAL-<n>" |
-// "PANTRY-<n>" | "M-<n>" (the WhatsApp-feed seam cos-ops#39 will produce). `boughtAt` is
-// server-stamped only (applyShoppingItemUpdate) — never read from a caller's patch.
+// "PANTRY-<n>" | "whatsapp:<message id>" (the WhatsApp-feed seam whatsapp-triage's STEP
+// 4.5 produces, cos-ops#39). `boughtAt` is server-stamped only (applyShoppingItemUpdate)
+// — never read from a caller's patch.
 export interface ShoppingItem {
   id: string; // "SHOP-<n>" minted like CASE-<n>/EVT-<n> ids
   name: string; // required, non-empty
@@ -468,7 +470,7 @@ export interface ShoppingItem {
   unit?: string;
   status: ShoppingStatus; // "needed" (default)
   source: ShoppingSource; // "manual" (default at the route boundary)
-  sourceRef?: string; // MEAL-<n> | PANTRY-<n> | M-<n>, soft — see above
+  sourceRef?: string; // MEAL-<n> | PANTRY-<n> | whatsapp:<message id> (channel), soft — see above
   note?: string;
   boughtAt?: string; // ISO — stamped when status flips to "bought", cleared otherwise
   createdAt: string;

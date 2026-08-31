@@ -49,6 +49,13 @@
 #      mail-to-board's drop region (which also records BEFORE it watermarks) and
 #      reminders-review's digest STEP — a parser-grade gate rides an existing id
 #      rather than minting a new one.
+#      [2f] also rides
+#      whatsapp-shopping-capture.mjs (cos-ops#39) — the same ADR 0014 shape for
+#      whatsapp-triage's STEP 4.5 (explicit purchase statements → the shopping list):
+#      both shopping tools + a small set of load-bearing phrases must be named inside
+#      the STEP 4.5 section, the sweep stays read-only on the whatsapp MCP, and the
+#      nutrition-server render + call-time narration must carry the whatsapp: form —
+#      a parser-grade gate rides an existing id rather than minting a new one.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -609,6 +616,24 @@ else
   echo "shopping-list-consumers: FAIL"
   fail=1
   fail_reasons="${fail_reasons} shopping-list-consumers"
+fi
+
+# --- 2f. whatsapp-shopping-capture (hard gate; rides [2f] — cos-ops#39) -----
+# The ADR 0014 gate: whatsapp-triage's STEP 4.5 (explicit purchase statements → the
+# shopping list) must exist, be reachable from STEP 4's routing table, name both
+# shopping tools it calls, state every load-bearing rule as a fixed pinned phrase,
+# stay read-only on the whatsapp MCP, and the nutrition-server render + call-time
+# narration must both carry the whatsapp: form. Rides this existing [2f] id with its
+# own echo line + fail_reasons token rather than minting a new [2*] id (ADR 0022).
+# Static, read-only, node-only.
+echo
+echo "--- [2f] whatsapp-shopping-capture (STEP 4.5 contract) ---"
+if node "${SCRIPT_DIR}/whatsapp-shopping-capture.mjs"; then
+  echo "whatsapp-shopping-capture: PASS"
+else
+  echo "whatsapp-shopping-capture: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} whatsapp-shopping-capture"
 fi
 
 # --- 2f. triage-decisions-consumers (hard gate; rides [2f] — cos-ops#41) -----

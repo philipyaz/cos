@@ -648,8 +648,8 @@ const ADD_SHOPPING_ITEM_TOOL = {
     " `name` is required (what to buy — food OR non-food, e.g. 'AA batteries'). Optionally " +
     "provide `category` (produce|protein|dairy|bakery|frozen|pantry|household|personal-care|" +
     "other), `quantity`, `unit`, a `note`, `source` (manual|plan|pantry|channel — defaults " +
-    "'manual'), and `sourceRef` (a soft MEAL-<n>/PANTRY-<n>/M-<n> reference — never validated). " +
-    "Returns the minted SHOP-id.",
+    "'manual'), and `sourceRef` (a soft MEAL-<n>/PANTRY-<n>/whatsapp:<message id> reference — " +
+    "never validated). Returns the minted SHOP-id.",
   inputSchema: {
     type: "object",
     properties: {
@@ -659,7 +659,7 @@ const ADD_SHOPPING_ITEM_TOOL = {
       unit: { type: "string", description: "Optional unit, e.g. 'g', 'cans', 'bunch'." },
       note: { type: "string", description: "Optional freeform note." },
       source: { type: "string", enum: SHOPPING_SOURCE, description: "Where this came from. Defaults 'manual'." },
-      sourceRef: { type: "string", description: "Optional soft reference, e.g. 'MEAL-12' or 'PANTRY-4'." },
+      sourceRef: { type: "string", description: "Optional soft reference, e.g. 'MEAL-12', 'PANTRY-4', or 'whatsapp:<message id>'." },
     },
     required: ["name"],
   },
@@ -1525,8 +1525,8 @@ async function handleSaveNutritionTargets(args) {
 
 // ── Shopping-list tools (v16; the persistent shopping list, cos-ops#37) ─────────────────────
 
-// One-line render of a shopping item: qty/unit, non-manual source, the bought/dismissed stamp,
-// and the note. Mirrors pantryLine's shape.
+// One-line render of a shopping item: qty/unit, non-manual source with its sourceRef when
+// present, the bought/dismissed stamp, and the note. Mirrors pantryLine's shape.
 function shoppingLine(it) {
   const qty =
     typeof it.quantity === "number"
@@ -1537,7 +1537,7 @@ function shoppingLine(it) {
   const flags = [];
   if (it.status === "bought" && it.boughtAt) flags.push(`bought ${it.boughtAt.slice(0, 10)}`);
   if (it.status === "dismissed") flags.push("dismissed");
-  if (it.source && it.source !== "manual") flags.push(it.source);
+  if (it.source && it.source !== "manual") flags.push(it.sourceRef ? `${it.source}:${it.sourceRef}` : it.source);
   const note = it.note ? `  — ${it.note}` : "";
   return `  - ${it.id}  ${it.name}${qty}${flags.length ? `  [${flags.join(", ")}]` : ""}${note}`;
 }
