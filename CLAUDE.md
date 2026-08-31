@@ -130,10 +130,13 @@ node scripts/mark-skill-uploaded.mjs <skill>|--all|--list   # per-machine receip
   the PR's status rollup, so branch protection keeps the PR `BLOCKED` even when `lint-test`/`python`
   pass. Re-trigger with a `pull_request` event (push a commit — an empty one is fine), never a re-dispatch.
 - **A local `tests/run.sh` result is never evidence about a PR — run `gh pr checks <N>` and report
-  what CI said.** Steps that read real machine state (today `[13f] gen-roles`, tracked in cos-ops#33:
-  `join-blob.mjs` falls through to the real `config/cos.env` and to a live `tailscale serve`) are red
-  on any machine with a hub URL configured or `tailscale serve` running, while passing in CI. So
-  `RESULT: FAIL` is routine on such a machine, and a real failure hides behind it.
+  what CI said.** Local and CI evaluate different check sets. **Never call a local red
+  "pre-existing" without naming the step and quoting CI's verdict for it** — a suite whose reds get
+  routinely discounted is one a real regression hides in.
+- **A check that reads machine-local state names its source as an env key and defines the absent
+  case** — assert where the data exists and print a distinct non-`✓` line elsewhere (never fail for
+  absence); anything touching the store takes its path from `COS_BOARD_DATA` and SKIPs when unset.
+  **Never default a data path to `board/data/cases.json`** — that is the live, irreplaceable store.
 - **A new `mcp/*-server` is a root workspace member** — `npm install` at the repo root and commit
   `package-lock.json`, or CI's `npm ci` fails fast.
 - **Never `next build` in `board/` while a `next dev` is running** — they share `.next` and the running
