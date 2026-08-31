@@ -7,7 +7,7 @@
 // safe fetch+error path. Writes default to the "human" actor (no x-actor header), which
 // the routes resolve for attribution — exactly what we want for UI edits.
 
-import type { PantryItem, NutritionTargetArtifact, DietProfile } from "./types";
+import type { PantryItem, NutritionTargetArtifact, DietProfile, ShoppingItem } from "./types";
 
 // Parse a JSON body, throwing the API's { error } text (or a status fallback) on a
 // non-ok response so the caller gets a meaningful message. Mirrors board-client.request.
@@ -68,6 +68,32 @@ export function updatePantryItem(
 // so this is irreversible; callers confirm first). GATED server-side (disabled → 404).
 export function deletePantryItem(id: string): Promise<PantryOkResponse> {
   return request(`/api/nutrition/pantry/${id}`, { method: "DELETE" });
+}
+
+// ── Shopping list (v16, cos-ops#38) ─────────────────────────────────────────
+// Clones of the pantry pair above. No deleteShoppingItem: nothing on the shopping surface
+// deletes — "dismiss" (a PATCH to status:"dismissed") covers "decided against".
+export interface ShoppingItemResponse {
+  item: ShoppingItem;
+  version: number;
+}
+
+// POST /api/nutrition/shopping — add a list item (only `name` is required). Used by both the
+// quick-add input and "Add" on a Suggested candidate (which also passes the candidate's own
+// source/sourceRef, so the engine suppresses it on the next candidates read). GATED server-side
+// (disabled add-on → 404).
+export function createShoppingItem(input: Record<string, unknown>): Promise<ShoppingItemResponse> {
+  return request("/api/nutrition/shopping", { method: "POST", body: JSON.stringify(input) });
+}
+
+// PATCH /api/nutrition/shopping/[id] — partial update (present keys only). The tick / restore /
+// dismiss controls all go through this: `{ status: "bought" }` stamps `boughtAt` server-side,
+// any other status clears it. GATED server-side (disabled add-on → 404).
+export function updateShoppingItem(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<ShoppingItemResponse> {
+  return request(`/api/nutrition/shopping/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
 // ── Dietary profile (v14) ───────────────────────────────────────────────────

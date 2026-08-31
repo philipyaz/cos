@@ -26,20 +26,26 @@
 // api test SKIPs silently without a running board).
 //
 // Snapshots board/data/cases.json first and restores it in a `finally` (net-zero — db.
-// shoppingItems + db.mealPlanEntries + settings.addons all live in cases.json). Requires a
-// running board:
+// shoppingItems + db.mealPlanEntries + settings.addons all live in cases.json) — but ONLY when
+// COS_BOARD_DATA is set: this file used to default DATA_FILE to the LIVE store, so a bare run
+// outside the suite (no env exported) would snapshot and rewrite board/data/cases.json —
+// Philip's live, irreplaceable data — even though its HTTP traffic already targeted a throwaway
+// board. Fixed to the api-nutrition-shelf-life.mjs shape: unset COS_BOARD_DATA means no
+// snapshot/restore (a printed warning, not a guessed path) rather than a silent live-store
+// default. Requires a running board:
 //   cd board && npm run dev
-//   node tests/api-nutrition-shopping.mjs    # CRM_BASE_URL defaults to http://localhost:3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-nutrition-shopping.mjs
+//   # CRM_BASE_URL defaults to http://localhost:3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore SKIPs if unset).
 import { promises as fs, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE =
-  process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -97,11 +103,11 @@ function checkRouteVsTool() {
 }
 
 async function main() {
-  console.log(`api-nutrition-shopping · board=${BASE}`);
+  console.log(`api-nutrition-shopping · board=${BASE}${DATA_FILE ? ` · store=${DATA_FILE}` : ""}`);
 
   checkRouteVsTool();
 
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
 
   try {
     // ----------------------------------------------------------------------
@@ -226,6 +232,76 @@ async function main() {
     );
 
     // ----------------------------------------------------------------------
+    // The board SURFACE (cos-ops#38): /nutrition/shopping renders three synthetic fixtures
+    // grouped by aisle order (produce/household/uncategorized, uncategorized last) — and
+    // loading the page + a candidates read advances db.version by exactly zero (criterion 5:
+    // "loading the page does not advance db.version"). Placed HERE, add-on still ENABLED, before
+    // the disable/re-enable block below. The tick/add/restore WRITE semantics are already
+    // asserted above (PATCH bought stamps boughtAt, needed clears it; POST defaults) — this
+    // section only proves the browser-facing wiring: reachability, grouping, and read-only load.
+    // ----------------------------------------------------------------------
+    const bananas = await POST("/api/nutrition/shopping", {
+      name: "zzz-fixture-bananas-9182",
+      category: "produce",
+    });
+    check(bananas.status === 201, `POST the produce surface fixture → 201 (got ${bananas.status})`);
+    const batteries2 = await POST("/api/nutrition/shopping", {
+      name: "zzz-fixture-batteries-9182",
+      category: "household",
+    });
+    check(batteries2.status === 201, `POST the household surface fixture → 201 (got ${batteries2.status})`);
+    const mystery = await POST("/api/nutrition/shopping", { name: "zzz-fixture-mystery-9182" });
+    check(mystery.status === 201, `POST the uncategorized surface fixture (no category) → 201 (got ${mystery.status})`);
+
+    const versionBeforePage = (await GET("/api/nutrition/shopping")).body.version;
+
+    // A plain fetch of the PAGE itself (HTML, not JSON) — the repo's first non-/api/ assertion
+    // (no house convention to inherit; kept to indexOf ordering, nothing structural per the
+    // architect's note on the count-adjacency regex it replaced). First compile on the
+    // throwaway `next dev` board takes a few seconds — no tight timeout here.
+    const pageRes = await fetch(`${BASE}/nutrition/shopping`);
+    const html = await pageRes.text();
+    check(pageRes.status === 200, `GET /nutrition/shopping (the page) → 200 (got ${pageRes.status})`);
+    for (const name of ["zzz-fixture-bananas-9182", "zzz-fixture-batteries-9182", "zzz-fixture-mystery-9182"]) {
+      check(html.includes(name), `the page HTML contains the fixture item "${name}"`);
+    }
+
+    const GROUP_ORDER = ["Produce", "Household", "Uncategorized"];
+    const labelIdx = Object.fromEntries(GROUP_ORDER.map((l) => [l, html.indexOf(l)]));
+    for (const l of GROUP_ORDER) {
+      check(labelIdx[l] !== -1, `the page HTML contains the "${l}" group label`);
+    }
+    check(
+      labelIdx.Produce < labelIdx.Household && labelIdx.Household < labelIdx.Uncategorized,
+      `group labels render in aisle order: Produce (${labelIdx.Produce}) < Household (${labelIdx.Household}) < Uncategorized (${labelIdx.Uncategorized})`,
+    );
+    // Membership over markup: each fixture's NAME index falls between its own group label's
+    // index and the next rendered label's index — proves grouping without pinning exact
+    // header/count markup adjacency (the architect flagged that regex shape as brittle; exact
+    // per-group counts are the unit test's job, where they're precise).
+    const BRACKETS = [
+      { name: "zzz-fixture-bananas-9182", group: "Produce", lo: labelIdx.Produce, hi: labelIdx.Household },
+      { name: "zzz-fixture-batteries-9182", group: "Household", lo: labelIdx.Household, hi: labelIdx.Uncategorized },
+      { name: "zzz-fixture-mystery-9182", group: "Uncategorized", lo: labelIdx.Uncategorized, hi: html.length },
+    ];
+    for (const b of BRACKETS) {
+      const idx = html.indexOf(b.name);
+      check(
+        idx > b.lo && idx < b.hi,
+        `"${b.name}" renders inside its "${b.group}" group (index ${idx} between ${b.lo} and ${b.hi})`,
+      );
+    }
+
+    const candidatesForPage = await GET(`/api/nutrition/shopping/candidates?from=${TODAY}&to=${TODAY}`);
+    check(candidatesForPage.status === 200, `GET /api/nutrition/shopping/candidates → 200 (got ${candidatesForPage.status})`);
+
+    const versionAfterPage = (await GET("/api/nutrition/shopping")).body.version;
+    check(
+      versionAfterPage === versionBeforePage,
+      `loading the page + a candidates read does not advance db.version (${versionBeforePage} === ${versionAfterPage})`,
+    );
+
+    // ----------------------------------------------------------------------
     // GATE: with the add-on DISABLED, POST → 404 while GET stays 200 (ungated).
     // ----------------------------------------------------------------------
     const disabled = await PATCH("/api/addons/nutrition", { enabled: false });
@@ -263,8 +339,12 @@ async function main() {
     const goneDetail = await GET(`/api/nutrition/shopping/${encodeURIComponent(shopId)}`);
     check(goneDetail.status === 404, `GET the deleted item → 404 (got ${goneDetail.status})`);
   } finally {
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {

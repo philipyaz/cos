@@ -18,6 +18,8 @@ const NAV_MODEL = join(REPO_ROOT, 'board', 'lib', 'nav.ts')
 const SIDEBAR = join(REPO_ROOT, 'board', 'components', 'sidebar.tsx')
 const MOBILE_NAV = join(REPO_ROOT, 'board', 'components', 'mobile-nav.tsx')
 const LAYOUT = join(REPO_ROOT, 'board', 'app', 'layout.tsx')
+const ADDONS_FILE = join(REPO_ROOT, 'board', 'lib', 'addons.ts')
+const NAV_ICONS_FILE = join(REPO_ROOT, 'board', 'components', 'nav-icons.tsx')
 
 const rel = (p) => relative(REPO_ROOT, p)
 const violations = []
@@ -46,6 +48,15 @@ function stringArrayLiterals(src, name) {
   const end = src.indexOf('];', start)
   const slice = end === -1 ? src.slice(start) : src.slice(start, end)
   return [...slice.matchAll(/"([^"]+)"/g)].map((m) => m[1])
+}
+
+/** Every `IconXxx` identifier inside one `const NAME = { ... }` object literal in `src`. */
+function objectIconKeys(src, name) {
+  const start = src.indexOf(`const ${name} = {`)
+  if (start === -1) return null
+  const end = src.indexOf('}', start)
+  const slice = end === -1 ? src.slice(start) : src.slice(start, end)
+  return [...slice.matchAll(/\b(Icon\w+)\b/g)].map((m) => m[1])
 }
 
 const navSrc = readOrNull(NAV_MODEL)
@@ -154,6 +165,55 @@ if (navSrc !== null) {
   }
 }
 
+// --- 7. every add-on manifest icon key resolves in NAV_ICONS (no silent IconBolt fallback) ------
+// A general invariant (ADR 0018), not a per-page one: any AddonManifest.icon or navItems[].icon
+// key that isn't a key of NAV_ICONS silently renders navIcon()'s IconBolt fallback
+// (nav-icons.tsx:59) instead of erroring — the add-on ships a wrong glyph with no signal. Filed
+// HERE (not in a page-specific gate) because it protects every add-on's rows, not just one
+// (cos-ops#38's 08-06 architect pass: "a per-page gate protects one row; the nav-invariant file
+// protects every add-on's rows"). Source-level regex over board/lib/addons.ts as TEXT — the
+// house idiom this file's own §§1-6 and skill-reachability.mjs's SCAN 2 both use.
+let iconValues = []
+const addonsSrc = readOrNull(ADDONS_FILE)
+const navIconsSrc = readOrNull(NAV_ICONS_FILE)
+if (addonsSrc === null) {
+  violations.push(`${rel(ADDONS_FILE)} — file does not exist (no add-on manifests to check)`)
+} else if (navIconsSrc === null) {
+  violations.push(`${rel(NAV_ICONS_FILE)} — file does not exist (nothing to resolve add-on icon keys against)`)
+} else {
+  // Every `icon: "..."` value in addons.ts — the manifest-level icon AND every navItems[].icon.
+  // Cross-checked against a raw occurrence count (excluding the interface's `icon: string`
+  // declarations, which never carry a quoted value) so a value written as anything other than a
+  // plain quoted string — a template literal, a shared const — can't silently shrink the checked
+  // set (mirrors skill-reachability.mjs SCAN 2's setupSkillKeys guard).
+  iconValues = [...addonsSrc.matchAll(/\bicon\s*:\s*"(\w+)"/g)].map((m) => m[1])
+  const iconKeyCount = (addonsSrc.match(/\bicon\s*:(?!\s*string\b)/g) || []).length
+  if (iconKeyCount !== iconValues.length) {
+    violations.push(
+      `${rel(ADDONS_FILE)} has ${iconKeyCount} icon key(s) but only ${iconValues.length} parsed as a plain ` +
+        'quoted string — every icon value must be a literal "IconX" so this gate can see it.',
+    )
+  }
+  if (iconValues.length === 0) {
+    violations.push(`${rel(ADDONS_FILE)} — no icon: "..." values parsed — the regex or the registry moved`)
+  } else {
+    const navIconKeys = objectIconKeys(navIconsSrc, 'NAV_ICONS')
+    if (navIconKeys === null || navIconKeys.length === 0) {
+      violations.push(`${rel(NAV_ICONS_FILE)} — no NAV_ICONS object literal found (the regex or the file moved)`)
+    } else {
+      const navIconKeySet = new Set(navIconKeys)
+      for (const key of new Set(iconValues)) {
+        if (!navIconKeySet.has(key)) {
+          violations.push(
+            `${rel(ADDONS_FILE)} references icon "${key}", which is not a key of NAV_ICONS ` +
+              `(${rel(NAV_ICONS_FILE)}) — navIcon() falls back to IconBolt silently for it`,
+          )
+        }
+      }
+    }
+  }
+}
+
 if (violations.length) {
   console.error('[mobile-nav] violation(s):')
   for (const v of violations) console.error(`  ${v}`)
@@ -165,6 +225,7 @@ if (violations.length) {
 }
 
 console.log(
-  `[mobile-nav] ${modelHrefs.size} nav href(s) checked — all reachable below md; sidebar scrolls its overflow.`,
+  `[mobile-nav] ${modelHrefs.size} nav href(s) checked — all reachable below md; sidebar scrolls its overflow; ` +
+    `${new Set(iconValues).size} add-on icon key(s) resolve in NAV_ICONS.`,
 )
 process.exit(0)
