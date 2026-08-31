@@ -18,7 +18,9 @@
 // it; a conflict on HUB.json means the CAS lost, never something to auto-merge.
 //
 // MIRRORED (not imported) by board/lib/backup-status.ts readHubLease() — the
-// .ts side cannot import this .mjs (outside the Next root).
+// .ts side cannot import this .mjs (outside the Next root). Pinned by
+// tests/unit/device-mirrors.test.ts — edit one, edit both, or the test will
+// tell you.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

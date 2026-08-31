@@ -6,6 +6,8 @@
 // GRAMMAR MIRROR: board/lib/devices.ts buildJoinBlob() emits the SAME `cos-join://v1?
 // hub=&schema=&backup=` shape for the board's "Add a device" button — keep the two in
 // lockstep (this .mjs is outside the Next root and cannot import the board module).
+// Pinned by tests/unit/device-mirrors.test.ts (an exact string-equality assertion
+// on both builders' output) — edit one, edit both, or the test will tell you.
 //
 //   node scripts/join-blob.mjs                       # from COS_HUB_PUBLIC_URL (cos.env)
 //   node scripts/join-blob.mjs https://mini.ts.net   # explicit hub URL (overrides)

@@ -58,6 +58,8 @@ export const nonEmpty = (v: unknown): v is string => typeof v === "string" && v.
 // cos.env parse is cached (static per process); the ENV override is read per
 // call so tests can flip roles without a module reload. Consumers: the store's
 // spoke write guard, /api/healthz, and backup-status's device-scoped freshness.
+// Pinned against backup/config.mjs's copy by tests/unit/device-mirrors.test.ts —
+// edit one, edit both, or the test will tell you.
 let _cosEnvCache: Record<string, string> | null = null;
 function machineEnv(): Record<string, string> {
   if (!_cosEnvCache) _cosEnvCache = parseCosEnv(path.resolve(process.cwd(), ".."));
@@ -80,7 +82,9 @@ export function machineValue(name: string, fallback: string): string {
 // last-seen map). One owner inside the Next root — getDeviceId AND devices.ts's
 // header-input sanitizer both use it, so the shape can't diverge. (backup/config.mjs
 // + mcp-kit hold their own copies: they are .mjs OUTSIDE the Next root and cannot
-// import this — the shape is documented as MIRRORED there.)
+// import this — the shape is documented as MIRRORED there.) Pinned against both
+// copies by tests/unit/device-mirrors.test.ts — edit one, edit all, or the test
+// will tell you.
 export function slugifyDeviceId(v: string): string {
   return v.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64);
 }

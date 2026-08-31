@@ -6,7 +6,9 @@
 // MANIFEST.json is still READ (old snapshots stay restorable) but no longer
 // written. Zero dependencies; shared by backup.mjs, restore.mjs (and mirrored,
 // not imported, by board/lib/backup-status.ts — the .mjs/.ts sides can't
-// cross-import, same as config.mjs's cos.env reader).
+// cross-import, same as config.mjs's cos.env reader). Pinned by
+// tests/unit/device-mirrors.test.ts — edit one, edit both, or the test will
+// tell you.
 import fs from "node:fs";
 import path from "node:path";
 
