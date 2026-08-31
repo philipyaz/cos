@@ -47,6 +47,20 @@ function run(cmd, args, extraEnv = {}) {
   }
 }
 
+// Like run(), but takes the FULL child env instead of merging extraEnv on top of
+// process.env — the only way to make a key absent rather than merely falsy (run()'s
+// spread can overwrite COS_HUB_PUBLIC_URL, never delete it). Used once, below, by the
+// check that must simulate COS_HUB_PUBLIC_URL being genuinely unset on a machine that
+// has one.
+function runWithEnv(cmd, args, env) {
+  try {
+    const out = execFileSync(cmd, args, { encoding: "utf8", cwd: COS_ROOT, env });
+    return { code: 0, out };
+  } catch (e) {
+    return { code: typeof e.status === "number" ? e.status : 1, out: `${e.stdout ?? ""}${e.stderr ?? ""}` };
+  }
+}
+
 // A hub URL that satisfies the loader's spoke misconfig guard in spoke-role runs.
 const HUB_URL = { BOARD_URL: "http://hub.example.ts.net:3000" };
 
@@ -133,6 +147,44 @@ async function main() {
   check(/hub=https%3A%2F%2Fmini\.example\.ts\.net/.test(r.out) && /schema=\d+/.test(r.out), "the blob carries the (url-encoded) hub URL + schema, no secret");
   r = run("node", ["scripts/join-blob.mjs", "notaurl"]);
   check(r.code !== 0 && /http/.test(r.out), "join-blob rejects a non-http hub value");
+
+  // join-blob.mjs must still emit a blob from config/cos.env ALONE (no CLI arg, no env
+  // var) — the path a fresh `node scripts/join-blob.mjs` takes on a configured hub. This
+  // must simulate COS_HUB_PUBLIC_URL being UNSET, not set to "" — after the fix above,
+  // an explicitly-set-but-empty value now means "the caller says unset" and refuses, so
+  // `{ COS_HUB_PUBLIC_URL: "" }` would trip that guard instead of exercising the cos.env
+  // fallback. run()'s extraEnv merge can only overwrite the key, never delete it, so this
+  // builds the child env by hand and spawns it directly with runWithEnv().
+  const envNoHubUrl = { ...process.env };
+  delete envNoHubUrl.COS_HUB_PUBLIC_URL;
+
+  r = runWithEnv("node", ["scripts/join-blob.mjs"], envNoHubUrl);
+  // The expected value comes from config/load-config.sh — the repo's one decider for
+  // "what does this machine's cos.env say" — never a fresh parse here: join-blob.mjs's
+  // own cosEnv() is already an unpinned third copy of that parser (a named follow-on,
+  // not fixed here — see cos-ops#33), and minting a fourth in the assertion path of the
+  // check that guards it would defeat the point. Same cleaned env as the join-blob spawn
+  // above, so a shell-exported override can't leak into the expectation either side sees.
+  const loader = runWithEnv(
+    "sh",
+    ["-c", '. config/load-config.sh >/dev/null 2>&1 && printf %s "${COS_HUB_PUBLIC_URL:-}"'],
+    envNoHubUrl,
+  );
+  // join-blob's own two normalization ops on the value under test — not a parser.
+  const cosEnvHub = loader.code === 0 ? loader.out.trim().replace(/\/$/, "") : "";
+  if (/^https?:\/\//.test(cosEnvHub)) {
+    const params = new URLSearchParams(r.out.trim().split("?")[1] ?? "");
+    check(
+      r.code === 0 && params.get("hub") === cosEnvHub,
+      `join-blob emits config/cos.env's own COS_HUB_PUBLIC_URL (${cosEnvHub}) with no CLI arg or env var`,
+    );
+  } else {
+    // Legitimately environment-dependent (CI, a fresh clone, any unconfigured machine) —
+    // not a ✓ and not a ✗: run.sh keys only on this file's exit code, so this line's only
+    // reader is a human. On a configured hub the check above genuinely asserts; the hub
+    // is the only detector for this regression.
+    console.log("  · cos.env sets no hub URL here — the cos.env-alone emission check runs on configured hubs only");
+  }
 
   if (failures > 0) {
     console.error(`gen-roles: ${failures} check(s) failed`);

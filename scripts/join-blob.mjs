@@ -12,8 +12,10 @@
 //
 // The hub URL is the `tailscale serve` MagicDNS name (BOARD_URL on a hub is localhost, so
 // the reachable URL must be supplied). Precedence: CLI arg > COS_HUB_PUBLIC_URL > auto-
-// detect via `tailscale serve status`. Prints ONE line (the blob) to stdout, or a helpful
-// error to stderr and exit 1.
+// detect via `tailscale serve status` — an explicitly-set-but-empty COS_HUB_PUBLIC_URL in
+// the environment means "treat as unset" and refuses rather than falling through (see the
+// precedence comment below). Prints ONE line (the blob) to stdout, or a helpful error to
+// stderr and exit 1.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -63,9 +65,24 @@ const env = cosEnv();
 const argUrl = process.argv[2] && process.argv[2].trim();
 // Precedence matches the board (env > cos.env), with the CLI arg first and a
 // tailscale auto-detect last: CLI arg > process.env > cos.env > tailscale.
-const hubUrl = (argUrl || process.env.COS_HUB_PUBLIC_URL || env.COS_HUB_PUBLIC_URL || detectTailscaleUrl() || "")
+// Unlike the board's `machineValue` (board/lib/cos-env.ts — `env && env.trim()`, so an
+// empty env value always falls through to cos.env), an explicitly-set-but-empty
+// process.env value HERE means "the caller says unset" and refuses instead of falling
+// through to cos.env or tailscale. Deliberate and CLI-only — it's what lets the
+// hermetic test in tests/gen-roles.mjs `[6]` simulate an unconfigured machine on a real
+// configured hub.
+const hubUrl = (
+  argUrl ||
+  ("COS_HUB_PUBLIC_URL" in process.env
+    ? process.env.COS_HUB_PUBLIC_URL // explicitly set — "" means "the caller says unset"
+    : env.COS_HUB_PUBLIC_URL || detectTailscaleUrl()) ||
+  ""
+)
   .trim()
   .replace(/\/$/, "");
+// backupRef stays truthiness-based (unlike hubUrl above): nothing needs empty-means-
+// unset semantics here, and widening the presence check would grow the blast radius for
+// no caller.
 const backupRef = (process.env.BACKUP_REPO_REF || env.BACKUP_REPO_REF || "").trim();
 
 if (!hubUrl) {
