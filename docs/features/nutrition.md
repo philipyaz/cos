@@ -338,7 +338,7 @@ inferred it.
 | `quantity` / `unit` | optional |
 | `status` | `needed` (default) \| `bought` \| `dismissed` |
 | `source` | `manual` (default) \| `plan` \| `pantry` \| `channel` |
-| `sourceRef` | a SOFT ref (`MEAL-<n>` \| `PANTRY-<n>` \| `M-<n>`) — dangling tolerated, never validated, exactly like `MealPlanEntry.pantryItemIds` |
+| `sourceRef` | a SOFT ref (`MEAL-<n>` \| `PANTRY-<n>` \| `whatsapp:<message id>`) — dangling tolerated, never validated, exactly like `MealPlanEntry.pantryItemIds` |
 | `note` | optional |
 | `boughtAt` | server-stamped ONLY — set when `status` flips to `bought`, cleared on any other status |
 
