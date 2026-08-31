@@ -208,6 +208,13 @@ never the data: update the code (`git pull`) and restart the board.
   **New enums:** `TriageDropReason`, `TriageDecisionStatus`. The dropped:promoted ratio and the
   first-time-dropped set are computed on read, never persisted. Full design:
   [Triage skills](../architecture/triage-skills.md).
+- **v17 → v18 — `CalendarEvent.status` (the event lifecycle).** Adds the optional
+  `status?: "confirmed" | "tentative" | "cancelled"`; absent ≡ `confirmed` so every pre-v18 event
+  keeps its meaning; no backfill (`migrate()` is a no-op — the `events[]` array rides through
+  verbatim). A `"cancelled"` event stops blocking `planPlacement` (and the starving-obligations
+  allocation) and renders struck-through; `"tentative"` still blocks. **Purely additive +
+  back-compatible:** old v17 files read unchanged. **New enum:** `EventStatus`. Full design:
+  [Calendar](../features/calendar.md), [Placement](../features/placement.md#the-engine-contract).
 
 !!! note "Payload-internal keys never bump the schema"
     Some records carry a `payload` the board stores **verbatim** (a `CoachingArtifact`'s training plan,

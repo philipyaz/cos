@@ -67,6 +67,15 @@ test("eventsForDay — empty for a day with no events", () => {
   assert.deepEqual(eventsForDay(events, "2026-06-20"), []);
 });
 
+test("eventsForDay — a cancelled event is NOT hidden (cos-ops#47 AC 6) — visibility is not the busy set", () => {
+  const events = [evt({ id: "EVT-CANCELLED", date: "2026-06-15", allDay: false, startTime: "10:00", status: "cancelled" })];
+  assert.deepEqual(
+    eventsForDay(events, "2026-06-15").map((e) => e.id),
+    ["EVT-CANCELLED"],
+    "a cancelled event stays visible in the day projection — only planPlacement/starvingObligations exclude it",
+  );
+});
+
 // ── eventsByDateRange ───────────────────────────────────────────────────────────
 test("eventsByDateRange — half-open [start, end): start inclusive, end exclusive", () => {
   const events = [

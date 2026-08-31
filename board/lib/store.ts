@@ -52,8 +52,9 @@ import type {
   Actor,
   TriageDecision,
   TriageDropReason,
+  EventStatus,
 } from "./types";
-import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, VALID_ARTIFACT_SOURCE, VALID_TRAINING_STATUS, VALID_SHOPPING_CATEGORY, VALID_SHOPPING_STATUS, VALID_SHOPPING_SOURCE, caseKind } from "./types";
+import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_EVENT_STATUS, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, VALID_ARTIFACT_SOURCE, VALID_TRAINING_STATUS, VALID_SHOPPING_CATEGORY, VALID_SHOPPING_STATUS, VALID_SHOPPING_SOURCE, caseKind } from "./types";
 import {
   hierarchyViolation,
   rollupFor,
@@ -224,6 +225,9 @@ const nowISO = (): string => new Date().toISOString();
 // v17 carries db.triageDecisions forward when it is an array (the per-sender mail-triage
 // editorial-drop decision record — mirrors db.healthEntries/db.coachingArtifacts). No
 // backfill: nothing to backfill, since no drop was ever recorded before this version.
+// v18 (CalendarEvent.status, the event lifecycle) is a no-op here too — the optional rides
+// through the events[] array verbatim, exactly like domain (v4): absent stays absent, present
+// rides through unchanged.
 export function migrate(raw: unknown): DBShape {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
@@ -917,6 +921,9 @@ export function applyEventUpdate(eventRec: CalendarEvent, patch: Record<string, 
   if ("caseId" in patch) eventRec.caseId = toOptionalString(patch.caseId); // null/"" clears the link
   if ("domain" in patch && VALID_DOMAIN.includes(patch.domain as CaseDomain)) {
     eventRec.domain = patch.domain as CaseDomain;
+  }
+  if ("status" in patch && VALID_EVENT_STATUS.includes(patch.status as EventStatus)) {
+    eventRec.status = patch.status as EventStatus;
   }
   eventRec.updatedAt = nowISO();
   return eventRec;

@@ -165,6 +165,27 @@ test("planPlacement: an all-day event never blocks placement", () => {
   assert.equal((ops[0] as { startTime: string }).startTime, "09:00");
 });
 
+// ── cos-ops#47 — a cancelled event frees the busy set; tentative still blocks ──
+
+test("planPlacement: a slot occupied ONLY by a cancelled event is free", () => {
+  const ops = planPlacement({
+    requests: [req({ key: "1", date: "2026-02-02", durationMin: 60, windows: [{ start: "10:00", end: "11:00" }] })],
+    events: [event({ id: "EVT-1", startTime: "10:00", endTime: "11:00", status: "cancelled" })],
+    today: TODAY,
+  });
+  assert.equal(ops[0].op, "create");
+  assert.equal((ops[0] as { startTime: string }).startTime, "10:00", "a cancelled event never occupies the busy set");
+});
+
+test("planPlacement: a tentative event still blocks the same slot — a hold is a real claim on the time", () => {
+  const ops = planPlacement({
+    requests: [req({ key: "1", date: "2026-02-02", durationMin: 60, windows: [{ start: "10:00", end: "11:00" }] })],
+    events: [event({ id: "EVT-1", startTime: "10:00", endTime: "11:00", status: "tentative" })],
+    today: TODAY,
+  });
+  assert.deepEqual(ops, [{ op: "skip", key: "1", date: "2026-02-02", reason: "no_free_slot" }]);
+});
+
 // ── ops#25 — the working-hours policy (2026-02-02 is a Monday; 2026-02-07/08 are Sat/Sun) ──
 
 test("planPlacement: no policy at all means NO working-hours protection — additive-only", () => {

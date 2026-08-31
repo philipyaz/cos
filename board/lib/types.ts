@@ -154,7 +154,14 @@ export const VALID_BIOLOGICAL_SEX: BiologicalSex[] = ["male", "female"];
 // /reminders-review's first-time-senders digest reviews. Purely additive; old files read unchanged
 // (triageDecisions defaults to []). migrate() carries it forward when present — no backfill, since
 // no drop was ever recorded before this version. New enums: TriageDropReason, TriageDecisionStatus.
-export const SCHEMA_VERSION = 17;
+// v18 adds CalendarEvent.status ("confirmed" | "tentative" | "cancelled", the event lifecycle) —
+// additive optional, read-compatible; migrate() is a no-op for it (rides through the events[]
+// array verbatim, exactly as domain (v4) did). ABSENT status ≡ "confirmed", so every pre-v18
+// event keeps exactly today's meaning and no data backfill runs. A "cancelled" event is excluded
+// from planPlacement's busy set (board/lib/placement.ts) and from starvingObligations' allocation
+// (board/lib/selectors.ts); it stays visible everywhere else (the day list, eventsForDay). New
+// enum: EventStatus.
+export const SCHEMA_VERSION = 18;
 
 // Who performed a mutation — drives activity attribution + note authorship.
 export type Actor = "human" | "agent" | "system";
@@ -331,6 +338,8 @@ export interface MessageRecord {
   context?: string; // one-sentence context shown in the unanswered-messages view (what they're asking). Additive optional, read-compatible like outbound/reminderId/url.
 }
 
+export type EventStatus = "confirmed" | "tentative" | "cancelled";
+
 export interface CalendarEvent {
   id: string; // "EVT-<n>" minted like CASE-<n>/M-<n> ids
   title: string; // required, non-empty
@@ -342,6 +351,7 @@ export interface CalendarEvent {
   location?: string;
   caseId?: string; // OPTIONAL link to a CaseRecord — the SINGLE SOURCE OF TRUTH for the case<->event link
   domain?: CaseDomain; // "work" | "life" — optional/advisory (may mirror the linked case domain)
+  status?: EventStatus; // lifecycle (RFC 5545 §3.8.1.11 / Google Calendar values, lowercase); ABSENT ≡ "confirmed". "cancelled" stays on the calendar as the record — only deletion destroys it.
   createdAt: string;
   updatedAt: string;
 }
@@ -1151,6 +1161,7 @@ export const VALID_CASE_STATUS: CaseStatus[] = ["urgent", "todo", "in_progress",
 export const VALID_TASK_STATUS: TaskStatus[] = ["open", "in_progress", "blocked", "done"];
 export const VALID_MESSAGE_SOURCE: MessageSource[] = ["gmail", "whatsapp", "jira", "agent", "client", "system"];
 export const VALID_DOMAIN: CaseDomain[] = ["work", "life"];
+export const VALID_EVENT_STATUS: EventStatus[] = ["confirmed", "tentative", "cancelled"];
 export const VALID_REMINDER_STATUS: ReminderStatus[] = ["open", "done", "dismissed"];
 export const VALID_PRIORITY: Priority[] = ["P0", "P1", "P2", "P3"];
 export const VALID_ACTOR: Actor[] = ["human", "agent", "system"];

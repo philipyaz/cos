@@ -49,6 +49,10 @@
 #      mail-to-board's drop region (which also records BEFORE it watermarks) and
 #      reminders-review's digest STEP — a parser-grade gate rides an existing id
 #      rather than minting a new one.
+#      [2f] also rides event-status-consumers.mjs (cos-ops#47) — CalendarEvent.status is
+#      the unit's whole product change: server.mjs's own EVENT_STATUS const must back
+#      UPDATE_EVENT_TOOL's enum, and mail-to-board + BOTH whatsapp-triage twins must
+#      instruct status:"cancelled" over delete_event.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -627,6 +631,25 @@ else
   echo "triage-decisions-consumers: FAIL"
   fail=1
   fail_reasons="${fail_reasons} triage-decisions-consumers"
+fi
+
+# --- 2f. event-status-consumers (hard gate; rides [2f] — cos-ops#47) --------
+# The ADR 0014 gate: CalendarEvent.status is this unit's whole product change, and nothing
+# else gates it. server.mjs's own EVENT_STATUS const (ground truth, never a manifest) must
+# back UPDATE_EVENT_TOOL's enum, and mail-to-board's ops-mapping section + BOTH whatsapp-triage
+# twins (the STEP 4 ops table and the recap bullet) must each name update_event and a
+# wrap-tolerant status:"cancelled" — mirroring triage-decisions-consumers.mjs's section-scoping
+# (a whole-file grep is permanently green once the token lands anywhere). Rides this existing
+# [2f] id rather than minting a new one (cos-ops#21's direction; #94/#98/#41 do the same).
+# Static, read-only, node-only.
+echo
+echo "--- [2f] event-status-consumers (calendar status field + tool contract) ---"
+if node "${SCRIPT_DIR}/event-status-consumers.mjs"; then
+  echo "event-status-consumers: PASS"
+else
+  echo "event-status-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} event-status-consumers"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --

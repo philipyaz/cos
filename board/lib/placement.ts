@@ -158,7 +158,7 @@ function freeGaps(window: CandidateWindow, busy: Interval[]): Interval[] {
 // same evening never stack (the second sees the first's freshly-placed interval).
 export function planPlacement(input: {
   requests: PlacementRequest[];
-  events: CalendarEvent[]; // the board's own events; only TIMED ones (!allDay && startTime) are busy
+  events: CalendarEvent[]; // the board's own events; only TIMED ones (!allDay && startTime) are busy, and never a cancelled one
   busyWindows?: BusyWindow[]; // caller-supplied, used-and-discarded; default [] === today's board-only behaviour
   policy?: PlacementPolicy; // the working-hours preference; absent === today's behaviour (additive)
   today: string; // "YYYY-MM-DD" — the injected clock
@@ -172,8 +172,12 @@ export function planPlacement(input: {
   const busyFor = (date: string): Interval[] => {
     let busy = busyByDate.get(date);
     if (!busy) {
+      // A cancelled event never blocks — it stays on the calendar as the record but is no
+      // longer a real claim on the time. A tentative one (and an absent status ≡ confirmed)
+      // still does: a hold is a real claim on the time — a one-word reversal here if Philip
+      // ever wants holds to read as free.
       const fromEvents = eventsForDay(input.events, date)
-        .filter((e) => !e.allDay && e.startTime)
+        .filter((e) => !e.allDay && e.startTime && e.status !== "cancelled")
         .map((e) => {
           const start = toMinutes(e.startTime as string);
           const end = e.endTime ? toMinutes(e.endTime) : start + DEFAULT_EVENT_DURATION_MIN;

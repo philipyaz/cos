@@ -27,6 +27,9 @@
 //   description / location       optional
 //   caseId    optional link to a CaseRecord (the case<->event link)
 //   domain    "work" | "life"    optional/advisory (may mirror the linked case)
+//   status    confirmed|tentative|cancelled (optional; absent ≡ confirmed) — "cancelled" stays
+//             on the calendar as the record and stops blocking placement; only delete_event
+//             destroys it
 //   createdAt / updatedAt        ISO
 //
 // Config: CRM_BASE_URL (default http://localhost:3000)
@@ -45,8 +48,11 @@ import { err, text, str, start, baseUrl, makeBoardApi } from "../../packages/mcp
 const CRM_BASE_URL = baseUrl("CRM_BASE_URL", "http://localhost:3000");
 
 // In lockstep with VALID_DOMAIN in board/lib/types.ts. No new enums — domain
-// reuses CaseDomain. (There is no event-status enum; the model is intentionally basic.)
+// reuses CaseDomain.
 const CASE_DOMAIN = ["work", "life"];
+
+// In lockstep with VALID_EVENT_STATUS in board/lib/types.ts (RFC 5545 STATUS, lowercase).
+const EVENT_STATUS = ["confirmed", "tentative", "cancelled"];
 
 // The house guardrail, baked into the create/link tool descriptions so the agent
 // prefers rolling an appointment up under an existing case.
@@ -195,9 +201,12 @@ const UPDATE_EVENT_TOOL = {
   name: "update_event",
   description:
     "Update a calendar event's fields — `PATCH /api/events/{id}`. Pass only the fields you want to " +
-    "change (any of: title, date, allDay, startTime, endTime, description, location, domain, caseId). " +
-    "Set `caseId` to (re)link the appointment to a case, or pass `caseId: null` to UNLINK it (leave it " +
-    "standalone). A non-empty caseId that doesn't reference an existing case is rejected with a 400.",
+    "change (any of: title, date, allDay, startTime, endTime, description, location, domain, caseId, " +
+    "status). Set `caseId` to (re)link the appointment to a case, or pass `caseId: null` to UNLINK it " +
+    "(leave it standalone). A non-empty caseId that doesn't reference an existing case is rejected " +
+    "with a 400. To call off a meeting, set `status: 'cancelled'` — the event STAYS on the calendar " +
+    "(renders struck-through) and stops blocking placement; NEVER delete_event to cancel. " +
+    "`status: 'tentative'` marks a hold and still blocks placement.",
   inputSchema: {
     type: "object",
     properties: {
@@ -216,6 +225,14 @@ const UPDATE_EVENT_TOOL = {
           "(Re)link this appointment to a case id (e.g. 'CASE-2'); pass null to UNLINK it from any " +
           "case. An unknown caseId is rejected with a 400.",
       },
+      status: {
+        type: "string",
+        enum: EVENT_STATUS,
+        description:
+          "Event lifecycle: 'cancelled' = not happening (kept on the calendar as the record; stops " +
+          "blocking placement — prefer this over delete_event); 'tentative' = a hold (still blocks " +
+          "placement); 'confirmed' = a normal commitment (the default when absent).",
+      },
     },
     required: ["id"],
   },
@@ -226,7 +243,8 @@ const DELETE_EVENT_TOOL = {
   description:
     "Delete a calendar event by id (e.g. 'EVT-1') — `DELETE /api/events/{id}`. Events have no soft-" +
     "archive; this hard-removes the event. If it was linked to a case, that link is dropped (the case " +
-    "itself is untouched).",
+    "itself is untouched). For a meeting that is merely cancelled, prefer `update_event` with " +
+    "`status: 'cancelled'` — deletion destroys the scheduling record.",
   inputSchema: {
     type: "object",
     properties: {
@@ -271,7 +289,7 @@ const TOOLS = [
 ];
 
 const server = new Server(
-  { name: "calendar", version: "1.1.0" },
+  { name: "calendar", version: "1.2.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -285,11 +303,14 @@ const api = makeBoardApi("calendar", CRM_BASE_URL);
 const isISODate = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 const isHHMM = (v) => typeof v === "string" && /^\d{2}:\d{2}$/.test(v);
 
-// One-line render of an event for list/summary output.
+// One-line render of an event for list/summary output. The status marker is compact and
+// appears only for the two non-default states — an absent/confirmed status renders nothing,
+// matching "absent ≡ confirmed" everywhere else.
 function eventLine(e) {
   const when = e.allDay ? "all-day" : [e.startTime, e.endTime].filter(Boolean).join("–") || "(no time)";
   return (
     `  - ${e.id}  ${e.date} ${when}  ${e.title}` +
+    `${e.status && e.status !== "confirmed" ? ` [${e.status}]` : ""}` +
     `${e.domain ? ` [${e.domain}]` : ""}${e.caseId ? `  → ${e.caseId}` : ""}`
   );
 }
@@ -335,6 +356,7 @@ async function handleGetEvent(args) {
     const when = [e.startTime, e.endTime].filter(Boolean).join("–");
     lines.push(`Time: ${when || "(no time set)"}`);
   }
+  if (e.status) lines.push(`Status: ${e.status}`);
   if (e.domain) lines.push(`Domain: ${e.domain}`);
   if (e.location) lines.push(`Location: ${e.location}`);
   if (e.description) lines.push(`Description: ${e.description}`);
@@ -421,10 +443,13 @@ async function handleUpdateEvent(args) {
   if (args.domain !== undefined && !CASE_DOMAIN.includes(args.domain)) {
     return err(`'domain' must be one of: ${CASE_DOMAIN.join(", ")}.`);
   }
+  if (args.status !== undefined && !EVENT_STATUS.includes(args.status)) {
+    return err(`'status' must be one of: ${EVENT_STATUS.join(", ")}.`);
+  }
 
   const payload = {};
   if (typeof args.allDay === "boolean") payload.allDay = args.allDay;
-  for (const k of ["title", "date", "startTime", "endTime", "description", "location", "domain"]) {
+  for (const k of ["title", "date", "startTime", "endTime", "description", "location", "domain", "status"]) {
     if (typeof args[k] === "string") payload[k] = args[k];
   }
   // null is a real update (unlink), so distinguish it from an absent caseId.
@@ -443,6 +468,7 @@ async function handleUpdateEvent(args) {
   return text(
     `Updated ${e.id} (${changed})\n` +
       `Date: ${e.date} ${when}\n` +
+      (e.status ? `Status: ${e.status}\n` : "") +
       (e.caseId ? `Linked case: ${e.caseId}` : `Linked case: (standalone)`)
   );
 }
@@ -510,5 +536,5 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 await start(
   server,
   new StdioServerTransport(),
-  `calendar MCP server v1.1 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
+  `calendar MCP server v1.2 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
 );

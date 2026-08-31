@@ -19,6 +19,7 @@ const DEFAULT_DB = path.resolve(__dirname, "..", "board", "data", "cases.json");
 
 // --- contract constants (kept in lockstep with board/lib/types.ts) ----------
 const VALID_DOMAINS = new Set(["work", "life"]);
+const VALID_EVENT_STATUS = new Set(["confirmed", "tentative", "cancelled"]); // v18 — kept in lockstep with board/lib/types.ts VALID_EVENT_STATUS
 const VALID_CASE_STATUS = new Set([
   "urgent",
   "todo",
@@ -36,7 +37,7 @@ const VALID_LABEL_COLORS = new Set([
   "sky", "blue", "indigo", "violet", "fuchsia", "pink",
 ]); // labels — kept in lockstep with board/lib/types.ts VALID_LABEL_COLORS
 const VALID_REMINDER_STATUS = new Set(["open", "done", "dismissed"]); // reminders (v5) — board/lib/types.ts VALID_REMINDER_STATUS
-const SCHEMA_VERSION = 17; // board/lib/types.ts SCHEMA_VERSION (v12 fitness data; v13 fitness coaching; v14 "body" add-on db.bodyProfile/db.bodyObjective + nutrition db.dietProfile/db.nutritionTargets, db.weights re-homed to body, db.nutritionGoal dropped on next write; v15 adds CaseRecord.vaultIngestedAt, the per-case vault-ingest receipt; v16 adds db.shoppingItems, the nutrition shopping list; v17 adds db.triageDecisions, the per-sender mail-triage editorial-drop decision record)
+const SCHEMA_VERSION = 18; // board/lib/types.ts SCHEMA_VERSION (v12 fitness data; v13 fitness coaching; v14 "body" add-on db.bodyProfile/db.bodyObjective + nutrition db.dietProfile/db.nutritionTargets, db.weights re-homed to body, db.nutritionGoal dropped on next write; v15 adds CaseRecord.vaultIngestedAt, the per-case vault-ingest receipt; v16 adds db.shoppingItems, the nutrition shopping list; v17 adds db.triageDecisions, the per-sender mail-triage editorial-drop decision record; v18 adds CalendarEvent.status, the event lifecycle — confirmed|tentative|cancelled, absent ≡ confirmed)
 const REMINDER_TASK_ID_RE = (reminderId) =>
   new RegExp(`^${reminderId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-T\\d+$`); // reminder task ids (v6): REM-<n>-T<k>
 const CASE_ID_RE = /^CASE-\d+$/;
@@ -587,6 +588,10 @@ if (Array.isArray(db.events)) {
     // domain — work|life when present (reuses CaseDomain / VALID_DOMAIN)
     if (e?.domain !== undefined && !VALID_DOMAINS.has(e.domain))
       fail("calendar events (v4)", `${where}: invalid domain '${e.domain}' (expected work|life)`);
+
+    // status — confirmed|tentative|cancelled when present (v18); absent ≡ confirmed
+    if (e?.status !== undefined && !VALID_EVENT_STATUS.has(e.status))
+      fail("calendar events (v4)", `${where}: invalid status '${e.status}' (expected confirmed|tentative|cancelled)`);
 
     // caseId — when present, references an existing case (the link source of truth)
     if (e?.caseId !== undefined && e?.caseId !== null) {

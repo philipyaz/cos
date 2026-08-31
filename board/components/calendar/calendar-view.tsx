@@ -10,7 +10,10 @@
 // mutation through the EventDrawer (board-client createEvent/updateEvent/deleteEvent).
 // Clicking an empty part of a day opens the composer prefilled to that day; clicking
 // an event chip opens the editor for it. A chip is coloured by its linked case's lane
-// when caseId is set, else by a neutral work/life tone.
+// when caseId is set, else by a neutral work/life tone. A cancelled event renders
+// struck-through/dimmed (still visible, still clickable — never hidden); a tentative
+// one renders outlined rather than filled. Status is render-only here: the drawer's
+// payload never carries it, so a human edit can't clobber an agent-set status.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -300,11 +303,23 @@ function EventChip({
       ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
       : "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100";
 
+  // Lifecycle (cos-ops#47): a cancelled event stays visible — struck-through + dimmed,
+  // never hidden — and a tentative one renders outlined rather than filled. Both remain
+  // clickable, same as a confirmed event.
+  const isCancelled = event.status === "cancelled";
+  const isTentative = event.status === "tentative";
+  const lifecycleClass = isCancelled
+    ? "line-through opacity-50"
+    : isTentative
+      ? "border border-dashed border-current bg-transparent"
+      : "";
+  const statusSuffix = isCancelled ? " (cancelled)" : isTentative ? " (tentative)" : "";
+
   return (
     <span
       role="button"
       tabIndex={0}
-      title={`${event.title}${event.location ? ` · ${event.location}` : ""}`}
+      title={`${event.title}${event.location ? ` · ${event.location}` : ""}${statusSuffix}`}
       onClick={(e) => {
         e.stopPropagation();
         onOpen();
@@ -316,7 +331,7 @@ function EventChip({
           onOpen();
         }
       }}
-      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] leading-tight truncate cursor-pointer hover:brightness-95 transition ${tone}`}
+      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] leading-tight truncate cursor-pointer hover:brightness-95 transition ${tone} ${lifecycleClass}`}
     >
       <span
         className={`w-1.5 h-1.5 rounded-full shrink-0 ${lane ? lane.dotClass : "bg-current opacity-60"}`}

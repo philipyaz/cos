@@ -11,7 +11,7 @@ import {
   VersionConflictError,
   BadRequestError,
 } from "@/lib/store";
-import { VALID_DOMAIN } from "@/lib/types";
+import { VALID_DOMAIN, VALID_EVENT_STATUS } from "@/lib/types";
 import { resolveActor, storeErrorToResponse, isISODate, isHHMM } from "@/lib/route-helpers";
 
 export const dynamic = "force-dynamic";
@@ -64,6 +64,12 @@ export async function PATCH(
       { status: 400 }
     );
   }
+  if ("status" in body && body.status != null && !VALID_EVENT_STATUS.includes(body.status)) {
+    return NextResponse.json(
+      { error: `'status' must be one of: ${VALID_EVENT_STATUS.join(", ")}.` },
+      { status: 400 }
+    );
+  }
   if ("expectedVersion" in body && typeof body.expectedVersion !== "number") {
     return NextResponse.json({ error: "'expectedVersion' must be a number." }, { status: 400 });
   }
@@ -94,13 +100,17 @@ export async function PATCH(
         }
       }
 
-      // Snapshot the old link BEFORE the patch so we can audit a relink on both sides.
+      // Snapshot the old link + status BEFORE the patch so we can audit a relink and a
+      // status transition on both sides.
       const prevCaseId = rec.caseId;
+      const prevStatus = rec.status;
       applyEventUpdate(rec, body);
       const now = rec.updatedAt;
 
       // Best-effort case audit trail (mirrors message_linked/unlinked). Guarded so a
-      // missing case never breaks the event write.
+      // missing case never breaks the event write. Activity lives per-case (there is no
+      // global feed) — for a STANDALONE event the status field itself is the durable
+      // record, which is the whole point (state, not a deletion that leaves no trace).
       if (prevCaseId !== rec.caseId) {
         if (prevCaseId) {
           const prev = findCase(db, prevCaseId);
@@ -119,7 +129,16 @@ export async function PATCH(
       } else if (rec.caseId) {
         const linked = findCase(db, rec.caseId);
         if (linked) {
-          logActivity(linked, actor, "event_updated", rec.title);
+          if (rec.status !== prevStatus) {
+            logActivity(
+              linked,
+              actor,
+              "event_status_changed",
+              `${rec.title}: ${prevStatus ?? "confirmed"} → ${rec.status ?? "confirmed"}`
+            );
+          } else {
+            logActivity(linked, actor, "event_updated", rec.title);
+          }
           linked.updatedAt = now;
         }
       }

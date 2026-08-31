@@ -1,4 +1,4 @@
-# calendar MCP server (v1.1)
+# calendar MCP server (v1.2)
 
 A stdio MCP server (registry name **`calendar`**) that creates and maintains **calendar
 events / appointments** on the Cos board. Every tool wraps the board's
@@ -11,8 +11,8 @@ The UI writes are attributed to **`human`**; every write this server makes is at
 to **`agent`** (see [Actor attribution](#actor-attribution)), so the case audit trail
 (`event_linked` / `event_updated` / `event_unlinked`) records who did what.
 
-The calendar is intentionally **basic** — title, day, optional time, description, location,
-domain — and it lives **alongside** the board. The headline idea is the **link**: an event's
+The calendar model is deliberately small — title, day, optional time, description, location,
+domain, and a lifecycle status — and it lives **alongside** the board. The headline idea is the **link**: an event's
 `caseId` is the **single source of truth** for the case↔event link, so an appointment can
 **roll up under** the case it belongs to.
 
@@ -39,9 +39,9 @@ The board reads either signal and stamps the linked case's `activity[]` entry wi
 
 ## The calendar-event model
 
-Defined in `board/lib/types.ts` as `CalendarEvent` (schema v4 — purely additive over v3;
-old files still read, `events` defaults to `[]`). No new enums — `domain` reuses
-`CaseDomain` / `VALID_DOMAIN`.
+Defined in `board/lib/types.ts` as `CalendarEvent` (schema v4 — purely additive over v3; old
+files still read, `events` defaults to `[]`). `domain` reuses `CaseDomain` / `VALID_DOMAIN`;
+`status` (added later, schema v18) is its own enum, `EventStatus` / `VALID_EVENT_STATUS`.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -55,6 +55,7 @@ old files still read, `events` defaults to `[]`). No new enums — `domain` reus
 | `location` | `string?` | optional |
 | `caseId` | `string?` | **optional link to a `CaseRecord` — the single source of truth for the case↔event link** |
 | `domain` | `CaseDomain?` | `work` \| `life` — optional/advisory (may mirror the linked case's domain) |
+| `status` | `EventStatus?` | `confirmed` \| `tentative` \| `cancelled` — optional, absent ≡ `confirmed`. `cancelled` **stays** on the calendar as the record (renders struck-through) and stops blocking placement; `tentative` still blocks — only `delete_event` destroys the record |
 | `createdAt` / `updatedAt` | `string` | ISO |
 
 ## Tools
@@ -98,14 +99,19 @@ standalone). Unknown id → tool error.
 - Returns the minted `EVT-id`, the day/time (suffixed "(placed by the board)" when `place` was used),
   and whether it linked or is standalone.
 
-#### `update_event(id, [title], [date], [allDay], [startTime], [endTime], [description], [location], [domain], [caseId])`
+#### `update_event(id, [title], [date], [allDay], [startTime], [endTime], [description], [location], [domain], [caseId], [status])`
 `PATCH /api/events/{id}`. Updates fields — pass only what you want to change. `caseId` (re)links
 the appointment to a case; **`caseId: null` UNLINKS it** (leaves it standalone). A non-empty
-`caseId` that doesn't reference an existing case is rejected with a 400.
+`caseId` that doesn't reference an existing case is rejected with a 400. `status` sets the event's
+lifecycle (`confirmed` | `tentative` | `cancelled`) — **prefer `status: 'cancelled'` over
+`delete_event`** to call off a meeting: the event stays on the calendar as the record and stops
+blocking placement.
 
 #### `delete_event(id)`
 `DELETE /api/events/{id}`. Hard-removes the event (events have no soft-archive). If it was linked
-to a case, that link is dropped — the case itself is untouched.
+to a case, that link is dropped — the case itself is untouched. For a meeting that is merely
+cancelled, prefer `update_event` with `status: 'cancelled'` — deletion destroys the scheduling
+record.
 
 ### Linking sugar
 

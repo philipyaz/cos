@@ -166,6 +166,15 @@ test("(c) a linked TIMED event tomorrow suppresses the case entirely (already-al
   assert.ok(!out.some((o) => o.id === c.id));
 });
 
+test("(c) cos-ops#47 — a linked TIMED event carrying status:'cancelled' within the horizon does NOT allocate; the case still ranks", () => {
+  const c = mkCase({ priority: "P1", tasks: [mkTask()], updatedAt: iso(-40) });
+  const e = mkEvent({ caseId: c.id, date: dayOffset(TODAY, 1), startTime: "18:30", allDay: false, status: "cancelled" });
+
+  const out = starvingObligations({ ...EMPTY, cases: [c], events: [e] }, NOW);
+
+  assert.ok(out.some((o) => o.id === c.id), "a cancelled meeting is not a real allocation — the case still ranks in the feed");
+});
+
 test("(c) a timed event dated TODAY suppresses — day-granular, not HH:MM (an earlier-today block still counts)", () => {
   const c = mkCase({ updatedAt: iso(-40) });
   const e = mkEvent({ caseId: c.id, date: TODAY, startTime: "09:00", allDay: false });
@@ -224,6 +233,19 @@ test("(d) a passed-unactioned block escalates the score and outranks its no-even
   assert.ok(!entryB.passedBlock, "B (no event) carries no passedBlock");
   assert.equal(entryB.score, 10);
   assert.ok(ids(out).indexOf(a.id) < ids(out).indexOf(b.id), "A ranks above B");
+});
+
+test("(d) cos-ops#47 — a PAST linked timed event carrying status:'cancelled' does NOT create the passedBlock escalation", () => {
+  const pastDay = dayOffset(TODAY, -6);
+  const c = mkCase({ updatedAt: iso(-10) });
+  const e = mkEvent({ caseId: c.id, date: pastDay, startTime: "10:30", allDay: false, status: "cancelled" });
+
+  const out = starvingObligations({ ...EMPTY, cases: [c], events: [e] }, NOW);
+
+  const entry = out.find((o) => o.id === c.id);
+  assert.ok(entry, "present via stale-idle");
+  assert.ok(!entry.passedBlock, "a cancelled meeting never manufactures a passed-block escalation");
+  assert.equal(entry.score, 10, "no +18 escalation — the same score as the no-event twin (case B above)");
 });
 
 test("(d) touched AFTER the block's day clears the escalation (counter-case C)", () => {

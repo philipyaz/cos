@@ -57,6 +57,7 @@ export interface CalendarEvent {
   location?: string;
   caseId?: string;       // OPTIONAL link to a CaseRecord — the SINGLE SOURCE OF TRUTH for the case<->event link
   domain?: CaseDomain;   // "work" | "life" — optional/advisory (may mirror the linked case domain)
+  status?: "confirmed" | "tentative" | "cancelled"; // lifecycle; absent ≡ confirmed
   createdAt: string;     // ISO
   updatedAt: string;     // ISO
 }
@@ -131,7 +132,7 @@ on every success body.
 | `GET /api/events` | Lists events; optional `?from=&to=&caseId=&domain=` filters. `from` (inclusive) / `to` (exclusive) bound a half-open day window by ISO-day string compare; `caseId` narrows to one case's events; `domain` to `work`/`life`. No filters → **all** events. Returns `{ events, version }`. |
 | `POST /api/events` | Creates an event. `title` + `date` required; `allDay` defaults `false`; absent optionals are omitted from the record. A `caseId` is validated against an existing case **inside the lock**. On a linked create, the case's activity log gets an `event_linked` entry. → `{ event, version }`, `201`. Instead of explicit times, `place: { durationMin, windows, busyWindows?, policy? }` lets the board find the earliest free gap itself (plan-and-insert inside the same lock; `409 { reason }` when nothing fits — see [placement](placement.md#third-consumer-chase-blocks-cos-ops24)); `place` is a request parameter, never stored. |
 | `GET /api/events/[id]` | Loads one event by id. Unknown id → `404`. → `{ event, version }`. |
-| `PATCH /api/events/[id]` | Partial update of any field, incl. **(re)linking via `caseId`**; `caseId: null`/`""` **unlinks** (leaves it standalone). Optional `expectedVersion` optimistic guard (`≠ current → 409`). Logs `event_linked`/`event_unlinked`/`event_updated` on the affected case(s). → `{ event, version }`. |
+| `PATCH /api/events/[id]` | Partial update of any field, incl. **(re)linking via `caseId`** and the lifecycle `status` (`confirmed`\|`tentative`\|`cancelled`). `caseId: null`/`""` **unlinks** (leaves it standalone). Optional `expectedVersion` optimistic guard (`≠ current → 409`). Logs `event_linked`/`event_unlinked`/`event_updated` on the affected case(s), or `event_status_changed` naming the transition when `status` itself changed. → `{ event, version }`. |
 | `DELETE /api/events/[id]` | **Hard-removes** the event (events have **no soft-archive**). If it was linked, the link is dropped and the case logs `event_unlinked`; the case itself is untouched. → `{ ok: true, version }`. |
 
 **The case read now surfaces its events.** `GET /api/cases/[id]` returns a new `events` array
@@ -158,7 +159,7 @@ stays honest.
 | `create_event(title, date, [allDay], [startTime], [endTime], [place], [description], [location], [caseId], [domain])` | `POST /api/events`. Mints an `EVT-` id; **prefer setting `caseId`** to roll the event up under a case. Unknown `caseId` → tool error (400). `place` (durationMin + candidate windows, optional busyWindows / policy) replaces explicit times — the board picks the slot; a `no_free_slot` / `outside_working_hours` 409 surfaces as a tool error with the reason. |
 | `list_events([from], [to], [caseId], [domain])` | `GET /api/events`. One line per event (day · time-or-`all-day` · title · linked `caseId`), chronological. Read-only. |
 | `get_event(id)` | `GET /api/events/{id}`. Renders title, date, time (or **all-day**), description, location, domain, and the linked `caseId` (or that it's standalone). |
-| `update_event(id, …)` | `PATCH /api/events/{id}`. Pass only changed fields. `caseId` (re)links; **`caseId: null` unlinks**. |
+| `update_event(id, …)` | `PATCH /api/events/{id}`. Pass only changed fields. `caseId` (re)links; **`caseId: null` unlinks**. `status: "cancelled"` calls off a meeting — the event **stays** on the calendar as the record and stops blocking placement; **prefer this over `delete_event`**. `status: "tentative"` marks a hold (still blocks placement). |
 | `delete_event(id)` | `DELETE /api/events/{id}`. Hard-removes the event; the linked case is untouched. |
 | `link_event(id, [caseId])` | `PATCH /api/events/{id} { caseId }`. Sugar for the common roll-up: pass a `caseId` to link, `null`/empty (or omit) to unlink. |
 
@@ -201,6 +202,14 @@ verb.** Clicking a day to compose, editing an event in the drawer, dragging the 
 attach an appointment, and deleting a chip all resolve to the **same `/api/events` routes** the
 agent's `create_event`, `update_event`, `link_event`, and `delete_event` call. There is no
 human-only or agent-only way to make, move, or link an appointment — one mutation path, two faces.
+
+**One deliberate exception: the lifecycle `status`.** A cancellation is a fact *reported by a
+channel* (an email, a WhatsApp message calling off a meeting), not a gesture the calendar grid
+needs — so `status` is the first field that is agent/API-only by design: the UI **renders** it
+(struck-through/dimmed for `cancelled`, outlined for `tentative`) but has no control that
+**writes** it — the event drawer's save payload never carries `status`, so a human edit can never
+clobber an agent-set one. Every other field keeps the parity rule above.
+
 And like every board write, an event mutation flows through the single atomic, version-guarded
 `mutate()` store path, with the linked case's activity log recording who did it
-(`event_linked` / `event_updated` / `event_unlinked`, `human` vs `agent`).
+(`event_linked` / `event_updated` / `event_unlinked` / `event_status_changed`, `human` vs `agent`).

@@ -22,7 +22,7 @@ for a deterministic engine: pure engine + thin route + MCP tool + api test + uni
 ```ts
 planPlacement({
   requests: PlacementRequest[],   // things that want a slot, in the order to place them
-  events: CalendarEvent[],        // the board's own db.events — timed ones are busy
+  events: CalendarEvent[],        // the board's own db.events — timed, non-cancelled ones are busy
   busyWindows?: BusyWindow[],     // caller-supplied busy times — see "The busy-set input" below
   policy?: PlacementPolicy,       // the working-hours preference — see "Working hours" below
   today: string,                  // "YYYY-MM-DD" — the injected clock
@@ -50,6 +50,10 @@ Five rules, each a unit-test case in
    *with* a receipt still gets its content `update` — the event is the record of the plan).
 3. **The busy set** per date is the board's own timed events (`!allDay && startTime`, a missing
    `endTime` defaulting to +60 minutes) **unioned with** the caller's `busyWindows` for that date.
+   The busy set excludes any event whose `status` is `"cancelled"` — a cancelled meeting stays on
+   the calendar as the record but is no longer a real claim on the time. A `"tentative"` hold
+   **still blocks** (a hold is a real claim on the time) — a one-word reversal in `placement.ts`
+   if holds should ever read as free.
 4. **Earliest fit, in preference order.** The engine walks `windows` in the order given and takes
    the first gap, in the first window, that fits — never falling back outside the given windows.
 5. **Same-call creates stack.** A `create` earlier in one `planPlacement` call becomes busy for

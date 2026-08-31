@@ -23,6 +23,16 @@
 //                                   window-shape 400s. Every assertion runs against a day
 //                                   PROVEN clean first (GET'd empty), never a hardcoded
 //                                   date — the live store is not empty.
+//   • status (cos-ops#47)          → PATCH accepts confirmed/tentative/cancelled and
+//                                   rejects anything else (400); it round-trips through
+//                                   a re-GET and the list; a cancelled event's own slot
+//                                   is offered again by `place` — engine-through-route,
+//                                   end-to-end; and a stdio JSON-RPC round trip against
+//                                   the calendar MCP server proves update_event/get_event/
+//                                   list_events all surface the value (never just that
+//                                   something changed) and pre-validate a bad status
+//                                   before the HTTP hop. The MCP sub-section degrades to
+//                                   a SKIP (not a failure) when its deps aren't installed.
 //
 // It snapshots board/data/cases.json first and restores it in a `finally`, so the
 // live board is left EXACTLY as found (net-zero) — db.events lives in cases.json
@@ -32,6 +42,7 @@
 //
 // Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
 import { promises as fs } from "node:fs";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,6 +50,7 @@ const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DATA_FILE =
   process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const CALENDAR_SERVER = path.join(HERE, "..", "mcp", "calendar-server", "server.mjs");
 
 // --- tiny check harness ------------------------------------------------------
 let failures = 0;
@@ -75,6 +87,66 @@ const DELETE = (p) => api("DELETE", p);
 // all calendar events currently on the board
 const listEvents = async () => (await GET("/api/events")).body.events || [];
 const eventIds = (events) => new Set(events.map((e) => e.id));
+
+// --- stdio JSON-RPC client (lifted verbatim from tests/api-vault.mjs — same framing) --------
+// Speaks newline-delimited JSON-RPC over the child's stdin/stdout, exactly like the calendar
+// MCP's own StdioServerTransport frames it: one JSON object per line on stdout; the server's
+// ready banner + logs go to stderr, so stdout is a clean JSON-RPC channel.
+function makeClient(child) {
+  let nextId = 1;
+  const pending = new Map();
+  let buf = "";
+
+  child.stdout.on("data", (chunk) => {
+    buf += chunk.toString("utf8");
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let msg;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        continue; // ignore any non-JSON line on stdout
+      }
+      if (msg.id !== undefined && pending.has(msg.id)) {
+        const { resolve, reject } = pending.get(msg.id);
+        pending.delete(msg.id);
+        if (msg.error) reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+        else resolve(msg.result);
+      }
+    }
+  });
+
+  const request = (method, params) => {
+    const id = nextId++;
+    const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      child.stdin.write(payload);
+      // Per-request guard so a hung server can't wedge the suite.
+      setTimeout(() => {
+        if (pending.has(id)) {
+          pending.delete(id);
+          reject(new Error(`timed out waiting for response to ${method}`));
+        }
+      }, 15000);
+    });
+  };
+
+  const notify = (method, params) =>
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n");
+
+  return { request, notify };
+}
+
+// Pull the flat text out of an MCP tool result's content array.
+const resultText = (r) =>
+  (r?.content || [])
+    .filter((c) => c && c.type === "text")
+    .map((c) => c.text)
+    .join("\n");
 
 const EVT_ID_RE = /^EVT-\d+$/;
 
@@ -161,6 +233,38 @@ async function main() {
     const reread = (await GET(`/api/events/${encodeURIComponent(evtId)}`)).body.event;
     check(reread?.title === newTitle, "re-GET shows the persisted new title");
     check(reread?.description === newDesc, "re-GET shows the persisted new description");
+
+    // ----------------------------------------------------------------------
+    // PATCH status (cos-ops#47) → 200, persisted, round-trips through the list
+    // ----------------------------------------------------------------------
+    const patchedTentative = await PATCH(`/api/events/${encodeURIComponent(evtId)}`, {
+      status: "tentative",
+    });
+    check(patchedTentative.status === 200, `PATCH { status: "tentative" } → 200 (got ${patchedTentative.status})`);
+    check(patchedTentative.body.event?.status === "tentative", "PATCH response reflects status:tentative");
+    const rereadTentative = (await GET(`/api/events/${encodeURIComponent(evtId)}`)).body.event;
+    check(rereadTentative?.status === "tentative", "re-GET shows the persisted status:tentative");
+    const listedTentative = await GET("/api/events");
+    check(
+      (listedTentative.body.events || []).find((e) => e.id === evtId)?.status === "tentative",
+      "GET /api/events list carries status:tentative on that id (raw passthrough)",
+    );
+
+    const patchedCancelled = await PATCH(`/api/events/${encodeURIComponent(evtId)}`, {
+      status: "cancelled",
+    });
+    check(patchedCancelled.status === 200, `PATCH { status: "cancelled" } → 200 (got ${patchedCancelled.status})`);
+    const rereadCancelled = (await GET(`/api/events/${encodeURIComponent(evtId)}`)).body.event;
+    check(rereadCancelled?.status === "cancelled", "re-GET shows the persisted status:cancelled");
+
+    const badStatus = await PATCH(`/api/events/${encodeURIComponent(evtId)}`, {
+      status: "nonsense",
+    });
+    check(badStatus.status === 400, `PATCH { status: "nonsense" } → 400 (got ${badStatus.status})`);
+    check(
+      /status/i.test(badStatus.body.error || ""),
+      `the bad-status error mentions 'status' ("${badStatus.body.error}")`,
+    );
 
     // ----------------------------------------------------------------------
     // link flow → create an event with caseId on a REAL existing case
@@ -396,9 +500,143 @@ async function main() {
     });
     check(badWindow.status === 400, `place: window start >= end → 400 (got ${badWindow.status})`);
 
+    // -- 7. cos-ops#47 — a cancelled event's slot is offered again: engine-through-route,
+    // end-to-end. A fresh clean weekday so this is independent of the busy-set left by the
+    // steps above. -------------------------------------------------------------------------
+    const cleanDay3 = await findCleanWeekday(addDaysISO(cleanDay2, 1));
+    const cancelSeed = await POST("/api/events", {
+      title: `place-cancel-seed ${marker}`,
+      date: cleanDay3,
+      allDay: false,
+      startTime: "10:00",
+      endTime: "11:00",
+    });
+    check(cancelSeed.status === 201, `place: seed a 10:00-11:00 event to cancel → 201 (got ${cancelSeed.status})`);
+    const cancelSeedEvtId = cancelSeed.body.event?.id;
+    const cancelPatch = await PATCH(`/api/events/${encodeURIComponent(cancelSeedEvtId)}`, {
+      status: "cancelled",
+    });
+    check(cancelPatch.status === 200, `place: cancel the seed → 200 (got ${cancelPatch.status})`);
+    const placedOverCancelled = await POST("/api/events", {
+      title: `place-over-cancelled ${marker}`,
+      date: cleanDay3,
+      place: { durationMin: 60, windows: [{ start: "10:00", end: "11:00" }] },
+    });
+    check(
+      placedOverCancelled.status === 201,
+      `place: a cancelled meeting's slot is offered again — end-to-end (got ${placedOverCancelled.status})`,
+    );
+    check(
+      placedOverCancelled.body.event?.startTime === "10:00",
+      `place: lands at 10:00, the cancelled event's own slot (got ${placedOverCancelled.body.event?.startTime})`,
+    );
+    const placedOverCancelledEvtId = placedOverCancelled.body.event?.id;
+
     // Cleanup: the snapshot restore below backstops regardless, but tidy exit is cheap.
-    for (const id of [seededEvtId, placed1EvtId, placed2EvtId, busyPlacedEvtId].filter(Boolean)) {
+    for (const id of [
+      seededEvtId, placed1EvtId, placed2EvtId, busyPlacedEvtId, cancelSeedEvtId, placedOverCancelledEvtId,
+    ].filter(Boolean)) {
       await DELETE(`/api/events/${encodeURIComponent(id)}`);
+    }
+
+    // ----------------------------------------------------------------------
+    // MCP half (cos-ops#47) — a stdio JSON-RPC round trip against the calendar server itself,
+    // proving status renders (not just "something changed") and pre-validates before the HTTP
+    // hop. Lifted mechanics from tests/api-vault.mjs: the early-exit race degrades this WHOLE
+    // sub-section to a SKIP (not a failure) when @modelcontextprotocol/sdk isn't installed —
+    // CI always exercises it (npm ci runs at the repo root); the HTTP checks above already
+    // counted regardless. The child is killed in ITS OWN try/finally, nested inside this
+    // function's outer try — so it is reaped BEFORE the outer `finally`'s snapshot restore
+    // below ever runs, and a late child write can never land on a restored store.
+    // ----------------------------------------------------------------------
+    const mcpEnv = { ...process.env, CRM_BASE_URL: BASE };
+    const mcpChild = spawn(process.execPath, [CALENDAR_SERVER], { env: mcpEnv, stdio: ["pipe", "pipe", "pipe"] });
+    let mcpStderr = "";
+    mcpChild.stderr.on("data", (d) => (mcpStderr += d.toString("utf8")));
+    const mcpExited = new Promise((resolve) => mcpChild.on("exit", (code) => resolve(code)));
+    const mcpEarlyExit = await Promise.race([mcpExited, new Promise((r) => setTimeout(() => r(null), 2500))]);
+    if (mcpEarlyExit !== null) {
+      if (/Cannot find package|ERR_MODULE_NOT_FOUND/.test(mcpStderr)) {
+        console.log(
+          "\nSKIP (calendar MCP deps not installed — npm install at the repo root) — skipping the calendar MCP sub-section only.",
+        );
+      } else {
+        failures++;
+        console.error(`\n✗ calendar MCP server exited early (code ${mcpEarlyExit}):\n${mcpStderr}`);
+      }
+    } else {
+      const mcpClient = makeClient(mcpChild);
+      try {
+        const init = await mcpClient.request("initialize", {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "api-events-test", version: "1.0.0" },
+        });
+        check(
+          init?.serverInfo?.name === "calendar",
+          `MCP initialize → serverInfo.name === "calendar" (got '${init?.serverInfo?.name}')`,
+        );
+        mcpClient.notify("notifications/initialized", {});
+
+        const mcpSeed = await POST("/api/events", {
+          title: `mcp-status ${marker}`,
+          date: "2026-06-25",
+          allDay: false,
+          startTime: "15:00",
+          endTime: "16:00",
+        });
+        check(mcpSeed.status === 201, `MCP: seed an event over HTTP → 201 (got ${mcpSeed.status})`);
+        const mcpEvtId = mcpSeed.body.event?.id;
+
+        const mcpUpdate = await mcpClient.request("tools/call", {
+          name: "update_event",
+          arguments: { id: mcpEvtId, status: "tentative" },
+        });
+        check(mcpUpdate?.isError !== true, "MCP: update_event { status: 'tentative' } is not an error");
+        check(
+          resultText(mcpUpdate).includes("Status: tentative"),
+          `MCP: update_event's result echoes the new VALUE, "Status: tentative" (got "${resultText(mcpUpdate)}")`,
+        );
+
+        const mcpReGet = await GET(`/api/events/${encodeURIComponent(mcpEvtId)}`);
+        check(
+          mcpReGet.body.event?.status === "tentative",
+          "MCP: the HTTP re-GET shows status:tentative — the MCP write round-trips through the API",
+        );
+
+        const mcpGetEvent = await mcpClient.request("tools/call", {
+          name: "get_event",
+          arguments: { id: mcpEvtId },
+        });
+        check(
+          resultText(mcpGetEvent).includes("Status: tentative"),
+          `MCP: get_event renders "Status: tentative" (got "${resultText(mcpGetEvent)}")`,
+        );
+
+        const mcpList = await mcpClient.request("tools/call", {
+          name: "list_events",
+          arguments: { from: "2026-06-25", to: "2026-06-26" },
+        });
+        check(
+          resultText(mcpList).includes("[tentative]"),
+          `MCP: list_events carries the "[tentative]" marker on that event's line (got "${resultText(mcpList)}")`,
+        );
+
+        const mcpBadStatus = await mcpClient.request("tools/call", {
+          name: "update_event",
+          arguments: { id: mcpEvtId, status: "bogus" },
+        });
+        check(mcpBadStatus?.isError === true, "MCP: update_event { status: 'bogus' } is a tool error (pre-hop validation)");
+        check(
+          /status/i.test(resultText(mcpBadStatus)),
+          `MCP: the bad-status tool error names 'status' (got "${resultText(mcpBadStatus)}")`,
+        );
+
+        await DELETE(`/api/events/${encodeURIComponent(mcpEvtId)}`);
+      } finally {
+        mcpChild.stdin.end();
+        mcpChild.kill();
+      }
     }
   } finally {
     // Restore — leave the live board exactly as found (net-zero).
@@ -412,7 +650,8 @@ async function main() {
   }
   console.log(
     "\nPASS — v4 calendar-events API holds (create/list/filter/patch/link/validate/delete, " +
-      "place: earliest-gap/overlap/409-reasons/busyWindows-not-persisted/validation).",
+      "place: earliest-gap/overlap/409-reasons/busyWindows-not-persisted/validation, " +
+      "status: HTTP round-trip/validation/engine-through-route/MCP round-trip).",
   );
 }
 

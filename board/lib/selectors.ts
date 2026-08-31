@@ -515,8 +515,9 @@ export function starvingObligations(
     if (!isMember) continue;
 
     // Allocation: a linked TIMED event within [today, horizon] suppresses the case entirely;
-    // an all-day event never counts, past or future. Among linked timed events strictly in
-    // the past, the most recent one is a candidate for "passed unactioned" escalation.
+    // an all-day event never counts, past or future, nor a cancelled one. Among linked timed
+    // events strictly in the past, the most recent one is a candidate for "passed unactioned"
+    // escalation.
     // HONESTY NOTE: a CalendarEvent carries no origin, so "passed block" means ANY past linked
     // timed event — a chase block the lens placed OR a meeting the human linked by hand — and
     // ANY later write to the case (a mail sweep linking a thread, too) clears it. The escalation
@@ -525,7 +526,7 @@ export function starvingObligations(
     let allocated = false;
     let mostRecentPastEvent: CalendarEvent | undefined;
     for (const e of eventsByCaseId(events, c.id)) {
-      if (e.allDay || !e.startTime) continue; // deadline marker, never allocation
+      if (e.allDay || !e.startTime || e.status === "cancelled") continue; // deadline marker, never allocation — nor a cancelled meeting
       if (e.date >= today && e.date <= horizon) {
         allocated = true;
         break;

@@ -77,7 +77,7 @@ concat, so the content scanner emits them). The verb's readable label comes from
 | `create` | emerald | `created`, `task_added`, `reminder_created`, `event_created` |
 | `complete` | teal | `task_completed`, `reminder_completed` |
 | `move` | sky | `moved` |
-| `update` | amber | `updated`, `task_updated`, `event_updated`, `restored`, `merged` |
+| `update` | amber | `updated`, `task_updated`, `event_updated`, `event_status_changed`, `restored`, `merged` |
 | `link` | indigo | `message_linked`, `reminder_linked`, `event_linked` |
 | `unlink` | orange | `message_unlinked` |
 | `note` | violet | `note_added` |
