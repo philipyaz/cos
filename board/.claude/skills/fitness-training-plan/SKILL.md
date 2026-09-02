@@ -176,6 +176,24 @@ free-text `goalText` + `targetWeightKg`), optionally glance at the Nutrition add
 the easy-vs-hard balance to the energy the athlete's actually fuelling. This is a
 **soft** edge — if Nutrition is off, skip it silently (it's not a fault).
 
+### 5.5 (soft) FETCH the vault's recorded context — the `vault` MCP's `query`
+
+The system archives what it knows about the athlete — `fitness-health-data` JOB 4 pushes
+a health report INTO the vault — so read that back before authoring, instead of letting
+the plan ask for context Cos already holds. **One** synchronous call (per
+`/vault-operations` — call it once, never poll):
+
+- `query({ question: "What is recorded about the athlete's training history, injuries,
+  constraints, and recent health reports?", domain: "life" })` — fold anything material
+  (a recorded injury, a standing constraint, a pattern a past report already named) into
+  STEP 6's choices, and say so in `weekly_notes`.
+- **A vault answer is knowledge as recorded, not board state.** Verify any board claim
+  in it — especially an absence — against the `board` MCP before acting on it; the board
+  is authoritative for current state.
+- **Degrade honestly: an empty, declined, or unavailable answer never blocks the run.**
+  (A declined purely-open-work answer is expected behaviour, not a fault.) Note it in one
+  line in your run report and proceed to STEP 6 — this is a soft edge, same as STEP 5.
+
 ### 6. GENERATE the 7-day plan (in your own reasoning)
 
 Author **seven day entries**, one per calendar day of the next ISO week, honouring
@@ -301,6 +319,9 @@ the **not-medical-advice** framing.
   enums.
 - **Adapt to recovery** — read HRV / sleep / resting HR / form score into a
   `recovery_status` and let it drive the week's intensity; injury-prevention baked in.
+- **Read the vault back (STEP 5.5)** — one soft `query` for the recorded athlete context;
+  answers are knowledge-as-recorded, board claims get verified, and an empty or
+  unavailable vault never blocks the plan.
 - **Gate + mode** — `save_training_plan` 404s if the add-on is off (flip on at
   /addons). Saving one plan is low-stakes in any mode; confirm only the **bulk**
   calendar push in approval mode.
