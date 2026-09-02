@@ -56,6 +56,12 @@
 #      the STEP 4.5 section, the sweep stays read-only on the whatsapp MCP, and the
 #      nutrition-server render + call-time narration must carry the whatsapp: form —
 #      a parser-grade gate rides an existing id rather than minting a new one.
+#      [2f] also rides
+#      vault-read-consumers.mjs (cos-ops#57) — the fitness family's vault-READ loop:
+#      fitness-training-plan + fitness-weekly-review must each carry their vault-read
+#      FETCH step (the `vault` MCP `query` + the knowledge-as-recorded / degrade-honestly
+#      guardrails, section-scoped per ADR 0030) so a reword cannot silently drop the
+#      read half of the write-only-vault fix.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -669,6 +675,23 @@ else
   echo "shopping-surface: FAIL"
   fail=1
   fail_reasons="${fail_reasons} shopping-surface"
+fi
+
+# --- 2f. vault-read-consumers (hard gate; rides [2f] — cos-ops#57) ----------
+# The ADR 0014 gate for the fitness vault-READ loop (cos-ops#57 step 1): the two fitness
+# coaching skills that author from gathered context must each carry a vault-read FETCH
+# step — the `vault` MCP's `query` plus the caller-side guardrails (knowledge-as-recorded,
+# board claims verified, empty/unavailable never blocks) — section-scoped per ADR 0030.
+# Static, read-only, node-only. Rides this existing [2f] id with its own echo +
+# fail_reasons token rather than minting a new [2*] id.
+echo
+echo "--- [2f] vault-read-consumers (fitness vault-read contract) ---"
+if node "${SCRIPT_DIR}/vault-read-consumers.mjs"; then
+  echo "vault-read-consumers: PASS"
+else
+  echo "vault-read-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} vault-read-consumers"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --

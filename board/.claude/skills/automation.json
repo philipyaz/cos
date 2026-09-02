@@ -42,12 +42,12 @@
   },
   "fitness-training-plan": {
     "class": "scheduled",
-    "summary": "Authors + persists the **new week's training plan** — grounded in the athlete profile, the body goal, the recovery state and the last ~4 weeks of workouts, varied against the last few plans with progressive overload toward the goal date — upserted by ISO week.",
+    "summary": "Authors + persists the **new week's training plan** — grounded in the athlete profile, the body goal, the recovery state, the last ~4 weeks of workouts and the vault's recorded context, varied against the last few plans with progressive overload toward the goal date — upserted by ISO week.",
     "schedules": [{ "trigger": "Run /fitness-training-plan", "cadence": "weekly (Sunday evening / Monday morning)" }]
   },
   "fitness-weekly-review": {
     "class": "scheduled",
-    "summary": "The look-back over the training week — planned vs done, sleep / HRV / resting-HR trends, the daily form scores — authored into a scored review with 3–5 recommendations and a next-week focus, persisted per ISO week.",
+    "summary": "The look-back over the training week — planned vs done, sleep / HRV / resting-HR trends, the daily form scores, the vault's recorded context — authored into a scored review with 3–5 recommendations and a next-week focus, persisted per ISO week.",
     "schedules": [{ "trigger": "Run /fitness-weekly-review", "cadence": "weekly (end of week, before the new plan)" }]
   },
   "vault-operations": {

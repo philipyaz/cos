@@ -94,6 +94,21 @@ week. Use those as `from` / `to` throughout.
   just leave the `nutrition` block thin (or omit it); the review is **not** broken because
   food data is missing. Point the user at `/nutrition-chef` if they want it.
 
+### 5.5 FETCH the vault's recorded context (SOFT — the `vault` MCP's `query`)
+
+- The fitness family writes INTO the vault (`fitness-health-data` JOB 4 archives a health
+  report); read it back before judging the week. **One** synchronous call, per
+  `/vault-operations` (call it once, never poll):
+  `query({ question: "What do the recorded health reports and notes say about the
+  athlete's recent training, recovery, and constraints?", domain: "life" })`. Fold
+  anything material into the `summary` / `recommendations` — e.g. a recorded injury, or a
+  pattern a prior report already named.
+- **A vault answer is knowledge as recorded, not board state** — verify any board claim
+  in it against the `board` MCP before repeating or acting on it.
+- **Degrade honestly: an empty, declined, or unavailable answer never blocks the run** —
+  note it in one line and review from the live data alone, exactly like STEP 5's soft
+  nutrition edge.
+
 ### 6. GENERATE the review (this is YOUR judgement)
 
 Synthesise — don't dump the numbers — into the `save_weekly_review` payload:
@@ -162,5 +177,8 @@ next week's plan off this review.
   profile) and the body **trainingStatus** + weight + free-text body goal (the body MCP). No profile →
   weaker review; note it and point at **fitness-athlete-profile** + **body-profile**.
 - **Nutrition is a SOFT dep** — empty food log → thin `nutrition` block, not a fault.
+- **The vault is read, not just written (STEP 5.5)** — one soft `query` for recorded
+  context; board claims in an answer are verified, and an empty or unavailable vault
+  never blocks the review.
 - **NOT MEDICAL ADVICE** — informational estimate; defer injuries / pain / illness / abnormal
   symptoms / pregnancy / under-18 to a physician / physiotherapist / qualified coach.
