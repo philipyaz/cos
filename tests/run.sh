@@ -56,6 +56,10 @@
 #      the STEP 4.5 section, the sweep stays read-only on the whatsapp MCP, and the
 #      nutrition-server render + call-time narration must carry the whatsapp: form —
 #      a parser-grade gate rides an existing id rather than minting a new one.
+#      [2f] also rides
+#      vault-status-consumers.mjs (cos-ops#56) — the terminal ingest_status cases echo: producer
+#      marker + call-time description in mcp/vault-server/server.mjs, and vault-operations'
+#      receipt + poll-loop sections stamping FROM the echo, never from recall.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -669,6 +673,25 @@ else
   echo "shopping-surface: FAIL"
   fail=1
   fail_reasons="${fail_reasons} shopping-surface"
+fi
+
+# --- 2f. vault-status-consumers (hard gate; rides [2f] — cos-ops#56) --------
+# The ADR 0014 gate: a terminal ingest_status payload must echo the board case ids the
+# job was submitted with (structuredContent.cases) — produced by server.mjs, narrated
+# in the INGEST_STATUS_TOOL description, and CONSUMED — by name — in both places
+# vault-operations/SKILL.md states the stamp rule (the receipt section and the
+# poll-loop's own completed bullet). Rides this existing [2f] id with its own echo
+# line + fail_reasons token rather than minting a new [2*] id (ADR 0030 clause 2 — a
+# new MCP field an operator skill must consume implies a gate). Static, read-only,
+# node-only.
+echo
+echo "--- [2f] vault-status-consumers (terminal cases echo → receipt handoff) ---"
+if node "${SCRIPT_DIR}/vault-status-consumers.mjs"; then
+  echo "vault-status-consumers: PASS"
+else
+  echo "vault-status-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} vault-status-consumers"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --
@@ -1610,9 +1633,12 @@ fi
 # is NOT an HTTP route, so it needs no board (the test spawns the server itself with
 # COS_VAULT_DIR pointed at a throwaway temp dir). Asserts ONLY the PRE-AGENT contract,
 # so it makes NO LLM call and needs NO ANTHROPIC_API_KEY: initialize→serverInfo.name
-# "vault"; tools/list = EXACTLY {ingest, query} with the right required fields;
-# ingest{content:""} → isError validation; ingest{files:["/etc/passwd"]} → isError
-# naming the path (the arbitrary-file-read guard). The server hard-imports the Agent
+# "vault"; tools/list = EXACTLY {ingest, ingest_status, ingest_cancel, query} with the
+# right required fields; ingest{content:""} → isError validation; ingest{files:
+# ["/etc/passwd"]} → isError naming the path (the arbitrary-file-read guard); a
+# terminal ingest_status payload echoes structuredContent.cases (empty if none) and
+# the completed text line names the ids + mark_vault_ingested (cos-ops#56), while a
+# live payload carries no `cases` key at all. The server hard-imports the Agent
 # SDK at module top, so if its deps aren't installed the test SKIPs gracefully (exit 0,
 # self-skip like guard-quarantine-release) — install with `cd mcp/vault-server &&
 # npm install`. Run UNCONDITIONALLY (it self-skips; no board dependency).

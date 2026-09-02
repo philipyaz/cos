@@ -64,9 +64,11 @@ re-submits **dedup** to the same `job_id` (no second agent). See
 
 Poll an ingest job started by `ingest`. Returns the job's `status` (`working` | `running` |
 `completed` | `failed` | `cancelled` | `interrupted`) in `structuredContent`, plus `result` on
-`completed` (the ingest summary) or `error` on `failed` / `interrupted`. Call every `poll_interval_ms`
-until terminal. An unknown / expired `job_id` returns an error (the job aged out of its retention
-window — re-submit the material).
+`completed` (the ingest summary) or `error` on `failed` / `interrupted`. On any terminal status the
+payload also carries `cases` — the board case ids the job was submitted with (empty if none),
+echoed so the caller stamps the board-side receipt from this payload rather than from recall. Call
+every `poll_interval_ms` until terminal. An unknown / expired `job_id` returns an error (the job
+aged out of its retention window — re-submit the material).
 
 - `job_id` **(required)** — the id returned by `ingest`.
 

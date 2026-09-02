@@ -118,8 +118,12 @@ const INGEST_STATUS_TOOL = {
     "until status is terminal (completed/failed/cancelled/interrupted). While status is working or " +
     "running the job is still in progress — wait and poll again; do NOT start a new ingest. On " +
     "completed, structuredContent.result holds the ingest summary; on failed/interrupted, " +
-    "structuredContent.error holds the reason. An unknown or expired job_id is an error (it aged out " +
-    "of its retention window — re-submit the material).",
+    "structuredContent.error holds the reason. On any terminal status, `structuredContent.cases` " +
+    "echoes the board case ids the job was submitted with (empty if none): on `completed`, stamp the " +
+    "board-side receipt for exactly those ids — the `board` MCP's `mark_vault_ingested` — instead of " +
+    "relying on recall of the earlier `ingest` call; the vault itself never writes the board. An " +
+    "unknown or expired job_id is an error (it aged out of its retention window — re-submit the " +
+    "material).",
   inputSchema: {
     type: "object",
     properties: { job_id: { type: "string", description: "The job_id returned by ingest." } },
@@ -217,6 +221,7 @@ function shapeStatusResult(job) {
     poll_interval_ms: POLL_INTERVAL_MS,
     ttl_ms: INGEST_TTL_MS,
   };
+  const live = !TERMINAL_STATUSES.has(job.status);
   if (job.status === "completed") {
     sc.result = job.result ?? null;
     // Honesty: if the store clipped an off-contract oversized result (capPatch → resultTruncated),
@@ -226,10 +231,20 @@ function shapeStatusResult(job) {
   if (job.status === "failed" || job.status === "interrupted") {
     sc.error = job.error ?? { message: job.interruptedReason || "interrupted", retryable: true };
   }
-  const live = !TERMINAL_STATUSES.has(job.status);
-  const line = live
+  // Terminal-only echo of the case ids the job was submitted with (empty, never omitted, when it
+  // named none) — same shape as result_truncated above: a fact the server already holds, surfaced
+  // so the caller stamps the board-side receipt from THIS payload at the moment it decides, instead
+  // of recall of the `ingest` call some turns (maybe a compaction) earlier. Never on a live payload,
+  // so a caller can't be tempted to stamp before the job actually finished.
+  if (!live) sc.cases = Array.isArray(job.cases) ? job.cases : [];
+  let line = live
     ? `Ingest job ${job.id}: ${job.status}${job.status_message ? " — " + job.status_message : ""}. Still running — poll again in ~${Math.round(POLL_INTERVAL_MS / 1000)}s.`
     : `Ingest job ${job.id}: ${job.status} (terminal).`;
+  // The moment-of-decision line: only a completed job with a non-empty echo gets stamp language —
+  // a receipt on a failed/cancelled/interrupted job is the exact lie the field exists to prevent.
+  if (job.status === "completed" && sc.cases.length) {
+    line += ` Board cases to stamp (mark_vault_ingested, exactly these ids): ${sc.cases.join(", ")}.`;
+  }
   return textSC(line, sc);
 }
 

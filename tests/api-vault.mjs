@@ -15,6 +15,9 @@
 //   • tools/call ingest {content:"…"} → NON-error, returns a job_id; an identical re-submit DEDUPS to
 //                                      the same id; ingest_status reports `working`; an unknown
 //                                      job_id is an isError; ingest_cancel acks — all WITHOUT the agent
+//   • ingest_status (terminal)       → structuredContent.cases echoes the submitted case ids (empty
+//                                      if none), and the completed text line names them + the
+//                                      mark_vault_ingested stamp; a LIVE status carries no `cases` key
 //
 // We boot the server with COS_VAULT_DIR set to a THROWAWAY temp dir (so requireVaultDir passes and the
 // job store lands in temp/.cos/) and WITHOUT an ANTHROPIC_API_KEY — none of the assertions reach the
@@ -313,6 +316,50 @@ async function main() {
       "ingest_status SURFACES result_truncated so the caller knows the receipt was clipped",
     );
 
+    // ----------------------------------------------------------------------
+    // TERMINAL CASES ECHO (cos-ops#56): a terminal ingest_status payload echoes the case ids the
+    // job was submitted with, so the caller stamps the board-side receipt from THIS payload instead
+    // of recall of the `ingest` call several turns earlier. Seed a second completed job (this one
+    // WITH cases) straight into the shared store, same idiom as the result-cap block above.
+    // ----------------------------------------------------------------------
+    const casesSeed = await seedStore.enqueue({
+      content: "cases echo probe",
+      domain: "work",
+      cases: ["CASE-9", "CASE-2"],
+    });
+    await seedStore.setStatus(casesSeed.job.id, "completed", { result: "ok" });
+    const echo = await client.request("tools/call", {
+      name: "ingest_status",
+      arguments: { job_id: casesSeed.job.id },
+    });
+    const echoSC = echo?.structuredContent || {};
+    check(
+      Array.isArray(echoSC.cases) && JSON.stringify(echoSC.cases) === JSON.stringify(["CASE-9", "CASE-2"]),
+      `a terminal payload echoes the submitted case ids in submission order (got ${JSON.stringify(echoSC.cases)})`,
+    );
+    const echoText = resultText(echo);
+    check(/CASE-9, CASE-2/.test(echoText), `the terminal text line names the ids ("${echoText}")`);
+    check(/mark_vault_ingested/.test(echoText), `the terminal text line names the stamp tool ("${echoText}")`);
+
+    // A job submitted WITHOUT cases exposes an EMPTY set on the terminal payload (never absent) —
+    // reuse the result-cap seed above (`seeded`), which was enqueued with no `cases`.
+    check(
+      Array.isArray(capSC.cases) && capSC.cases.length === 0,
+      `a terminal payload for a job submitted without cases carries an empty cases array (got ${JSON.stringify(capSC.cases)})`,
+    );
+
+    // LIVE (non-terminal) payloads carry no 'cases' key at all — terminal-only, so a caller can't be
+    // tempted to stamp before the job actually finished. Re-poll the still-`working` job from the
+    // async-contract block above (ingest_cancel only set a cooperative flag; no runner is running in
+    // this test, so the status never advanced).
+    const liveStatus = await client.request("tools/call", {
+      name: "ingest_status",
+      arguments: { job_id: jobId },
+    });
+    const liveSC = liveStatus?.structuredContent || {};
+    check(liveSC.status === "working", "the re-polled live job is still 'working' (no runner in this test)");
+    check(!("cases" in liveSC), "a LIVE (non-terminal) status payload carries no 'cases' key at all");
+
     // Sanity: the server is still alive (the validation + async paths can't crash-loop it).
     const listAgain = await client.request("tools/list", {});
     check((listAgain?.tools || []).length === 4, "the server is still responsive after the calls");
@@ -327,7 +374,7 @@ async function main() {
     process.exit(1);
   }
   console.log(
-    "\nPASS — vault MCP holds (initialize name, 4-tool list, ingest empty + read-guard validation, async enqueue + dedup + ingest_status + ingest_cancel; no LLM call, no key).",
+    "\nPASS — vault MCP holds (initialize name, 4-tool list, ingest empty + read-guard validation, async enqueue + dedup + ingest_status + ingest_cancel, terminal cases echo; no LLM call, no key).",
   );
 }
 

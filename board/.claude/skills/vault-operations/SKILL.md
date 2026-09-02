@@ -60,9 +60,10 @@ The loop you MUST follow:
 3. Stop only when `status` is **terminal**: `completed`, `failed`, `cancelled`, or `interrupted`.
 4. Then report to the user:
    - `completed` → `structuredContent.result` holds the ingest summary (pages synthesized, sources
-     created). If the `ingest` call passed `cases`, immediately stamp the board-side receipt — call
-     the `board` MCP's `mark_vault_ingested({ ids })` with those same case ids — then report what
-     landed.
+     created) and `structuredContent.cases` echoes the case ids the job was submitted with. If that
+     echo is non-empty, immediately stamp the board-side receipt — call the `board` MCP's
+     `mark_vault_ingested({ ids })` with the ids read off this payload, not from recall — then
+     report what landed.
    - `failed` → `structuredContent.error.message` says why. If `error.retryable` is true, you may
      re-submit.
    - `cancelled` → the job was cancelled; already-written pages stayed (no rollback).
@@ -83,8 +84,11 @@ nothing new — call `ingest_status` instead.
 
 The receipt is what lets the board answer *"what has the vault never been told?"* (`get_vault_coverage`
 on the `board` MCP) — stamp the receipt only on `completed`; a `failed`, `cancelled`, or `interrupted`
-job leaves it unset, because the field means *landed*, never *attempted*. Skip the call when the
-ingest named no `cases`.
+job leaves it unset, because the field means *landed*, never *attempted*. Take the ids from the status
+payload, not from memory: the terminal `ingest_status` result echoes the job's submitted case ids as
+`structuredContent.cases`, so the stamp — `mark_vault_ingested({ ids })` on the `board` MCP — uses
+exactly that echo, never your recall of an `ingest` call made several turns earlier. Skip the call
+when the echo is empty.
 
 No separate approval is needed — the receipt records the completion of an ingest that was already
 confirmed, not a new judgment.
