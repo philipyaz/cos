@@ -11,6 +11,7 @@ import type {
   MessageRecord,
   CaseNote,
   Task,
+  TaskStatus,
   CaseStatus,
   CaseDomain,
   CalendarEvent,
@@ -30,7 +31,7 @@ import type {
   DeviceStatus,
   VaultStatus,
 } from "./types";
-import type { TreeNode } from "./selectors";
+import type { TreeNode, TaskListRow, TaskBucket } from "./selectors";
 
 // ── Core fetch ───────────────────────────────────────────────────────────────
 // All responses carry the post-write db.version (mutations) or current version
@@ -284,6 +285,33 @@ export function deleteTask(id: string, taskId: string): Promise<CaseResponse> {
     `/api/cases/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskId)}`,
     { method: "DELETE" },
   );
+}
+
+export interface TasksResponse extends VersionedResponse {
+  tasks: TaskListRow[];
+  // Over the FILTERED result of this request, not the whole board (mirrors the
+  // needs-attention route's counts semantics) — a `due: ["overdue"]` call returns
+  // counts whose only non-zero bucket is `overdue`.
+  counts: { overdue: number; today: number; week: number; later: number; undated: number; total: number };
+}
+
+// The open-task list (cos-ops#51) — GET /api/tasks. All filters optional; omit the
+// absent ones (a bare call returns every open task, default "live" scope).
+export function fetchTasks(opts?: {
+  status?: TaskStatus[];
+  scope?: "live" | "all";
+  due?: TaskBucket[];
+  caseId?: string;
+  owner?: string;
+}): Promise<TasksResponse> {
+  const sp = new URLSearchParams();
+  if (opts?.status?.length) sp.set("status", opts.status.join(","));
+  if (opts?.scope) sp.set("scope", opts.scope);
+  if (opts?.due?.length) sp.set("due", opts.due.join(","));
+  if (opts?.caseId) sp.set("caseId", opts.caseId);
+  if (opts?.owner) sp.set("owner", opts.owner);
+  const qs = sp.toString();
+  return request<TasksResponse>(`/api/tasks${qs ? `?${qs}` : ""}`);
 }
 
 // ── Notes / messages ─────────────────────────────────────────────────────────

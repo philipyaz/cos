@@ -1,4 +1,4 @@
-# board MCP server (v3.7)
+# board MCP server (v3.8)
 
 A stdio MCP server (registry name **`board`**) that opens and maintains cases on the
 Cos board — the single to-do surface for both **work** and **life**. Every
@@ -49,7 +49,10 @@ agent-reachable), and the **v3.6 starving rank** (the same tool now leads with `
 single aging-ordered list across cases, open reminders, and unanswered messages). 
 and the **v3.7 triage decisions** triple (`record_triage_decision` writes the
 per-sender mail-drop receipt, `list_triage_decisions` reads the computed ratio + first-time senders,
-`resolve_triage_decision` writes a keep-or-confirm answer). `[x]` marks optional args.
+`resolve_triage_decision` writes a keep-or-confirm answer), and the **v3.8 task list**
+(`list_tasks` reads every open task across every case, bucketed overdue/today/week/later/undated —
+the plain enumeration add_task/update_task/complete_task/delete_task never had). `[x]` marks
+optional args.
 
 ### Reads
 
@@ -218,6 +221,15 @@ Sugar for `update_task` with `status: "done"` → `PATCH /api/cases/{id}/tasks/{
 #### `delete_task(id, taskId)`
 `DELETE /api/cases/{id}/tasks/{taskId}`. Hard-removes a task from the checklist (not a
 completion — prefer `complete_task` when the work is actually done).
+
+#### `list_tasks([status], [scope], [due], [caseId], [owner])`
+`GET /api/tasks`. Lists tasks across **every** case — the plain enumeration the task never had.
+One compact line each: status · case/task id · title · owning case (title · domain) · due (or
+`completed <day>` for a done row) · created date. Grouped into buckets — `overdue` / `today` /
+`week` / `later` / `undated` — with `undated` a **first-class** bucket, never dropped (most open
+tasks on this board carry no date at all). Default `scope` **excludes** tasks whose case is
+done/archived/future-snoozed; `scope: "all"` adds done-case rows back, each distinguished by its
+`caseStatus`. Default `status` excludes `done`. Read-only.
 
 ### Notes
 
