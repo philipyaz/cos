@@ -307,6 +307,10 @@
 #      spoke/localhost + invalid-role hard-fails. Run UNCONDITIONALLY (node only).
 #   13g. upgrade-check.mjs — the post-pull planner (scripts/upgrade-check.mjs): path → step
 #      contract + a CLI smoke test on a throwaway git repo. Hermetic; HARD gate.
+#   13h. boardapp-deploy — the production-board deploy decision (scripts/boardapp-deploy.mjs):
+#      rails 6–8 as a pure table (build / serve / refuse-serve / refuse-exit / throttle;
+#      exit-for-respawn while serving) + structural pins on scripts/boardapp-run.mjs.
+#      Hermetic; HARD gate.
 #  14. search-sidecar — headless python tests for the semantic search sidecar
 #      (search/test_search.py): index/topk/batch/determinism over BOTH backends,
 #      offline (COS_SEARCH_EMBEDDER=hash, no network). uv-GATED — skipped (not
@@ -1838,6 +1842,21 @@ else
   echo "upgrade-check: FAIL"
   fail=1
   fail_reasons="${fail_reasons} upgrade-check"
+fi
+
+# --- 13h. boardapp-deploy (hermetic; the deploy decision table) --------------
+# scripts/boardapp-run.mjs decides once per launch what to do (build / serve /
+# refuse / exit) and, since rails 6-8, keeps deciding while serving. The decision
+# is a pure function in scripts/boardapp-deploy.mjs; pin its table + the wrapper's
+# consumption of it. No board, no launchd, no git, no live data.
+echo
+echo "--- [13h] boardapp-deploy (hermetic deploy decision) --------"
+if node "${SCRIPT_DIR}/boardapp-deploy.mjs"; then
+  echo "boardapp-deploy: PASS"
+else
+  echo "boardapp-deploy: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} boardapp-deploy"
 fi
 
 # --- 13. search sidecar (python, headless, deterministic) --------------------
