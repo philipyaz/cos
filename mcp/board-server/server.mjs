@@ -182,7 +182,8 @@ async function handleGetCase(args) {
   for (const t of c.tasks) {
     lines.push(
       `  - [${t.status}] ${t.id} — ${t.title}` +
-        `${t.owner ? ` (owner: ${t.owner})` : ""}${t.dueAt ? ` [due ${t.dueAt}]` : ""}`
+        `${t.owner ? ` (owner: ${t.owner})` : ""}${t.dueAt ? ` [due ${t.dueAt}]` : ""}` +
+        `${t.status === "done" && t.completedAt ? ` [done ${t.completedAt}]` : ""}`
     );
     if (t.detail) lines.push(`      ${t.detail}`);
   }

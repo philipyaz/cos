@@ -28,8 +28,10 @@ import {
   dueClasses,
   labelChipClasses,
   formatDate,
+  formatDateTime,
 } from "@/lib/format";
 import { dueStatus, slaStatus, lineageOfCases, childrenOfCases, rollupFor, sortReminders } from "@/lib/selectors";
+import { partitionTasks } from "@/lib/task-partition";
 import { messageContent } from "@/lib/inbox";
 import {
   updateCase as apiUpdateCase,
@@ -346,6 +348,7 @@ export function CaseDetailDrawer({
 
           {/* Tasks */}
           <TasksSection
+            key={caseRec.id}
             caseId={caseRec.id}
             tasks={caseRec.tasks}
             done={p.done}
@@ -1290,7 +1293,13 @@ function TasksSection({
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
+  const [showCompleted, setShowCompleted] = useState(false);
   const addRef = useRef<HTMLInputElement | null>(null);
+
+  // Derived, not stored (ADR 0017) — recomputed from the `tasks` prop on every
+  // change, so completing/un-completing a task moves its row between groups the
+  // moment the refetched tasks prop lands, with no extra code here.
+  const { open, completed } = useMemo(() => partitionTasks(tasks), [tasks]);
 
   useEffect(() => {
     if (adding) addRef.current?.focus();
@@ -1325,12 +1334,24 @@ function TasksSection({
       }
     >
       <div className="space-y-1">
-        {tasks.map((t) => (
+        {open.map((t) => (
           <TaskRow key={t.id} caseId={caseId} task={t} run={run} />
         ))}
         {tasks.length === 0 && !adding && (
           <div className="text-[12px] text-ink-400">No tasks yet.</div>
         )}
+        {completed.length > 0 && (
+          <button
+            onClick={() => setShowCompleted((v) => !v)}
+            className="w-full flex items-center gap-1 text-[11px] text-ink-400 hover:text-ink-700 px-1 py-1"
+            aria-expanded={showCompleted}
+          >
+            {showCompleted ? <IconChevronDown className="w-3 h-3" /> : <IconChevronRight className="w-3 h-3" />}
+            {completed.length} completed
+          </button>
+        )}
+        {showCompleted &&
+          completed.map((t) => <TaskRow key={t.id} caseId={caseId} task={t} run={run} />)}
         {adding && (
           <div className="flex items-center gap-2 py-1">
             <IconCircle className="w-4 h-4 text-ink-300 shrink-0" />
@@ -1438,6 +1459,12 @@ function TaskRow({
             <TaskOwnerInline value={task.owner ?? ""} onSave={(v) => patchTask({ owner: v })} />
             <span>·</span>
             <TaskDueInline value={task.dueAt} onSave={(v) => patchTask({ dueAt: v })} />
+            {task.status === "done" && task.completedAt && (
+              <>
+                <span>·</span>
+                <span title={formatDateTime(task.completedAt)}>Completed {formatDate(task.completedAt)}</span>
+              </>
+            )}
             {subtasks.length > 0 && (
               <>
                 <span>·</span>

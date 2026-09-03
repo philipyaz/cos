@@ -123,9 +123,9 @@ const GET_CASE_TOOL = {
   description:
     "Fetch a single case from the Cos board by id (e.g. 'CASE-1'). Returns the case " +
     "fields (including `domain`, `priority`, `dueAt`, `archivedAt`, and linked vault context " +
-    "pages), its tasks (the checklist, with each task's status, owner, and dueAt), its recent " +
-    "activity log, and the messages linked to it. Use this to load a case's current state before " +
-    "acting on it." +
+    "pages), its tasks (the checklist, with each task's status, owner, dueAt, and — once done — " +
+    "completedAt), its recent activity log, and the messages linked to it. Use this to load a " +
+    "case's current state before acting on it." +
     " It ALSO surfaces the case's MANUAL ACTIONS — the edits the user made by hand (lane moves, task completions, field changes) — which you MUST NOT undo, reopen, or override without explicit instruction. Treat the human's deliberate state as authoritative; when an email or inference seems to conflict, add a note (or propose the change) instead of reverting.",
   inputSchema: {
     type: "object",
