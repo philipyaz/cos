@@ -21,7 +21,7 @@
 //   case    : create_case, update_case, update_cases (bulk), archive_case,
 //             restore_case, delete_case (soft → Trash), apply_template
 //   hierarchy: create_initiative, create_workstream, set_parent, regroup_cases
-//   task    : add_task, update_task, complete_task, delete_task
+//   task    : add_task, update_task, complete_task, delete_task, list_tasks
 //   notes   : add_note
 //   message : link_message, update_message
 //   reminder: create_reminder, list_reminders, get_reminder, update_reminder,
@@ -73,6 +73,14 @@
 // `sender-reversed`) and is NEVER mirrored into the guard's sender-trust store — an editorial
 // verdict, not a security one. Core (no add-on gate); rides `/api/triage-decisions`.
 //
+// v3.8: TASK LIST (cos-ops#51) — the plain enumeration the task never had: add_task/update_task/
+// complete_task/delete_task give it full CRUD but no list verb. list_tasks reads every open task
+// across every case, bucketed overdue/today/week/later/undated (undated is FIRST-CLASS, never
+// dropped) — the same engine as GET /api/tasks (board/lib/selectors.ts's selectTasks), so the two
+// surfaces agree by construction. Default `scope` excludes tasks whose case is done/archived/
+// future-snoozed; `scope:"all"` adds done-case rows back, distinguished by caseStatus. Core (no
+// add-on gate); rides `/api/tasks` (no new server, port, or store).
+//
 // HIERARCHY (v3): the board is a strict 3-tier tree of MAX DEPTH 3, where ALL THREE
 // tiers are the SAME CaseRecord (id CASE-<n>) distinguished by a `kind` field:
 //   INITIATIVE  (Epic)      — a big work/life aspiration; NO parentId (a root).
@@ -111,13 +119,14 @@ import {
   CASE_KIND,
   TRIAGE_DROP_REASON,
   TRIAGE_DECISION_STATUS,
+  TASK_DUE_BUCKET,
   TOOLS,
 } from "./tools.mjs";
 
 const CRM_BASE_URL = baseUrl("CRM_BASE_URL", "http://localhost:3000");
 
 const server = new Server(
-  { name: "board", version: "3.4.0" },
+  { name: "board", version: "3.8.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -664,6 +673,65 @@ async function handleDeleteTask(args) {
 
   const c = data.case;
   return text(`Deleted task ${taskId} from ${id}. Case now has ${c.tasks.length} task(s).`);
+}
+
+// One compact line per task: status · case/task id · title · (case: title · domain) ·
+// due (or "completed <day>" for a done row) · created date. The created date is
+// load-bearing — it is how board-organize's STEP 7 recognises a LONG-undated task.
+function taskLine(row) {
+  const t = row.task;
+  const parts = [
+    `[${t.status}] ${row.caseId}/${t.id} — ${t.title} (case: ${row.caseTitle} · ${row.domain})`,
+  ];
+  if (t.status === "done") {
+    if (t.completedAt) parts.push(`completed ${t.completedAt.slice(0, 10)}`);
+  } else if (row.due) {
+    // "no due" in the undated section would be redundant with the section heading —
+    // the due fragment is simply omitted there (the `else if` above).
+    parts.push(`due ${row.due.slice(0, 10)}${row.dueInherited ? " (case due)" : ""}`);
+  }
+  parts.push(`created ${t.createdAt.slice(0, 10)}`);
+  return parts.join(" · ");
+}
+
+async function handleListTasks(args) {
+  if (args.status !== undefined && !TASK_STATUS.includes(args.status)) {
+    return err(`'status' must be one of: ${TASK_STATUS.join(", ")}.`);
+  }
+  if (args.scope !== undefined && args.scope !== "live" && args.scope !== "all") {
+    return err("'scope' must be one of: live, all.");
+  }
+  if (args.due !== undefined && !TASK_DUE_BUCKET.includes(args.due)) {
+    return err(`'due' must be one of: ${TASK_DUE_BUCKET.join(", ")}.`);
+  }
+
+  const sp = new URLSearchParams();
+  if (typeof args.status === "string" && args.status) sp.set("status", args.status);
+  if (typeof args.scope === "string" && args.scope) sp.set("scope", args.scope);
+  if (typeof args.due === "string" && args.due) sp.set("due", args.due);
+  if (typeof args.caseId === "string" && args.caseId.trim()) sp.set("caseId", args.caseId.trim());
+  if (typeof args.owner === "string" && args.owner.trim()) sp.set("owner", args.owner.trim());
+  const qs = sp.toString();
+
+  const { data, errorResult } = await api("GET", `/api/tasks${qs ? `?${qs}` : ""}`);
+  if (errorResult) return errorResult;
+
+  // Rendered VERBATIM from the route response — no re-filtering, no re-bucketing here —
+  // which is what makes "list_tasks returns the same set as the route" true by construction.
+  const tasks = data.tasks ?? [];
+  if (!tasks.length) return text("No tasks match.");
+
+  // counts.total always equals tasks.length (the route computes counts over exactly the
+  // rows it returns, never a larger unfiltered total — unlike search's k-clamped hit
+  // count), so the header states the count once, not "N of N".
+  const lines = [`Tasks (${tasks.length}):`];
+  for (const bucket of TASK_DUE_BUCKET) {
+    const rows = tasks.filter((r) => r.bucket === bucket);
+    if (!rows.length) continue;
+    lines.push(`\n${bucket} (${rows.length}):`);
+    for (const row of rows) lines.push(`  - ${taskLine(row)}`);
+  }
+  return text(lines.join("\n"));
 }
 
 // ── Note tool ────────────────────────────────────────────────────────────────
@@ -1711,6 +1779,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleUpdateTask(args, { forceDone: true });
     case "delete_task":
       return handleDeleteTask(args);
+    case "list_tasks":
+      return handleListTasks(args);
     // notes
     case "add_note":
       return handleAddNote(args);
@@ -1789,5 +1859,5 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 await start(
   server,
   new StdioServerTransport(),
-  `board MCP server v3.7 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
+  `board MCP server v3.8 ready (tools: ${TOOLS.map((t) => t.name).join(", ")}; CRM_BASE_URL=${CRM_BASE_URL})`
 );
