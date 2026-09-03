@@ -105,8 +105,12 @@ Two staleness classes, and why the plan restarts what it restarts:
   Code session caches `tools/list` — start a **new session** (or `/mcp` → reconnect) — and Cowork holds
   one long-lived child per server — **⌘Q + reopen**.
 
-The production board: `boardapp-run.mjs` rebuilds only when its process restarts and the checked-out
-commit differs from `board/.next/COS_BUILT_COMMIT`. A failed build writes `board/.next/COS_BUILD_FAILED`
+The production board: `boardapp-run.mjs` builds only `main` — a tree parked on a feature branch keeps
+serving whatever was last built and refuses to build anything else. A running **supervised** board (the
+launchd job) notices within about a minute when `main` has moved and redeploys itself, so on a hub
+**the `git pull` in Step 2 is itself what arms the redeploy** — Step 1's `bootout` *before* pulling is
+what keeps the full freeze intact. A moved `board/package-lock.json` triggers `npm ci` before the build.
+A failed build writes `board/.next/COS_BUILD_FAILED`
 and will **not** retry on that commit — fix the cause (usually a missed `npm install`), `rm` the marker,
 kick again; read `mcp/logs/boardapp.err.log`. Never `kickstart -k` the scheduled **backup** job — that
 fires a backup (use `node backup/backup.mjs` when you want one).
@@ -116,7 +120,8 @@ fires a backup (use `node backup/backup.mjs` when you want one).
 
 **Windows hub:** `node mcp/cos-services.mjs restart` respawns every bridge + sidecar from the live
 manifest (no render step); `uv sync` the sidecar venvs by hand (their uvicorn is called directly); stop
-the running `boardapp-run.mjs` and re-run it (same rebuild-on-commit rules); the backup is a Task
+the running `boardapp-run.mjs` and re-run it (same rails — though rail 7 is supervised-only, so a
+hand-run wrapper never self-exits; re-running it by hand IS the deploy there); the backup is a Task
 Scheduler job (re-read from disk each fire). Stop a `cos-services watch` supervisor first — it would
 respawn the old processes.
 

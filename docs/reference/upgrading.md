@@ -42,7 +42,7 @@ Hub **first**, then every spoke. Browser-only viewers do nothing.
 | `mcp/<name>-server/**` (a bridge's `stdio` source dir), `mcp/vault-server/**` (the `vaultjobs` runner), `guard/` or `search/` (a sidecar's `dir`) | `launchctl kickstart -k gui/$UID/<label>` for **that** service, if its plist is installed here — the step names the tools the server gained | a long-lived runner/sidecar serves the old code until its process restarts (a uv sidecar re-syncs its venv on start); a supergateway bridge spawns a fresh child per request, so there the stale part is the client — a **new Claude Code session** and a **⌘Q of Cowork**. `ensure-bridges.sh` only starts what is *down* |
 | `board/**` or a lockfile, on a hub with the boardapp agent | **first** `launchctl bootout` the board (freeze), **last** `bootstrap` + `kickstart -k` it | no write lands between the snapshot and the new code; `npm install` never runs under a live `next start`; a build before deps land cannot poison `COS_BUILD_FAILED` |
 | `packages/mcp-kit/**` | kick **every** installed bridge | they all embed it |
-| `board/**` (outside `.claude/` and `data/`) | hub: `kickstart -k` the `boardapp` LaunchAgent (it rebuilds when the checked-out commit moved); dev: restart `next dev` | the production build is the old commit's |
+| `board/**` (outside `.claude/` and `data/`) | hub: `kickstart -k` the `boardapp` LaunchAgent (it rebuilds when `main` moved past the built commit; a running supervised board also notices a moved `main` itself within a minute — the kick is just the impatient path, and a pull on `main` is itself the deploy trigger); dev: restart `next dev` | the production build is the old commit's |
 | `board/.claude/skill-bundles/*.zip` — or, with an upload receipt, any zip whose sha256 differs from the one last marked uploaded here | **manual:** upload each in Cowork → Settings → Capabilities → Skills, then `node scripts/mark-skill-uploaded.mjs <skill>…` | Cowork installs the zip you uploaded, not the repo, and cannot be read back — the per-machine receipt (`mcp/logs/.cowork-skills-uploaded.json`) is what makes the drift computable |
 | an add-on enabled in the store with no `com.chiefofstaff.mcp-<id>` plist here | **manual:** run `/<id>-mcp-setup` | the board serves its nav + API; no agent on this machine can reach it |
 | `board/.claude/skills/automation.json` | **manual:** create / edit the listed Cowork scheduled tasks | a catalogued trigger runs nowhere until it exists in Cowork |
@@ -60,7 +60,9 @@ fire) — comes from the descriptors, so a new add-on needs no edit here.
 the mapping (`run.sh` step `[13g]`).
 
 Choosing `--from`: right after a pull the default is `ORIG_HEAD`; otherwise the commit the production
-board was last **built** from (`board/.next/COS_BUILT_COMMIT`), which is the honest "what is running".
+board was last **built** from (`board/.next/COS_BUILT_COMMIT` — its sibling `COS_BUILT_LOCK` records
+the lockfile hash the build was compiled against, rail 8's install trigger), which is the honest
+"what is running".
 Pass `--from <ref>` explicitly in any other situation (`git reflog` shows what you were on).
 
 The plan also pauses/resumes the Cowork routines around the window on a hub (a sweep that fires
@@ -68,7 +70,8 @@ mid-rebuild, or runs last month's bundle against the new API, fails halfway afte
 tools each restarted server gained, and — on a spoke — tells you to confirm the hub is ahead before
 restarting the wrappers. **Windows hub:** `node mcp/cos-services.mjs restart` respawns every bridge and
 sidecar from the live manifest; `uv sync` the sidecar venvs by hand; stop and re-run
-`scripts/boardapp-run.mjs` for the board.
+`scripts/boardapp-run.mjs` for the board (rail 7's self-exit is supervised-only, so a hand-run
+wrapper never redeploys itself — re-running it by hand IS the deploy here).
 
 ## Restore and rollback rules
 
