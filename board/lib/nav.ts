@@ -13,6 +13,7 @@ export type CoreNavItem = { href: string; label: string; icon: NavIconKey };
 export const DAILY_NAV: CoreNavItem[] = [
   { href: "/my-issues", label: "My Issues", icon: "IconCircleUser" },
   { href: "/inbox", label: "Inbox", icon: "IconInbox" },
+  { href: "/tasks", label: "Tasks", icon: "IconCheckCircle" },
   { href: "/priorities", label: "Priorities", icon: "IconStar" },
   { href: "/reminders", label: "Reminders", icon: "IconBell" },
   { href: "/calendar", label: "Calendar", icon: "IconCalendar" },

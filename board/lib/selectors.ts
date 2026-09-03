@@ -4,8 +4,8 @@
 // the board through these so filtering/sorting/grouping stays consistent and
 // deep-linkable. URL state round-trips through parseBoardQuery/encodeBoardQuery.
 
-import type { CaseRecord, CaseStatus, CaseDomain, CaseKind, CalendarEvent, Reminder, ReminderStatus, PriorityNote, MessageRecord, CaseActivity, Actor, DBShape, Priority } from "./types";
-import { VALID_CASE_STATUS, VALID_DOMAIN, VALID_PRIORITY, VALID_CASE_KIND, VALID_REMINDER_STATUS, caseKind } from "./types";
+import type { CaseRecord, CaseStatus, CaseDomain, CaseKind, CalendarEvent, Reminder, ReminderStatus, PriorityNote, MessageRecord, CaseActivity, Actor, DBShape, Priority, Task, TaskStatus } from "./types";
+import { VALID_CASE_STATUS, VALID_DOMAIN, VALID_PRIORITY, VALID_CASE_KIND, VALID_REMINDER_STATUS, VALID_TASK_STATUS, caseKind } from "./types";
 import { STALE_AFTER_DAYS, wholeDaysBetween } from "./staleness";
 import { selectUnansweredMessages } from "./inbox";
 
@@ -1353,4 +1353,139 @@ export function activityFeed(db: DBShape, opts?: { limit?: number }): FeedEntry[
     return a.key.localeCompare(b.key);
   });
   return rows.slice(0, opts?.limit ?? 200);
+}
+
+// ── Task list (cos-ops#51) ───────────────────────────────────────────────────
+// The plain enumeration ADR 0017 does NOT govern — that ADR's own "Considered and
+// rejected" section blesses letting an agent derive a candidate set from a PLAIN
+// list read (the reminders-review shape) as "not rejected in general"; the four
+// judgment reads above (needsAttention / starvingObligations) are the status-read
+// family it DOES cover. The task is the only first-class entity with full CRUD
+// (add_task/update_task/complete_task/delete_task) and no list verb; this is that
+// verb's engine — GET /api/tasks and the MCP `list_tasks` both call it, so their
+// sets agree by construction instead of two independent filters drifting apart.
+
+export type TaskBucket = "overdue" | "today" | "week" | "later" | "undated";
+export const TASK_BUCKETS: TaskBucket[] = ["overdue", "today", "week", "later", "undated"]; // display order
+
+export interface TaskListRow {
+  caseId: string;
+  caseTitle: string;
+  caseStatus: CaseStatus;
+  domain: CaseDomain;
+  // The task rides WHOLE (unlike the trimmed CaseRecord side): a Task is small and
+  // search/route.ts already returns { caseId, task } for a task hit (SearchResponse
+  // in board-client.ts) — TaskListRow is that shape's strict superset for full
+  // enumeration (search stays text-matched and k-clamped). Carrying the whole record
+  // is also why list_tasks needs no separate `verbose` mode.
+  task: Task;
+  due?: string; // the EFFECTIVE due used for bucketing: task.dueAt ?? case.dueAt
+  dueInherited?: boolean; // true ⇔ due came from the case, not the task itself
+  bucket: TaskBucket;
+}
+
+export interface TaskListOpts {
+  status?: TaskStatus[]; // default: every status except "done"
+  scope?: "live" | "all"; // default "live"
+  due?: TaskBucket[]; // restrict to these buckets
+  caseId?: string;
+  owner?: string;
+}
+
+// Classify an effective due date into one of the five task buckets. Delegates
+// overdue/today/none to `dueStatus` (the pinned due classifier, above) and splits
+// its future statuses (soon/later) at the 7-day mark via staleness.ts's
+// `wholeDaysBetween` over two UTC day strings (AC 5's named home for the day
+// maths, staleness.ts:21-28's calendar-day frame). The `<= 7` far edge is the SAME
+// inclusive boundary upcomingEvents/upcomingReminders/starvingObligations all
+// compute, reused inline per their own convention — never a new named constant.
+// dueStatus's "soon" (<=3 rolling days) is always inside this window, so
+// soon → week unconditionally.
+function taskBucket(due: string | undefined, now: Date): TaskBucket {
+  const status = dueStatus(due, now);
+  if (status === "none") return "undated";
+  if (status === "overdue") return "overdue";
+  if (status === "today") return "today";
+  // soon | later — both future; split at +7 whole days in the UTC day-string frame.
+  const days = wholeDaysBetween(todayISO(now), todayISO(new Date(due as string)));
+  return days <= 7 ? "week" : "later";
+}
+
+// The open-task list across every case, computed on read (ADR 0017: never
+// persisted) — the shared engine behind GET /api/tasks and the MCP `list_tasks`.
+//
+// Scope: "live" (default) excludes a case whose status is "done" AND anything
+// isVisible (above) hides — archived or future-snoozed. "all" adds done-status
+// and snoozed cases back; archived stays excluded under BOTH scopes — archived is
+// Trash, surfaced only by /trash (mirrors reminders/route.ts:33's archivedAt
+// exclusion, centralized here instead of duplicated across a page and a route).
+// No surface needs a trashed task today, so scope stays two-valued rather than
+// growing reminders' third includeArchived value.
+//
+// Status: defaults to every VALID_TASK_STATUS except "done" — DERIVED, not
+// hand-enumerated, so a fifth status landing keeps this in agreement with
+// partitionTasks's `status !== "done"` by construction (todayCases above
+// hand-enumerates open|in_progress and silently drops blocked — the cautionary
+// sibling this reuse avoids repeating).
+//
+// Bucket is computed for EVERY row, including a status:["done"] query — it is
+// "the due classification", status-independent; a completed-tasks view simply
+// doesn't render it.
+//
+// Pure: no I/O, clock injected, returns a fresh array.
+export function selectTasks(
+  cases: CaseRecord[],
+  now: Date = new Date(),
+  opts?: TaskListOpts,
+): { tasks: TaskListRow[] } {
+  const scope = opts?.scope ?? "live";
+  const statuses = opts?.status?.length
+    ? opts.status
+    : VALID_TASK_STATUS.filter((s) => s !== "done");
+
+  const rows: TaskListRow[] = [];
+  for (const c of cases) {
+    if (scope === "live") {
+      if (c.status === "done") continue;
+      if (!isVisible(c, now, false)) continue; // archived or future-snoozed
+    } else if (c.archivedAt) {
+      continue; // archived is Trash even under scope:"all" — never a work list
+    }
+
+    for (const task of c.tasks) {
+      if (!statuses.includes(task.status)) continue;
+      const due = task.dueAt ?? c.dueAt;
+      const dueInherited = !task.dueAt && !!c.dueAt;
+      const bucket = taskBucket(due, now);
+      if (opts?.due?.length && !opts.due.includes(bucket)) continue;
+      if (opts?.caseId && c.id !== opts.caseId) continue;
+      if (opts?.owner && (task.owner ?? "").trim() !== opts.owner.trim()) continue;
+
+      rows.push({
+        caseId: c.id,
+        caseTitle: c.title,
+        caseStatus: c.status,
+        domain: c.domain,
+        task,
+        due,
+        dueInherited: dueInherited ? true : undefined,
+        bucket,
+      });
+    }
+  }
+
+  // TASK_BUCKETS order, then effective due ascending (absent due sorts last via
+  // the shared ms()/NaN→Infinity guard — the applyBoardQuery "due" idiom above),
+  // then task.createdAt ascending as a stable tiebreak.
+  rows.sort((a, b) => {
+    const br = TASK_BUCKETS.indexOf(a.bucket) - TASK_BUCKETS.indexOf(b.bucket);
+    if (br !== 0) return br;
+    const da = ms(a.due);
+    const db = ms(b.due);
+    const dd = (Number.isNaN(da) ? Infinity : da) - (Number.isNaN(db) ? Infinity : db);
+    if (dd !== 0) return dd;
+    return ms(a.task.createdAt) - ms(b.task.createdAt);
+  });
+
+  return { tasks: rows };
 }
