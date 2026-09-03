@@ -32,6 +32,23 @@ updates:
     groups:
       npm-board:
         patterns: ["*"]
+    # Majors held back (cos-ops#64): eslint-config-next pins typescript-eslint ^8.46.0,
+    # whose peer range is typescript ">=4.8.4 <6.1.0" — TS 7 fails `npm run lint` with
+    # "typescript-eslint does not support TS 7.0" (exit 2). Remove BOTH entries once
+    # eslint-config-next ships a typescript-eslint that admits TS 7.x; that range lives
+    # in a transitive manifest this repo cannot assert on, which is why the removal
+    # condition is prose (ADR 0024). Check it with:
+    #   npm view eslint-config-next@latest dependencies
+    # The update-types qualifier is load-bearing, not decoration: it scopes each ignore
+    # to VERSION updates, so Dependabot SECURITY updates for these packages still open
+    # PRs. A bare dependency-name ignore would suppress those too
+    # (dependabot/dependabot-core#4027) — the exact inversion of this block's purpose.
+    # tests/unit/dependabot-config.test.ts gates the qualifier; never drop it.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
 
   # Python sidecars (uv lockfiles).
   - package-ecosystem: uv
