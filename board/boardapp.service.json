@@ -12,7 +12,8 @@
   "env": {
     "COS_DEVICE_ROLE": "${COS_DEVICE_ROLE}",
     "NODE_BIN": "${NODE_BIN}",
-    "BOARD_PORT": "${BOARD_PORT}"
+    "BOARD_PORT": "${BOARD_PORT}",
+    "COS_SUPERVISED": "1"
   },
   "clients": [],
   "probe": { "type": "httpListen" }
