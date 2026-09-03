@@ -66,8 +66,9 @@ Read-only. Answers "which machine am I on / is this the hub / is my code in sync
 #### `get_case(id)`
 `GET /api/cases/{id}`. Loads a case's current state. Returns the case fields — including
 **`domain`**, **`priority`**, **`dueAt`**, **`archivedAt`**, **`snoozeUntil`**, and linked
-**vault context** pages — its tasks (status, owner, detail, `dueAt`), its **notes**, its
-linked **messages**, and the **last few activity** entries. Unknown id → tool error.
+**vault context** pages — its tasks (status, owner, detail, `dueAt`; a done task also carries
+`completedAt`), its **notes**, its linked **messages**, and the **last few activity** entries.
+Unknown id → tool error.
 
 #### `search(q | queries[], [k], [types], [domain], [status])`
 **Semantic + keyword** search across case titles/summaries/tags/labels,
