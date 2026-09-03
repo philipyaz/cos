@@ -11,12 +11,17 @@
 // The installed plists are gitignored + machine-specific (absolute paths), exactly as before — only
 // their SOURCE moves from per-server templates to the manifest. Run the dry-run / --print / --out
 // modes freely; only --install touches ~/Library/LaunchAgents.
+//
+// --install verifies every `launchctl bootstrap`/`kickstart -k` it runs (scripts/launchd-load.mjs)
+// — a service that fails to load prints `FAILED to load <label>: <reason>` on stderr and the
+// process exits non-zero; it never prints `loaded` for a step it did not check (ops#54 Fix 1).
 
-import { mkdirSync, writeFileSync, realpathSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 import { getManifest, currentRole, supergatewayArgv } from '../mcp/service-manifest.mjs'
 import { loadConfig, REPO_ROOT } from '../config/load-config.mjs'
+import { loadServices, installedButUnselected } from './launchd-load.mjs'
 
 const env = loadConfig()
 const BREW_PREFIX = env.BREW_PREFIX || '/opt/homebrew'
@@ -140,8 +145,11 @@ if (args[0] === '--print') {
   // this role must not run.
   const rest = args.slice(args[0] === '--out' ? 2 : 1)
   let picked
-  if (rest.includes('--all')) picked = manifest.filter((e) => e.roles.includes(ROLE))
-  else if (rest.filter((n) => !n.startsWith('--')).length) {
+  let mode // 'all' | 'named' | 'default' — drives the selection line + the not-selected note below
+  if (rest.includes('--all')) {
+    picked = manifest.filter((e) => e.roles.includes(ROLE))
+    mode = 'all'
+  } else if (rest.filter((n) => !n.startsWith('--')).length) {
     picked = rest
       .filter((n) => !n.startsWith('--'))
       .map((n) => {
@@ -159,29 +167,44 @@ if (args[0] === '--print') {
         }
         return e
       })
-  } else picked = manifest.filter((e) => e.core && e.roles.includes(ROLE))
+    mode = 'named'
+  } else {
+    picked = manifest.filter((e) => e.core && e.roles.includes(ROLE))
+    mode = 'default'
+  }
   mkdirSync(dir, { recursive: true })
+
+  // Part 2 (ops#54): never let the selection be a surprise. A bare `--install` silently skipping
+  // boardapp (not core) used to read as "nothing to do" — now it is a line of output.
+  const selectionLabel = mode === 'all' ? `--all for role ${ROLE}` : mode === 'default' ? `core defaults for role ${ROLE}` : null
+  process.stdout.write(
+    `[gen-launchd] selected${selectionLabel ? ` (${selectionLabel})` : ''}: ${picked.map((e) => e.name).join(', ')}\n`,
+  )
+  if (args[0] === '--install' && mode === 'default') {
+    const notSelected = installedButUnselected(manifest, picked, readdirSync(dir))
+    if (notSelected.length) {
+      process.stdout.write(`[gen-launchd] not selected (already installed here, left untouched): ${notSelected.join(', ')}\n`)
+    }
+  }
+
   const onDarwin = args[0] === '--install' && process.platform === 'darwin'
   const uid = onDarwin ? process.getuid() : null
   for (const e of picked) {
-    const plistPath = join(dir, `${e.label}.plist`)
-    writeFileSync(plistPath, renderPlist(e))
+    writeFileSync(join(dir, `${e.label}.plist`), renderPlist(e))
     process.stdout.write(`[gen-launchd] wrote ${e.label}.plist\n`)
-    if (onDarwin) {
-      // Reload via launchd so the new plist takes effect now (bootout to pick up edits, then
-      // bootstrap). A SCHEDULED job is NOT kickstarted — kickstart -k would FIRE it immediately
-      // (e.g. run a backup at install time) instead of waiting for its StartCalendarInterval.
-      const cmds = [`bootout gui/${uid}/${e.label}`, `bootstrap gui/${uid} "${plistPath}"`]
-      if (!e.schedule) cmds.push(`kickstart -k gui/${uid}/${e.label}`)
-      for (const c of cmds) {
-        try {
-          execSync(`launchctl ${c}`, { stdio: 'ignore' })
-        } catch {
-          /* best-effort */
-        }
-      }
-      process.stdout.write(`[gen-launchd] loaded ${e.label} (launchctl${e.schedule ? ', scheduled — not fired now' : ''})\n`)
-    }
+  }
+  if (onDarwin) {
+    // Reload via launchd so the new plist takes effect now — extracted into launchd-load.mjs so
+    // the reporting is testable with an injected runner (ops#54: the deploy path must never claim
+    // a load it did not verify). A SCHEDULED job is NOT kickstarted there — kickstart -k would
+    // FIRE it immediately (e.g. run a backup at install time) instead of waiting for its
+    // StartCalendarInterval.
+    const run = (c) => execSync(`launchctl ${c}`, { stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' })
+    const failed = loadServices(
+      picked.map((e) => ({ label: e.label, schedule: e.schedule, plistPath: join(dir, `${e.label}.plist`) })),
+      { uid, run, out: (s) => process.stdout.write(s), errOut: (s) => process.stderr.write(s) },
+    )
+    if (failed.length) process.exitCode = 1
   }
 } else {
   process.stdout.write('[gen-launchd] dry-run — would render these LaunchAgent plists from the manifest:\n')

@@ -59,6 +59,16 @@ fire) — comes from the descriptors, so a new add-on needs no edit here.
 [`tests/upgrade-check.mjs`](https://github.com/philipyaz/cos/blob/main/tests/upgrade-check.mjs) pins
 the mapping (`run.sh` step `[13g]`).
 
+**`--install` verifies every load it claims.** Each `launchctl bootstrap` / `kickstart -k` it runs is
+checked: a non-zero exit means a named service genuinely FAILED to load — not a cosmetic problem, and
+not something a re-run will silently fix. The stderr line `FAILED to load <label>: <reason>` names it,
+and the process exits non-zero. Read that service's err log under `mcp/logs/` (path per its
+descriptor), fix the cause, then re-run `node scripts/gen-launchd.mjs --install <name>`.  `--install`
+also prints its selection first (`selected: <names>`), and a **bare** (default, core-only) invocation
+additionally names any already-installed plists it left untouched — the line where a by-hand run sees
+that `boardapp` was deliberately not restarted. That "not selected" note is scoped to the bare form:
+the upgrade command above names `boardapp` explicitly, so on *this* path boardapp IS restarted.
+
 Choosing `--from`: right after a pull the default is `ORIG_HEAD`; otherwise the commit the production
 board was last **built** from (`board/.next/COS_BUILT_COMMIT` — its sibling `COS_BUILT_LOCK` records
 the lockfile hash the build was compiled against, rail 8's install trigger), which is the honest

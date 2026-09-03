@@ -87,7 +87,7 @@ The order matters and the planner already sorted it: **deps → config keys → 
 
 ```bash
 npm install && (cd board && npm install)                    # only when a lockfile changed (the plan says which)
-node scripts/gen-launchd.mjs --install <installed names>    # only when a descriptor / generator changed — the plan names EXACTLY the services installed here; never --all
+node scripts/gen-launchd.mjs --install <installed names>    # only when a descriptor / generator changed — the plan names EXACTLY the services installed here; never --all; a non-zero exit means a named service FAILED to load — read the stderr line and fix it before continuing
 launchctl kickstart -k gui/$(id -u)/com.chiefofstaff.mcp-<name>   # each runner/sidecar/bridge the plan lists — the label is the manifest's
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.chiefofstaff.mcp-boardapp.plist; launchctl kickstart -k gui/$(id -u)/com.chiefofstaff.mcp-boardapp   # hub: rebuild (the commit moved) + start
 node scripts/gen-cowork-config.mjs                          # only when the plan says the Cowork config snapshot is stale

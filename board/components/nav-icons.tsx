@@ -20,6 +20,7 @@ import {
   IconTrash,
   IconShield,
   IconArchive,
+  IconCheckCircle,
 } from "@/components/icons";
 
 // Every nav glyph — core AND add-on — is resolved here from a STRING key, because
@@ -49,6 +50,7 @@ const NAV_ICONS = {
   IconTrash,
   IconShield,
   IconArchive,
+  IconCheckCircle,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement>>>;
 
 // The CORE nav's icon type — a literal union of the keys above, consumed

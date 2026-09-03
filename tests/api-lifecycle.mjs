@@ -129,6 +129,82 @@ async function main() {
     );
 
     // ----------------------------------------------------------------------
+    // GET /api/tasks — the open-task list (cos-ops#51). Assertions are membership
+    // by id, never counts — the sandbox store's pre-existing content is not this
+    // test's to assume.
+    // ----------------------------------------------------------------------
+    const addT2 = await POST(`/api/cases/${encodeURIComponent(idA)}/tasks`, {
+      title: `list-tasks lifecycle task ${marker}`,
+    });
+    check(addT2.status === 201, `POST task (no dueAt) → 201 (got ${addT2.status})`);
+    const taskId2 = addT2.body.task?.id;
+    check(!!taskId2, `add_task returned a task id (${taskId2})`);
+
+    const listDefault = await GET("/api/tasks");
+    check(listDefault.status === 200, `GET /api/tasks → 200 (got ${listDefault.status})`);
+    check(typeof listDefault.body.version === "number", "GET /api/tasks carries a numeric version");
+    check(typeof listDefault.body.counts?.total === "number", "GET /api/tasks carries counts.total");
+    const rowDefault = (listDefault.body.tasks || []).find((r) => r.task?.id === taskId2);
+    check(!!rowDefault, "default GET /api/tasks carries the new (dueAt-less) task");
+    // Case A carries its OWN dueAt (set in the create_case block above), so a
+    // dueAt-less task on it INHERITS that date rather than landing in 'undated'
+    // — the dedicated undated-bucket check below uses a dueAt-less CASE instead.
+    check(rowDefault?.dueInherited === true, "the dueAt-less task inherits its case's dueAt");
+    check(rowDefault?.caseId === idA, "the row carries its owning case id");
+    check(typeof rowDefault?.caseTitle === "string", "the row carries a string caseTitle");
+
+    // Mark it done — the default GET drops it; ?status=done still carries it.
+    const doneT2 = await PATCH(
+      `/api/cases/${encodeURIComponent(idA)}/tasks/${encodeURIComponent(taskId2)}`,
+      { status: "done" },
+    );
+    check(doneT2.status === 200, `PATCH task status:done → 200 (got ${doneT2.status})`);
+    const listAfterDone = await GET("/api/tasks");
+    check(
+      !(listAfterDone.body.tasks || []).some((r) => r.task?.id === taskId2),
+      "default GET /api/tasks omits the now-done task",
+    );
+    const listDoneOnly = await GET("/api/tasks?status=done");
+    check(
+      (listDoneOnly.body.tasks || []).some((r) => r.task?.id === taskId2),
+      "?status=done carries the done task",
+    );
+
+    // A whole CASE marked done: its open task drops from the default GET and shows
+    // under ?scope=all with the row's caseStatus reflecting the case.
+    const caseC = await POST("/api/cases", {
+      title: `API tasks-scope case ${marker}`,
+      domain: "work",
+      tasks: [{ title: "throwaway open task" }],
+    });
+    check(caseC.status === 201, `POST /api/cases (case C) → 201 (got ${caseC.status})`);
+    const idC = caseC.body.case?.id;
+    const taskIdC = caseC.body.case?.tasks?.[0]?.id;
+    check(!!idC && !!taskIdC, `case C created with its seed task (${idC}, ${taskIdC})`);
+
+    // Case C carries no dueAt anywhere — its seed task is genuinely undated (the
+    // 'undated' bucket check the case-A task above can't make).
+    const listBeforeCaseDone = await GET("/api/tasks");
+    const rowC0 = (listBeforeCaseDone.body.tasks || []).find((r) => r.task?.id === taskIdC);
+    check(rowC0?.bucket === "undated", "a task with no dueAt anywhere lands in the 'undated' bucket");
+
+    const doneC = await PATCH(`/api/cases/${encodeURIComponent(idC)}`, { status: "done" });
+    check(doneC.status === 200, `PATCH case C status:done → 200 (got ${doneC.status})`);
+    const listAfterCaseDone = await GET("/api/tasks");
+    check(
+      !(listAfterCaseDone.body.tasks || []).some((r) => r.task?.id === taskIdC),
+      "default GET /api/tasks omits a task whose case is done",
+    );
+    const listScopeAll = await GET("/api/tasks?scope=all");
+    const rowC = (listScopeAll.body.tasks || []).find((r) => r.task?.id === taskIdC);
+    check(!!rowC, "?scope=all carries the done-case's task");
+    check(rowC?.caseStatus === "done", "the row's caseStatus reflects the done case");
+
+    // Clean up what THIS block created that's cheap to remove (the extra task on
+    // A) — case C and the rest are covered by the snapshot/restore in `finally`.
+    await DELETE(`/api/cases/${encodeURIComponent(idA)}/tasks/${encodeURIComponent(taskId2)}`);
+
+    // ----------------------------------------------------------------------
     // add_note → appears in case.notes
     // ----------------------------------------------------------------------
     const noteBody = `lifecycle note ${marker}`;
