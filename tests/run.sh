@@ -56,6 +56,17 @@
 #      the STEP 4.5 section, the sweep stays read-only on the whatsapp MCP, and the
 #      nutrition-server render + call-time narration must carry the whatsapp: form —
 #      a parser-grade gate rides an existing id rather than minting a new one.
+#      [2f] also rides
+#      shopping-surface.mjs (cos-ops#38) — the ADR 0014 gate for the shopping-list BOARD
+#      SURFACE: /nutrition/shopping is reachable from the shared nav model, the page SSR-seeds
+#      computeShoppingCandidates on the candidates route's own default window, and
+#      shopping-view.tsx wires all three statuses + the always-visible quick-add — a
+#      parser-grade gate rides an existing id rather than minting a new one.
+#      [2f] also rides
+#      task-list-consumers.mjs (cos-ops#51) — the same ADR 0014 shape for board-organize's STEP 7
+#      open-task read: STEP 7 must name `list_tasks` and, with STEP 8, carry the pinned "overdue
+#      and long-undated tasks" phrase, plus the list_tasks tool/dispatch/route wiring trio — a
+#      parser-grade gate rides an existing id rather than minting a new one.
 #   3. grep-based vault property checks — no stray task checkboxes in wiki/,
 #      no still-open "- [ ]" item in a life|work/reminders file (post-migration
 #      target; reported as WARN so the harness is usable mid-migration), plus
@@ -669,6 +680,22 @@ else
   echo "shopping-surface: FAIL"
   fail=1
   fail_reasons="${fail_reasons} shopping-surface"
+fi
+
+# --- 2f. task-list-consumers (hard gate; rides [2f] — cos-ops#51) -----------
+# The ADR 0014 gate (ADR 0030 clause-compliant) for board-organize's STEP 7 open-task read:
+# STEP 7's own section must name `list_tasks`, and STEP 7 + STEP 8's own sections must each carry
+# the pinned "overdue and long-undated tasks" phrase, plus the always-run wiring trio (the tool is
+# registered, dispatched, and its route exists). Static, read-only, node-only. Rides this existing
+# [2f] id (ADR 0030 clause 2) rather than minting a new [2*] id.
+echo
+echo "--- [2f] task-list-consumers (STEP 7 open-task read contract) ---"
+if node "${SCRIPT_DIR}/task-list-consumers.mjs"; then
+  echo "task-list-consumers: PASS"
+else
+  echo "task-list-consumers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} task-list-consumers"
 fi
 
 # --- 3. vault property checks (grep; mostly WARN-level, three HARD sub-checks 3c/3d/3e) --

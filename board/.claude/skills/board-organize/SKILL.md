@@ -280,6 +280,18 @@ block — never triaging messages, moving lanes, or setting labels.
    cases, open reminders, and unanswered messages. Work the **top 3** unresolved
    entries; the *whole* list still goes into the report (STEP 8) regardless.
 
+   **The open-task set rides the same read.** Call **`list_tasks`** (the `board`
+   MCP) with its defaults — the default scope already excludes tasks inside done
+   or archived cases, which is what you want: never chase a task whose case is
+   finished. This is a second read beside `starving`, not part of it (`starving`
+   ranks cases, reminders and messages — a task never appears there): a task in
+   `overdue` is already-dated work that is slipping, and a long-undated task
+   (bucket `undated` with an old created date — every line carries it) is work
+   that has silently left the calendar's reach. Name the **overdue and
+   long-undated tasks** in the STEP 8 report; chasing stays governed by the
+   top-3 rule above — this read widens what the report *names*, not how much
+   the lens *does*.
+
    **Orphan-block hygiene, before chasing anything new.** The daily
    `reminders-review` sweep can dismiss a reminder whose chase block *this* lens
    placed yesterday, and it knows nothing about calendar events. So `list_events`
@@ -395,9 +407,10 @@ Close with one report, grouped **by domain**, then by class:
   placed for the top 3, what could not be resolved (vault empty AND web empty → say
   so; a human-frozen task → flagged; unallocatable within the horizon → named), any
   entry that returned **escalated** (a passed, unactioned block), any orphaned
-  chase blocks the hygiene sweep removed, any web source **discarded** on a
-  flagged guard verdict, and whether web research ran with the guard **offline**
-  (admitted unscanned).
+  chase blocks the hygiene sweep removed, when the lens ran, the **overdue and
+  long-undated tasks** the open-task read (`list_tasks`) surfaced — named even
+  when unchased, any web source **discarded** on a flagged guard verdict, and
+  whether web research ran with the guard **offline** (admitted unscanned).
 
 Then stop. The sweep is **idempotent by construction**: an already-well-filed case
 is no longer an orphan and is skipped; your own prior placements are refined, not

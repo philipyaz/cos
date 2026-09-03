@@ -20,6 +20,8 @@ export const TRIAGE_DECISION_STATUS = ["active", "reversed"];
 // The three hierarchy tiers (in lockstep with VALID_CASE_KIND in board/lib/types.ts).
 // All three are CaseRecords; `kind` absent === "case" (a leaf).
 export const CASE_KIND = ["initiative", "workstream", "case"];
+// The five task-list display buckets (in lockstep with TASK_BUCKETS in board/lib/selectors.ts).
+export const TASK_DUE_BUCKET = ["overdue", "today", "week", "later", "undated"];
 
 // ── Tool definitions ─────────────────────────────────────────────────────────
 
@@ -123,9 +125,9 @@ const GET_CASE_TOOL = {
   description:
     "Fetch a single case from the Cos board by id (e.g. 'CASE-1'). Returns the case " +
     "fields (including `domain`, `priority`, `dueAt`, `archivedAt`, and linked vault context " +
-    "pages), its tasks (the checklist, with each task's status, owner, and dueAt), its recent " +
-    "activity log, and the messages linked to it. Use this to load a case's current state before " +
-    "acting on it." +
+    "pages), its tasks (the checklist, with each task's status, owner, dueAt, and — once done — " +
+    "completedAt), its recent activity log, and the messages linked to it. Use this to load a " +
+    "case's current state before acting on it." +
     " It ALSO surfaces the case's MANUAL ACTIONS — the edits the user made by hand (lane moves, task completions, field changes) — which you MUST NOT undo, reopen, or override without explicit instruction. Treat the human's deliberate state as authoritative; when an email or inference seems to conflict, add a note (or propose the change) instead of reverting.",
   inputSchema: {
     type: "object",
@@ -484,6 +486,46 @@ const DELETE_TASK_TOOL = {
       taskId: { type: "string", description: "Task id, e.g. 'CASE-1-T1'." },
     },
     required: ["id", "taskId"],
+  },
+};
+
+const LIST_TASKS_TOOL = {
+  name: "list_tasks",
+  description:
+    "List tasks across EVERY case — the plain enumeration that add_task/update_task/complete_task/" +
+    "delete_task never had a list verb for. One compact line each: task id · status · title · " +
+    "owning case id+title+lane · effective due (suffixed '(case due)' when inherited from the case, " +
+    "for a task that carries no date of its own) · created date. Grouped into buckets — overdue / " +
+    "today / week / later / undated — with `undated` a FIRST-CLASS bucket that is NEVER dropped " +
+    "(most open tasks on this board carry no date at all). The default `scope` already EXCLUDES " +
+    "tasks whose case is done or archived; pass `scope:'all'` to add done-case rows back, each " +
+    "DISTINGUISHED by its case's status — a large share of this board's open tasks sit inside " +
+    "already-done cases, so ignoring this can ship a list that is missing much of the real total. " +
+    "The default `status` excludes 'done' — pass `status:'done'` to see completed tasks instead " +
+    "(they still carry a bucket). Read-only. `GET /api/tasks`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      status: {
+        type: "string",
+        enum: TASK_STATUS,
+        description: "Restrict to one status. Defaults to every status except 'done'.",
+      },
+      scope: {
+        type: "string",
+        enum: ["live", "all"],
+        description:
+          "'live' (default) excludes tasks whose case is done, archived, or future-snoozed. 'all' " +
+          "adds done-case (and snoozed-case) rows back, each distinguished by its caseStatus.",
+      },
+      due: {
+        type: "string",
+        enum: TASK_DUE_BUCKET,
+        description: "Restrict to one due bucket.",
+      },
+      caseId: { type: "string", description: "Only tasks owned by this case id, e.g. 'CASE-3'." },
+      owner: { type: "string", description: "Only tasks whose `owner` matches (trimmed equality)." },
+    },
   },
 };
 
@@ -1465,6 +1507,7 @@ export const TOOLS = [
   UPDATE_TASK_TOOL,
   COMPLETE_TASK_TOOL,
   DELETE_TASK_TOOL,
+  LIST_TASKS_TOOL,
   // notes
   ADD_NOTE_TOOL,
   // messages
