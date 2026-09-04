@@ -32,7 +32,7 @@ const TRAINING_PLAN_FILE = join(REPO_ROOT, "board", ".claude", "skills", "fitnes
 const BRIEF_FILE = join(REPO_ROOT, "board", ".claude", "skills", "fitness-pre-workout-brief", "SKILL.md");
 const SERVER_FILE = join(REPO_ROOT, "mcp", "fitness-server", "server.mjs");
 const CLIENT_FILE = join(REPO_ROOT, "board", "lib", "fitness-client.ts");
-const MIN_KEYS = 3; // the post-change field count — see the header comment above.
+const MIN_KEYS = 4; // the post-change field count — see the header comment above.
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -111,6 +111,38 @@ check(
 // --- job 2: fixed, load-bearing, SECTION-SCOPED phrases (few, individually named) --------------
 for (const phrase of ["set_plan_day_outcome", "provenDone", "one batched", "unattended", "proceed to STEP 1", "keep the old date", "one entry per date"]) {
   check(containsPhrase(closeOutSection, phrase), `the training-plan "### 0.5" section states '${phrase}'`);
+}
+
+// --- job 2b: the close-out DEPOSIT contract (cos-ops#67) — three tool identifiers (case-
+// sensitive plain substring, like the field checks above — NOT containsPhrase, which is
+// case-insensitive and blind to a line wrap) plus two canonical guardrail phrases that must
+// land VERBATIM. Those two are long enough to wrap at this file's ~72-col width, so they're
+// matched with a whitespace/hyphen-tolerant regex built from the phrase's own words rather
+// than a literal substring (ops#68's complaint about this family's exact-substring phrase
+// checks going silently blind to a line wrap).
+const phraseRe = (phrase) =>
+  new RegExp(
+    phrase
+      .trim()
+      .split(/\s+/)
+      .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[\\s-]+"),
+    "i",
+  );
+for (const tool of ["create_reminder", "update_reminder", "complete_reminder"]) {
+  check(
+    closeOutSection.includes(tool),
+    `the training-plan "### 0.5" section names '${tool}' (the close-out deposit, cos-ops#67)`,
+  );
+}
+for (const phrase of [
+  "keep exactly one open close-out reminder — find it by its exact title and update it in place; never mint a second",
+  "a clean run deposits nothing",
+]) {
+  check(
+    phraseRe(phrase).test(closeOutSection),
+    `the training-plan "### 0.5" section states (wrap-tolerantly) '${phrase}'`,
+  );
 }
 check(
   containsPhrase(trainingPlanSrc, "a rest day OR a `resolved` day — carries an\n`eventId`") ||

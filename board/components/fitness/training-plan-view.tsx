@@ -31,6 +31,7 @@ interface PlanDay {
   zones: string;
   status?: string; // cos-ops#19: absent ≡ "planned" | "done" | "skipped" | "moved"
   movedTo?: string; // present only while status === "moved"
+  eventId?: string; // cos-ops#66: the calendar-push receipt (board-owned)
 }
 
 interface TrainingPlan {
@@ -249,6 +250,19 @@ function PlanBody({ plan, artifactId, artifactUpdatedAt }: { plan: TrainingPlan;
                         )}
                       </>
                     )}
+                    {/* cos-ops#66: the missing calendar-push receipt, on its OWN condition (a
+                        session day, still effectively planned, no eventId) — never nested under
+                        the `type !== "rest"` fragment above, which is a narrower predicate.
+                        Absence of this chip on a receipted or resolved day IS the distinguishable
+                        render; no positive "on calendar" pill (opposite polarity from the
+                        meal-plan view's — a whole week of positive pills here would be noise). */}
+                    {isSessionDay(day) &&
+                      (overrides[day.date]?.status ?? day.status ?? "planned") === "planned" &&
+                      !day.eventId && (
+                        <span className="text-[11px] font-medium px-1.5 py-0.5 rounded border bg-ink-50 text-ink-500 border-ink-200">
+                          Not on calendar
+                        </span>
+                      )}
                   </div>
                   {day.description && (
                     <p className="mt-1 text-[12px] text-ink-600 leading-relaxed">

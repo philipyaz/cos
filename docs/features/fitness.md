@@ -300,9 +300,11 @@ the day-type enum is open, so this is always a DENY-list check, never an allow-l
 **The computed read — `reconciliation` on the artifact GET.** For a `training_plan`, `GET
 /api/fitness/coaching/<id>` (and `get_coaching_artifact`) also returns a `reconciliation`:
 `sessionDays` (how many session days the plan has), `outcomes` (a `{done,skipped,moved,planned}`
-tally over all session days), and `unresolvedDays` (session days dated before today that are
+tally over all session days), `unresolvedDays` (session days dated before today that are
 still `planned` — each flagged `provenDone` when a same-date `healthEntries` workout entry
-already proves it happened, with the proving `healthEntryId`). This is **compute-on-read, never
+already proves it happened, with the proving `healthEntryId`), and `calendarCoverage` (cos-ops#66
+— `withEventId`/`sessionDays` over the same session-day universe, plus `missing`: unresolved
+planned days carrying no calendar-push receipt). This is **compute-on-read, never
 stored** (ADR 0017) — the engine
 ([`board/lib/fitness-plan-status.ts`](https://github.com/philipyaz/cos/blob/main/board/lib/fitness-plan-status.ts))
 is pure, clock-free, and matches proof at the DATE level only, never by sport (a fuzzy join

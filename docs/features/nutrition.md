@@ -254,6 +254,7 @@ log, pantry, and meal plan already on the store. It returns:
 |---|---|
 | `stalePlannedMeals` | `{ count, oldestDate, oldestAgeDays, ids }` — past-dated `planned` meal-plan entries. |
 | `provablyCooked` | `{ count, matches: { mealId, foodLogId }[] }` — the subset of stale meals with a same-date, same-slot food-log entry naming their `MEAL-<n>` id (see the proof convention below). |
+| `unpushedPlannedMeals` | `{ count, ids }` — planned meal-plan entries dated today or later with no calendar-push receipt (`eventId`) yet (cos-ops#66). |
 | `daysSinceLastFoodLog` / `daysSinceLastPantryWrite` | calendar-day gaps since the food log / pantry was last touched. |
 | `expiredPantryItems` | `{ count, ids }` — pantry items whose `expiresAt` is before today. |
 | `pantryLifecycle` | `{ fresh, likelyPastHorizon, excluded }` — a fresh/staple/spice scoping of the pantry (from `category`+`location` alone) plus a **computed** freshness horizon for the fresh class; see below. |

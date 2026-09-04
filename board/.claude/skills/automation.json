@@ -32,7 +32,7 @@
     "summary": "Reconciles the meal plan first — auto-closing past-dated planned meals a food log proves were cooked, batching the rest into one question — then plans the week's meals from what's on hand (preferring what's expiring), or checks how you're tracking to your calorie target — and keeps the persistent shopping list (JOB 6): candidates from plan + pantry, one batched confirmation.",
     "schedules": [
       { "trigger": "Run /nutrition-chef take stock of the pantry and draft the shopping list", "cadence": "Friday (before the weekend shop)", "does": "Takes stock of the pantry — what's expired, what's likely past its freshness horizon, what this week's plan needs — and drafts the weekend **shopping list**, after the standing meal-plan reconcile." },
-      { "trigger": "Run /nutrition-chef plan this week's meals, preferring what's expiring", "cadence": "Sunday", "does": "Plans the week's meals from what's on hand (preferring what's expiring), honoring allergies + diet, optionally onto the calendar — after the standing meal-plan reconcile." }
+      { "trigger": "Run /nutrition-chef plan this week's meals, preferring what's expiring", "cadence": "Sunday", "does": "Plans the week's meals from what's on hand (preferring what's expiring), honoring allergies + diet, onto the calendar by default — after the standing meal-plan reconcile." }
     ]
   },
   "fitness-pre-workout-brief": {

@@ -65,9 +65,13 @@ rotation reads intentions instead of reality.
 
 - **Find the most recent prior plan.** `list_coaching_artifacts { kind:"training_plan", limit:4 }`,
   take the most recent one whose week PRECEDES the week you're about to plan, then
-  `get_coaching_artifact { id }` and read its **`reconciliation`** — all three fields:
-  `sessionDays` (the batched line's "N planned"), `outcomes` (feeds STEP 4's rotation), and
-  `unresolvedDays`.
+  `get_coaching_artifact { id }` and read its **`reconciliation`** — all four fields:
+  `sessionDays` (the batched line's "N planned"), `outcomes` (feeds STEP 4's rotation),
+  `unresolvedDays`, and `calendarCoverage` (last week's did-the-hand-off-ever-**landed**
+  detector — history only, a past week's dates are no longer placeable). State it in the run
+  report as "last week N of M session days never landed on the calendar" — word it "never
+  landed", not "the push never ran": a zero is equally consistent with a push that ran and
+  every placement was declined (only STEP 8's own `results[].reason` says why).
 - **Auto-resolve the proven subset, silently.** For every `unresolvedDays.days[]` entry with
   `provenDone: true`, call `set_plan_day_outcome(artifact_id, date, "done")` — no need to ask,
   a same-date workout entry already proves it happened. Cite the proving `healthEntryId` in your
@@ -82,6 +86,20 @@ rotation reads intentions instead of reality.
   and **proceed to STEP 1 immediately** — the unanswered days stay `planned` and are re-asked
   next run. Only a conversational run waits for the answer; the weekly plan is never skipped
   because a question went unanswered.
+- **Before batching — every mode — consume ticks on the standing close-out reminder.**
+  `list_reminders { status:"open" }`, exact title match on **`Training week close-out —
+  sessions awaiting an answer`**; found → `get_reminder` it and read each ticked task as
+  Philip's own answer for that day: `set_plan_day_outcome(artifact_id, date, "done")`, citing
+  the tick. A ticked day is resolved — it drops out of the batch above and the deposit below.
+- **Unattended run: deposit what's left unresolved as that same reminder.** Keep exactly one
+  open close-out reminder — find it by its exact title and update it in place; never mint a
+  second. One `ReminderTask` per remaining unresolved day, title `<date> — <sport> (<type>) —
+  tick if DONE` and `done:false`; `detail` carries the question, how to answer, and the
+  artifact id/periodKey so a tick routes to the right record; `dueAt` = today. None yet →
+  `create_reminder`; one exists → `update_reminder` with the FULL task list, id-less, `done`
+  explicit on every item — an omitted `done` resets a tick on the wholesale replace. The set
+  empties and the reminder still exists → `complete_reminder` it. A clean run deposits nothing.
+  The conversational path above is unchanged; this is the unattended branch only.
 - **Answers.** "done" / "skipped" → `set_plan_day_outcome(artifact_id, date, status)`. "move it
   [to \<date\>]" → `set_plan_day_outcome(artifact_id, date, "moved", moved_to:<chosen date>)`
   **and** carry that session into the new week's plan you're about to author (place it on
@@ -257,9 +275,10 @@ single yes before calling it. In auto mode, call it and report.
 **Relay every `skipped` result with its reason** — `rest_day` (expected, no action
 needed), `resolved` (the day was already marked done/skipped/moved by STEP 0.5's close-out or
 the training-plan view; expected), `no_free_slot` (the day was genuinely
-fully booked; tell the user which day), or `outside_working_hours` (every candidate slot fell
+fully booked; tell the user which day), `outside_working_hours` (every candidate slot fell
 inside working hours — this is a policy skip, not congestion; tell the user their working day
-left no margin). When a skipped result — a rest day OR a `resolved` day — carries an
+left no margin), or `past` (the day is already gone — a past date is never placed; expected,
+no action, and reachable on a mid-week re-push). When a skipped result — a rest day OR a `resolved` day — carries an
 `eventId`, a session is still on the calendar for a slot that no longer holds one (the plan
 changed since that day was last pushed, or the day was **moved** and its original slot is now
 stale) — tell the user and offer to remove it via the `calendar` MCP's delete tool (the board
@@ -267,14 +286,23 @@ itself never deletes it). A `resolved` result without an `eventId` needs no acti
 button calls the same route server-side; either path works, but only this skill's
 path can supply `busy_windows`.)
 
+**Close the loop — report the coverage figure.** After the push, re-read the saved week
+(`get_coaching_artifact`) and report `calendarCoverage`: "N of `sessionDays` session days on
+the calendar", naming any `missing.dates` alongside the skip reasons above. The push is not a
+one-time default — it is idempotent, so **call it again whenever coverage is incomplete**
+(`calendarCoverage.missing.count > 0`), rather than assuming an earlier run already covered
+the week; this is what lets an unattended re-run self-heal a week that never got pushed.
+
 ### 9. Tell the user
 
 Confirm the plan is **saved** and **visible in the `/fitness/training-plan` history
 feed** (latest-by-default). Call out the **week's focus**, the **`recovery_status`**
 driving the intensity, the **rest/recovery days**, and — explicitly — **how this week
 rotates/progresses vs. last** (the variety is the value; make it legible). Report
-what STEP 8's calendar push did (created / updated / skipped, with reasons) and
-offer the **weekly review / pre-workout brief** (fitness-coach) as follow-ups. Carry
+what STEP 8's calendar push did (created / updated / skipped, with reasons), the
+resulting **`calendarCoverage`** figure for the new week, and — when STEP 0.5 touched
+one — the close-out reminder id (deposited / updated / completed). Offer the **weekly
+review / pre-workout brief** (fitness-coach) as follow-ups. Carry
 the **not-medical-advice** framing.
 
 ---
