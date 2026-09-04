@@ -212,8 +212,22 @@ so the digest's scope is Gmail, stated as such below. Fully self-contained — n
 `/mail-to-board`'s own steps.
 
 - **One call:** `list_triage_decisions({ source: "gmail" })`.
-- **Nothing new** — `firstTime` is empty → **one line**: *"nothing new was filtered from your
-  mail."* — and move on (the no-op case; most runs land here).
+- **An empty digest has three meanings — branch on the numbers, never on `firstTime` alone:**
+  - **Nothing new** — `firstTime` empty and `dropped > 0` → **one line**: *"nothing new was
+    filtered from your mail."* — and move on (the genuine no-op: the ledger is live and no new
+    sender came up).
+  - **Zero drops ever** — `dropped` is `0` while `promoted > 0` (the tool answers *"No drop
+    records…"*) → **report the anomaly, NOT the reassurance**: the filter's receipt has never been
+    written, so "nothing new" is unverifiable. One line, both numbers, honest scopes — zero drops
+    ever recorded, against `promoted` inbound Gmail threads currently on the board (a receipt
+    count, never a drop rate — a dropped thread never becomes a board message, so the denominator
+    counts what was kept, not what the gate faced). Then name the two candidate causes so the line
+    is actionable: either the Cowork bundle for `/mail-to-board` predates the drop ledger (rebuilt
+    zip never re-uploaded — the stale-bundle silent no-op), or the five-test gate has genuinely
+    never fired since the ledger shipped. This branch stays a report — fix nothing, write nothing
+    from here.
+  - **Nothing swept yet** — `promoted` is `0` too → stay quiet; there is no sweep history to
+    report on either way.
 - **Otherwise**, the scale line — *"~`dropped` emails from `senders` senders filtered so far
   (promoted: `promoted`); K senders new since your last review:"* — then **one line per
   first-time sender**, never a per-email list: sender · reasons×counts · since `firstSeen` ·
@@ -264,8 +278,10 @@ Then **report** a consolidated tally:
 - **Needs you** — passed deadlines that might still be owed (e.g. the meter readings) —
   surfaced, **not** closed.
 - **Kept open** — still-live nudges (awaiting the other side, future-dated, starred).
-- **Filtered mail** (STEP 5) — *"K new senders surfaced (answered: X confirmed, Y kept)"*, or the
-  one-line no-op (*"nothing new was filtered from your mail"*) when `firstTime` was empty.
+- **Filtered mail** (STEP 5) — *"K new senders surfaced (answered: X confirmed, Y kept)"*; or the
+  one-line no-op (*"nothing new was filtered from your mail"*) when the ledger held drops but no
+  new sender; or the zero-drops anomaly line when the ledger was empty while mail was promoted; or
+  silence when nothing was ever swept.
 - The board surface: **`<BOARD_URL>`** → the **Reminders** page.
 
 ---
