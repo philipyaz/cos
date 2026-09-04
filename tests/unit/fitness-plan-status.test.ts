@@ -48,7 +48,12 @@ test("VALID_PLAN_DAY_OUTCOME is the four-value enum", () => {
 
 // ── computePlanReconciliation: garbage in → zeros out, never throws ─────────────────────────────
 test("computePlanReconciliation: missing/non-array/dayless days → zeros, no throw", () => {
-  const empty = { sessionDays: 0, outcomes: { done: 0, skipped: 0, moved: 0, planned: 0 }, unresolvedDays: { count: 0, days: [] } };
+  const empty = {
+    sessionDays: 0,
+    outcomes: { done: 0, skipped: 0, moved: 0, planned: 0 },
+    unresolvedDays: { count: 0, days: [] },
+    calendarCoverage: { sessionDays: 0, withEventId: 0, missing: { count: 0, dates: [] } },
+  };
 
   assert.deepEqual(computePlanReconciliation({ payload: {}, healthEntries: [], today: TODAY }), empty, "no days key at all");
   assert.deepEqual(
@@ -203,6 +208,58 @@ test("computePlanReconciliation: sessionDays equals the sum of every outcomes bu
     r.sessionDays,
     "every session day is counted in exactly one outcomes bucket",
   );
+});
+
+// ── calendarCoverage (cos-ops#66): the calendar-push receipt over the SAME deny-list universe ──
+test("computePlanReconciliation: calendarCoverage counts receipts over the deny-list universe only", () => {
+  const r = computePlanReconciliation({
+    payload: {
+      days: [
+        { date: "2026-07-20", type: "endurance", sport: "running", eventId: "EVT-1" }, // receipted, planned
+        { date: "2026-07-21", type: "strength", sport: "strength" }, // planned, no receipt — missing
+        { date: "2026-07-22", type: "tempo", sport: "running", status: "done" }, // resolved, no receipt — neither bucket
+        { date: "2026-07-23", type: "rest", sport: "rest", eventId: "EVT-STRAY" }, // rest day — outside the universe entirely
+      ],
+    },
+    healthEntries: [],
+    today: TODAY,
+  });
+  assert.deepEqual(
+    r.calendarCoverage,
+    { sessionDays: 3, withEventId: 1, missing: { count: 1, dates: ["2026-07-21"] } },
+    "the rest day's stray eventId never counts — same deny-list scope as sessionDays",
+  );
+});
+
+test("computePlanReconciliation: calendarCoverage.missing includes a FUTURE planned day too — unlike unresolvedDays", () => {
+  const r = computePlanReconciliation({
+    payload: { days: [{ date: TODAY, type: "endurance", sport: "running" }] }, // today, planned, no receipt
+    healthEntries: [],
+    today: TODAY,
+  });
+  assert.equal(r.unresolvedDays.count, 0, "today's own session is not yet unresolved");
+  assert.equal(r.calendarCoverage.missing.count, 1, "but it IS missing a calendar receipt — coverage is not date-bounded");
+});
+
+test("computePlanReconciliation: calendarCoverage recomputes when a fixture's eventId is added/removed — pure, no store", () => {
+  const base = { date: "2026-07-20", type: "endurance", sport: "running" };
+
+  const withReceipt = computePlanReconciliation({
+    payload: { days: [{ ...base, eventId: "EVT-1" }] },
+    healthEntries: [],
+    today: TODAY,
+  });
+  assert.equal(withReceipt.calendarCoverage.withEventId, 1);
+  assert.equal(withReceipt.calendarCoverage.missing.count, 0);
+
+  const withoutReceipt = computePlanReconciliation({
+    payload: { days: [base] },
+    healthEntries: [],
+    today: TODAY,
+  });
+  assert.equal(withoutReceipt.calendarCoverage.withEventId, 0, "removing the receipt drops withEventId");
+  assert.equal(withoutReceipt.calendarCoverage.missing.count, 1, "and the day now counts as missing");
+  assert.deepEqual(withoutReceipt.calendarCoverage.missing.dates, ["2026-07-20"]);
 });
 
 test("effectivePlanDayStatus: the ONE reader — valid is itself, anything else is 'planned'", () => {

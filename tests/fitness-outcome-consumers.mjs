@@ -32,7 +32,7 @@ const TRAINING_PLAN_FILE = join(REPO_ROOT, "board", ".claude", "skills", "fitnes
 const BRIEF_FILE = join(REPO_ROOT, "board", ".claude", "skills", "fitness-pre-workout-brief", "SKILL.md");
 const SERVER_FILE = join(REPO_ROOT, "mcp", "fitness-server", "server.mjs");
 const CLIENT_FILE = join(REPO_ROOT, "board", "lib", "fitness-client.ts");
-const MIN_KEYS = 3; // the post-change field count — see the header comment above.
+const MIN_KEYS = 4; // the post-change field count — see the header comment above.
 
 let failures = 0;
 const check = (cond, msg) => {

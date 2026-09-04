@@ -510,7 +510,9 @@ const GET_COACHING_ARTIFACT_TOOL = {
     "Fetch one coaching artifact by its id (e.g. 'COACH-3'). Ungated read. For a training_plan, " +
     "the response also carries a computed 'reconciliation' (cos-ops#19: sessionDays, outcomes, " +
     "and unresolvedDays — past session days still 'planned', each flagged provenDone when a " +
-    "same-date workout entry already proves it happened) — compute-on-read, never stored.",
+    "same-date workout entry already proves it happened; cos-ops#66: calendarCoverage — which " +
+    "session days carry a calendar-push receipt and which a push would still place) — " +
+    "compute-on-read, never stored.",
   inputSchema: {
     type: "object",
     properties: {

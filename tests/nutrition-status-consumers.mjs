@@ -9,7 +9,7 @@
 // to get the field list, and greps ONLY JOB 0's own section of SKILL.md, not the whole file: a
 // whole-file grep passes on incidental mentions (an example line, a parenthetical) — the exact
 // shape of the pre-change bug — while the acceptance criterion is that JOB 0 itself consumes the
-// field. Fails loudly if fewer than 8 keys parse, so a refactor that moves the interface or drops
+// field. Fails loudly if fewer than 9 keys parse, so a refactor that moves the interface or drops
 // a key breaks THIS test rather than silently passing it with a shrunken field list.
 //
 //   node tests/nutrition-status-consumers.mjs
@@ -20,7 +20,7 @@ import { REPO_ROOT } from "../config/load-config.mjs";
 
 const ENGINE_FILE = join(REPO_ROOT, "board", "lib", "nutrition-status.ts");
 const SKILL_FILE = join(REPO_ROOT, "board", ".claude", "skills", "nutrition-chef", "SKILL.md");
-const MIN_KEYS = 8; // the post-change field count — see the header comment above.
+const MIN_KEYS = 9; // the post-change field count — see the header comment above.
 
 let failures = 0;
 const check = (cond, msg) => {

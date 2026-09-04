@@ -124,9 +124,11 @@ JOB 3 plans anything new, and now acts on everything the read returns.
 re-entry is "start again from today," stated not asked), pantry freshness
 (`daysSinceLastPantryWrite` + `pantryLifecycle`'s fresh/past-horizon/excluded counts —
 collapse the two into one clause when they tell the same silence, per
-`references/lifecycle.md`), printed expiries (`expiredPantryItems` — a fact), and targets
-(`hasNutritionTargets`/`daysSinceLastTargets`). **Clean no-op:** nothing stale, no items
-past horizon, no expired items, recent logging, targets present — one line, no lecture.
+`references/lifecycle.md`), printed expiries (`expiredPantryItems` — a fact), the calendar
+hand-off (`unpushedPlannedMeals` — upcoming planned meals not yet on the calendar), and
+targets (`hasNutritionTargets`/`daysSinceLastTargets`). **Clean no-op:** nothing stale, no
+items past horizon, no expired items, recent logging, nothing unpushed, targets present —
+one line, no lecture.
 
 **3. Auto-resolve only the PROVEN set.** `provablyCooked.matches` pairs each stale meal
 with the `FOOD-<n>` entry that proves it (same date + slot, food log names the meal's
@@ -151,6 +153,14 @@ through JOB 2's `reconcile_pantry`, not from here.
 **5. Report the tally**: N auto-closed (with proofs), N proposed, the lifecycle numbers
 (fresh / past-horizon / excluded), and — targets missing or stale (~14+ days) — one line
 pointing at JOB 5. Idempotent: re-runs converge to nothing new.
+
+**6. Nonzero `unpushedPlannedMeals` → push, don't ask.** It's a pure write with no question
+attached. **Auto mode:** call `push_meal_plan_to_calendar` with an explicit `from`/`to`
+spanning the unpushed dates (the default window is only `[today, today+7)` — a meal planned
+further out is otherwise counted by the signal and missed by the push; the same idempotent
+call JOB 3.4 makes) and report the before/after counts. **Approval mode:** state the number
+here and fold the push into JOB 3.4's existing single confirmation — this is a
+state-and-move-on, not a second question; JOB 0's one-question budget (item 4) stays intact.
 
 **The proof convention.** `FoodLogEntry` has no structured link to a meal-plan entry — a
 logged meal fulfilling a planned one names the plan's `MEAL-<n>` id in its `description`
@@ -392,6 +402,10 @@ rather than duplicates, so it's safe every time this job runs. This is the **sam
 approval-mode confirmation as the plan itself (see the gate above) — one combined yes
 for "plan the week AND put it on the calendar", never a second prompt.
 
+After the push, re-read `get_nutrition_status` and report the `unpushedPlannedMeals`
+figure — "now 0" when it cleared, or which meals still lack a receipt and why (the push's
+own per-meal `skipped` reason, or a date that fell outside the window just pushed).
+
 **Explicit-time requests still go the manual route.** When the user names a specific
 time (*"put dinner on my calendar at 7"*), the `eventId` must reference an
 **existing** CalendarEvent or `plan_meal` rejects the write — **create the event
@@ -613,7 +627,8 @@ renders it grouped by category).
 - **Meal plan:** `read_pantry` **first**; prefer on-hand + expiring ingredients; record
   `pantryItemIds` (soft refs). Calendar push is the **default** —
   `push_meal_plan_to_calendar` after planning/reconciling, idempotent + overlap-safe,
-  folded into the same approval-mode confirmation as the plan. Read the user's real
+  folded into the same approval-mode confirmation as the plan, reporting the
+  `unpushedPlannedMeals` figure afterward. Read the user's real
   calendar first and pass its busy times as `busy_windows` (date/start/end only —
   never store the content); working hours are protected automatically either way. An
   explicit named time still goes the manual route: `create_event` (calendar MCP)

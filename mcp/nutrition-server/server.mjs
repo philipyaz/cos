@@ -480,7 +480,8 @@ const GET_NUTRITION_STATUS_TOOL = {
     "`daysSinceLastPantryWrite`, `expiredPantryItems`, `pantryLifecycle` (fresh/staple/spice " +
     "scoping for routine reconciliation — spices and shelf-stable staples are OUT of the routine " +
     "sweep by default — plus fresh items likely past a computed, never-stored freshness horizon), " +
-    "and `hasNutritionTargets` + `daysSinceLastTargets`. Everything is computed fresh from " +
+    "`unpushedPlannedMeals` (cos-ops#66: planned meals dated today or later with no calendar-push " +
+    "receipt yet), and `hasNutritionTargets` + `daysSinceLastTargets`. Everything is computed fresh from " +
     "existing records on every call — nothing is stored here.",
   inputSchema: { type: "object", properties: {} },
 };
@@ -921,6 +922,13 @@ async function handleGetNutritionStatus() {
     lines.push(
       `Stale planned meals: ${stale.count} (oldest ${stale.oldestDate}, ${age} day${age === 1 ? "" : "s"} ago) — ${stale.ids.join(", ")}`,
     );
+  }
+
+  const unpushed = s.unpushedPlannedMeals ?? { count: 0, ids: [] };
+  if (unpushed.count === 0) {
+    lines.push("Meal plan → calendar: every upcoming planned meal is on the calendar.");
+  } else {
+    lines.push(`Planned meals not on the calendar (today onward): ${unpushed.count} — ${unpushed.ids.join(", ")}`);
   }
 
   const proven = s.provablyCooked ?? { count: 0, matches: [] };

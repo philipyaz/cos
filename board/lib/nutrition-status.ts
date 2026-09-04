@@ -72,6 +72,12 @@ export interface NutritionStatus {
   };
   hasNutritionTargets: boolean;
   daysSinceLastTargets: number | null;
+  // Planned meals dated today or later that never reached the calendar — no `eventId`
+  // receipt (cos-ops#66; the receipt is stamped by push-plan-to-calendar onto the entry,
+  // types.ts:452; ADR 0016 — coverage is a set difference over the initiator's own store).
+  // Presence-only (a dangling receipt counts as covered; the push live-checks). Past-dated
+  // planned meals are stalePlannedMeals' business — deliberately not double-counted here.
+  unpushedPlannedMeals: { count: number; ids: string[] };
 }
 
 // Compute the reconciliation status. ALWAYS resolvable: empty arrays → zero counts, null dates/ages,
@@ -102,6 +108,13 @@ export function computeNutritionStatus(input: {
     );
     if (proof) matches.push({ mealId: meal.id, foodLogId: proof.id });
   }
+
+  // ── unpushed planned meals: planned, dated today or later, with no calendar receipt
+  // (cos-ops#66). `date >= today` mirrors the push route's window START (route.ts:90, `from =
+  // today`) but not its END — the route's default window is half-open [today, today+7) (:91),
+  // so a meal planned 7+ days out counts here even though one default push would still skip
+  // it. Past-dated planned meals are stalePlannedMeals' own business, never double-counted. ──
+  const unpushed = mealPlanEntries.filter((m) => m.status === "planned" && m.date >= today && !m.eventId);
 
   // ── recency signals: food log / pantry-write / targets ──────────────────────────────────────────
   const lastFoodLogDate = foodLogs.reduce<string | null>(
@@ -164,5 +177,6 @@ export function computeNutritionStatus(input: {
     },
     hasNutritionTargets: nutritionTargets.length > 0,
     daysSinceLastTargets: lastTargetsPeriod != null ? wholeDaysBetween(lastTargetsPeriod, today) : null,
+    unpushedPlannedMeals: { count: unpushed.length, ids: unpushed.map((m) => m.id) },
   };
 }

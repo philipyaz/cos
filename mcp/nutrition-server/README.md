@@ -114,9 +114,11 @@ deterministic RECONCILIATION status — the read `/nutrition-chef` runs FIRST, o
 before any planning. Returns `stalePlannedMeals` (past-dated `planned` meal-plan entries — count,
 oldest date/age, ids), `provablyCooked` (the subset with a same-date+slot food-log entry naming
 their `MEAL-<n>` id — the auto-closeable set), `daysSinceLastFoodLog`, `daysSinceLastPantryWrite`,
-`expiredPantryItems`, and `hasNutritionTargets` + `daysSinceLastTargets`. Nothing here is stored —
-every field is recomputed fresh from the food log, pantry, meal plan, and targets already on the
-board.
+`expiredPantryItems`, `pantryLifecycle` (fresh/staple/spice scoping of the pantry plus a computed
+freshness horizon for the fresh class), `unpushedPlannedMeals` (planned meals dated today or later
+with no calendar-push receipt yet — cos-ops#66), and `hasNutritionTargets` + `daysSinceLastTargets`.
+Nothing here is stored — every field is recomputed fresh from the food log, pantry, meal plan, and
+targets already on the board.
 
 #### `list_food_log([from], [to], [slot], [date])`
 `GET /api/nutrition/log`. Lists entries **grouped by day** with a **per-day calorie rollup**,
