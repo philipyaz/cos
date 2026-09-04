@@ -38,7 +38,6 @@ export async function POST(
         detail: body.detail ? String(body.detail) : undefined,
         status: body.status ?? "open",
         owner: body.owner ? String(body.owner) : undefined,
-        completedAt: body.completedAt ? String(body.completedAt) : undefined,
         dueAt: body.dueAt ? String(body.dueAt) : undefined,
       });
       logActivity(rec, actor, "task_added", t.title);

@@ -129,6 +129,74 @@ async function main() {
     );
 
     // ----------------------------------------------------------------------
+    // completedAt gets one owner at task birth (cos-ops#58): a done-born task
+    // is stamped; a non-done birth drops a caller-supplied completedAt.
+    // ----------------------------------------------------------------------
+    const addDone = await POST(`/api/cases/${encodeURIComponent(idA)}/tasks`, {
+      title: "born done",
+      status: "done",
+    });
+    check(addDone.status === 201, `POST task status:done → 201 (got ${addDone.status})`);
+    check(
+      typeof addDone.body.task?.completedAt === "string" && addDone.body.task.completedAt !== "",
+      `a task born done carries a completedAt (${addDone.body.task?.completedAt})`,
+    );
+
+    const addOpenWithStamp = await POST(`/api/cases/${encodeURIComponent(idA)}/tasks`, {
+      title: "born open with a supplied stamp",
+      status: "open",
+      completedAt: "2026-01-01T00:00:00.000Z",
+    });
+    check(
+      addOpenWithStamp.status === 201,
+      `POST task status:open → 201 (got ${addOpenWithStamp.status})`,
+    );
+    check(
+      addOpenWithStamp.body.task?.completedAt === undefined,
+      "a non-done birth drops a caller-supplied completedAt",
+    );
+
+    // ----------------------------------------------------------------------
+    // POST /api/cases with tasks[] — the inline-builder path (path 2) routes
+    // through the same appendTask owner: ids/createdAt unchanged, a done item
+    // is stamped with the case's own shared `now`, an open one is not.
+    // ----------------------------------------------------------------------
+    const createdWithTasks = await POST("/api/cases", {
+      title: `API lifecycle tasks-at-birth ${marker}`,
+      domain: "work",
+      tasks: [{ title: "a" }, { title: "b", status: "done" }],
+    });
+    check(
+      createdWithTasks.status === 201,
+      `POST /api/cases with tasks[] → 201 (got ${createdWithTasks.status})`,
+    );
+    const caseWithTasks = createdWithTasks.body.case;
+    check(
+      caseWithTasks?.tasks?.[0]?.id === `${caseWithTasks?.id}-T1`,
+      `first inline task id is <case>-T1 (${caseWithTasks?.tasks?.[0]?.id})`,
+    );
+    check(
+      caseWithTasks?.tasks?.[1]?.id === `${caseWithTasks?.id}-T2`,
+      `second inline task id is <case>-T2 (${caseWithTasks?.tasks?.[1]?.id})`,
+    );
+    check(
+      caseWithTasks?.tasks?.[0]?.createdAt === caseWithTasks?.createdAt,
+      "first inline task's createdAt equals the case's createdAt",
+    );
+    check(
+      caseWithTasks?.tasks?.[1]?.createdAt === caseWithTasks?.createdAt,
+      "second inline task's createdAt equals the case's createdAt",
+    );
+    check(
+      caseWithTasks?.tasks?.[1]?.completedAt === caseWithTasks?.createdAt,
+      "the done inline task's completedAt equals the case's shared creation instant",
+    );
+    check(
+      caseWithTasks?.tasks?.[0]?.completedAt === undefined,
+      "the open inline task carries no completedAt",
+    );
+
+    // ----------------------------------------------------------------------
     // GET /api/tasks — the open-task list (cos-ops#51). Assertions are membership
     // by id, never counts — the sandbox store's pre-existing content is not this
     // test's to assume.

@@ -4,6 +4,7 @@ import {
   mutate,
   nextCaseId,
   findCase,
+  appendTask,
   applyCaseUpdate,
   describeCaseChange,
   logActivity,
@@ -140,20 +141,6 @@ export async function POST(req: NextRequest) {
     assertHierarchy(db, { id, kind, parentId });
     const now = new Date().toISOString();
 
-    const tasks: Task[] = Array.isArray(body.tasks)
-      ? body.tasks.map((t: Partial<Task>, i: number) => ({
-          id: `${id}-T${i + 1}`,
-          title: String(t.title ?? "Untitled task"),
-          detail: t.detail ? String(t.detail) : undefined,
-          status: VALID_TASK_STATUS.includes(t.status as TaskStatus)
-            ? (t.status as TaskStatus)
-            : "open",
-          owner: t.owner ? String(t.owner) : undefined,
-          createdAt: now,
-          dueAt: t.dueAt ? String(t.dueAt) : undefined,
-        }))
-      : [];
-
     const rec: CaseRecord = {
       id,
       title: String(body.title).trim(),
@@ -169,7 +156,7 @@ export async function POST(req: NextRequest) {
         ? Array.from(new Set(body.labels.map(String).map((s: string) => s.trim()).filter(Boolean)))
         : undefined,
       vaultLinks: Array.isArray(body.vaultLinks) ? body.vaultLinks.map(String) : undefined,
-      tasks,
+      tasks: [],
       messageIds: [],
       createdAt: now,
       updatedAt: now,
@@ -178,6 +165,28 @@ export async function POST(req: NextRequest) {
       startDate: body.startDate ? String(body.startDate) : undefined,
       priority: VALID_PRIORITY.includes(body.priority) ? (body.priority as Priority) : undefined,
     };
+
+    // Route body.tasks through appendTask — the single owner of completedAt at
+    // birth (it derives: present iff the task is born "done"). Coercions stay here
+    // (appendTask does no String() normalisation). Both timestamps are pinned to
+    // the case's shared `now` — completedAt is the route's OWN clock, never the
+    // caller's t.completedAt — so a create still carries a single instant.
+    if (Array.isArray(body.tasks)) {
+      for (const t of body.tasks as Partial<Task>[]) {
+        appendTask(rec, {
+          title: String(t.title ?? "Untitled task"),
+          detail: t.detail ? String(t.detail) : undefined,
+          status: VALID_TASK_STATUS.includes(t.status as TaskStatus)
+            ? (t.status as TaskStatus)
+            : "open",
+          owner: t.owner ? String(t.owner) : undefined,
+          createdAt: now,
+          completedAt: now,
+          dueAt: t.dueAt ? String(t.dueAt) : undefined,
+        });
+      }
+      rec.updatedAt = now; // appendTask touched it; pin to creation time (templates/route.ts:136 idiom)
+    }
 
     logActivity(rec, actor, "created");
     db.cases.unshift(rec);
