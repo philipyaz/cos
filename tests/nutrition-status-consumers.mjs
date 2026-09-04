@@ -70,6 +70,30 @@ for (const key of keys) {
   );
 }
 
+// --- deposit-step contract, cos-ops#67: the close-out DEPOSIT — three tool identifiers
+// (case-sensitive plain substring, matching this file's existing field-check style above)
+// plus two canonical guardrail phrases that must land VERBATIM. Those two are long enough
+// to wrap at this file's line width, so they're matched with a whitespace/hyphen-tolerant
+// regex built from the phrase's own words, not a literal substring.
+const phraseRe = (phrase) =>
+  new RegExp(
+    phrase
+      .trim()
+      .split(/\s+/)
+      .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[\\s-]+"),
+    "i",
+  );
+for (const tool of ["create_reminder", "update_reminder", "complete_reminder"]) {
+  check(job0.includes(tool), `JOB 0 names '${tool}' (the close-out deposit, cos-ops#67)`);
+}
+for (const phrase of [
+  "keep exactly one open close-out reminder — find it by its exact title and update it in place; never mint a second",
+  "a clean run deposits nothing",
+]) {
+  check(phraseRe(phrase).test(job0), `JOB 0 states (wrap-tolerantly) '${phrase}'`);
+}
+
 if (failures) {
   console.error(`\nFAIL — ${failures} check(s) failed.`);
   process.exit(1);

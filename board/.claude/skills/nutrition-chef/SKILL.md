@@ -130,7 +130,13 @@ targets (`hasNutritionTargets`/`daysSinceLastTargets`). **Clean no-op:** nothing
 items past horizon, no expired items, recent logging, nothing unpushed, targets present —
 one line, no lecture.
 
-**3. Auto-resolve only the PROVEN set.** `provablyCooked.matches` pairs each stale meal
+**3. Consume ticks on the standing close-out reminder — before anything below, every mode.**
+`list_reminders { status:"open" }`, exact title match on **`Meal plan close-out — planned
+meals awaiting an answer`**; found → `get_reminder` it and read each ticked task as Philip's
+own confirm-skipped answer: `update_meal_plan(id, status: "skipped")`, citing the tick. A
+ticked meal is resolved — it drops out of items 4–5 below.
+
+**4. Auto-resolve only the PROVEN set.** `provablyCooked.matches` pairs each stale meal
 with the `FOOD-<n>` entry that proves it (same date + slot, food log names the meal's
 `MEAL-<n>` id — the proof convention below). For each match:
 `update_meal_plan(mealId, status: "cooked")`, citing the proving `FOOD-id`. Never offer a
@@ -138,7 +144,7 @@ with the `FOOD-<n>` entry that proves it (same date + slot, food log names the m
 set in the batch too (mirror `/reminders-review` STEP 0) rather than flipping it
 silently.
 
-**4. ONE question at most, priority-ordered.** (a) the stale-meal skip-or-name-it batch,
+**5. ONE question at most, priority-ordered.** (a) the stale-meal skip-or-name-it batch,
 if any remain — *"12 planned meals from 24–41 days ago — mark them all skipped? (name
 any you actually cooked)"*; **else** (b) the pantry ramp, when the fresh scope is cold:
 **exactly one** action — a photo of the fridge/shelf through `reconcile_pantry` (JOB 2's
@@ -148,19 +154,26 @@ it to `cooked` and **offer** a `log_food` for it (**never fabricate one** — a 
 intake figure is worse than a blank day). Whichever need loses the priority is **stated,
 not asked** this run. Never per-item pantry correction or an unconfirmed delete.
 **Writes here stay `update_meal_plan` only** — a "yes" to the pantry ramp executes
-through JOB 2's `reconcile_pantry`, not from here.
+through JOB 2's `reconcile_pantry`, not from here. **Unattended: deposit (a)'s remainder
+instead of asking.** Keep exactly one open close-out reminder — find it by its exact title
+and update it in place; never mint a second. One task per remaining stale meal (`MEAL-<n> —
+<date> <slot>: <title> — tick to confirm SKIPPED (cooked? tell Cos or log it)`,
+`done:false`); none yet → `create_reminder`; one exists → `update_reminder` with the FULL
+task list, id-less, `done` explicit on every item — an omitted `done` resets a tick. Set
+empties and the reminder still exists → `complete_reminder`. A clean run deposits nothing.
 
-**5. Report the tally**: N auto-closed (with proofs), N proposed, the lifecycle numbers
-(fresh / past-horizon / excluded), and — targets missing or stale (~14+ days) — one line
+**6. Report the tally**: N auto-closed (with proofs), N proposed, the lifecycle numbers
+(fresh / past-horizon / excluded), the close-out reminder id when one was
+deposited/updated/completed, and — targets missing or stale (~14+ days) — one line
 pointing at JOB 5. Idempotent: re-runs converge to nothing new.
 
-**6. Nonzero `unpushedPlannedMeals` → push, don't ask.** It's a pure write with no question
+**7. Nonzero `unpushedPlannedMeals` → push, don't ask.** It's a pure write with no question
 attached. **Auto mode:** call `push_meal_plan_to_calendar` with an explicit `from`/`to`
 spanning the unpushed dates (the default window is only `[today, today+7)` — a meal planned
 further out is otherwise counted by the signal and missed by the push; the same idempotent
 call JOB 3.4 makes) and report the before/after counts. **Approval mode:** state the number
 here and fold the push into JOB 3.4's existing single confirmation — this is a
-state-and-move-on, not a second question; JOB 0's one-question budget (item 4) stays intact.
+state-and-move-on, not a second question; JOB 0's one-question budget (item 5) stays intact.
 
 **The proof convention.** `FoodLogEntry` has no structured link to a meal-plan entry — a
 logged meal fulfilling a planned one names the plan's `MEAL-<n>` id in its `description`
@@ -597,8 +610,11 @@ renders it grouped by category).
 
 ## Conventions (guardrails recap)
 
-- **`nutrition` MCP only, via the tools.** Never `bash`/`curl`. The board UI is the
-  read twin; you do the writing.
+- **`nutrition` MCP for every nutrition write, via the tools.** Never `bash`/`curl`. Two
+  sanctioned cross-MCP writes only: the `calendar` MCP for an explicit-time event (JOB 3),
+  and the `board` MCP's reminder tools (`create_reminder` / `update_reminder` /
+  `complete_reminder`) for JOB 0's close-out deposit. The board UI is the read twin; you do
+  the writing.
 - **The add-on must be ENABLED for writes.** A disabled add-on 404s every write ("Not
   found.") while reads stay open — tell the user to flip it on at **/addons**; you
   don't enable it yourself.

@@ -86,6 +86,20 @@ rotation reads intentions instead of reality.
   and **proceed to STEP 1 immediately** — the unanswered days stay `planned` and are re-asked
   next run. Only a conversational run waits for the answer; the weekly plan is never skipped
   because a question went unanswered.
+- **Before batching — every mode — consume ticks on the standing close-out reminder.**
+  `list_reminders { status:"open" }`, exact title match on **`Training week close-out —
+  sessions awaiting an answer`**; found → `get_reminder` it and read each ticked task as
+  Philip's own answer for that day: `set_plan_day_outcome(artifact_id, date, "done")`, citing
+  the tick. A ticked day is resolved — it drops out of the batch above and the deposit below.
+- **Unattended run: deposit what's left unresolved as that same reminder.** Keep exactly one
+  open close-out reminder — find it by its exact title and update it in place; never mint a
+  second. One `ReminderTask` per remaining unresolved day, title `<date> — <sport> (<type>) —
+  tick if DONE` and `done:false`; `detail` carries the question, how to answer, and the
+  artifact id/periodKey so a tick routes to the right record; `dueAt` = today. None yet →
+  `create_reminder`; one exists → `update_reminder` with the FULL task list, id-less, `done`
+  explicit on every item — an omitted `done` resets a tick on the wholesale replace. The set
+  empties and the reminder still exists → `complete_reminder` it. A clean run deposits nothing.
+  The conversational path above is unchanged; this is the unattended branch only.
 - **Answers.** "done" / "skipped" → `set_plan_day_outcome(artifact_id, date, status)`. "move it
   [to \<date\>]" → `set_plan_day_outcome(artifact_id, date, "moved", moved_to:<chosen date>)`
   **and** carry that session into the new week's plan you're about to author (place it on
@@ -285,8 +299,9 @@ Confirm the plan is **saved** and **visible in the `/fitness/training-plan` hist
 feed** (latest-by-default). Call out the **week's focus**, the **`recovery_status`**
 driving the intensity, the **rest/recovery days**, and — explicitly — **how this week
 rotates/progresses vs. last** (the variety is the value; make it legible). Report
-what STEP 8's calendar push did (created / updated / skipped, with reasons) and the
-resulting **`calendarCoverage`** figure for the new week, and offer the **weekly
+what STEP 8's calendar push did (created / updated / skipped, with reasons), the
+resulting **`calendarCoverage`** figure for the new week, and — when STEP 0.5 touched
+one — the close-out reminder id (deposited / updated / completed). Offer the **weekly
 review / pre-workout brief** (fitness-coach) as follow-ups. Carry
 the **not-medical-advice** framing.
 
