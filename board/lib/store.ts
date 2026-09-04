@@ -791,19 +791,24 @@ export function messagesForReminder(db: DBShape, id: string): MessageRecord[] {
   return messagesByReminderId(db.messages, id);
 }
 
+// `completedAt` is managed automatically: stamped when a task is born "done"
+// (an explicitly supplied value — an import/restore path — is honoured), and
+// never present otherwise — the same policy applyTaskUpdate enforces on every
+// later status flip.
 export function appendTask(
   caseRec: CaseRecord,
   partial: Omit<Task, "id" | "createdAt"> & { id?: string; createdAt?: string },
 ): Task {
   const now = nowISO();
+  const status = partial.status ?? "open";
   const task: Task = {
     id: partial.id ?? nextTaskId(caseRec),
     title: partial.title,
     detail: partial.detail,
-    status: partial.status ?? "open",
+    status,
     owner: partial.owner,
     createdAt: partial.createdAt ?? now,
-    completedAt: partial.completedAt,
+    completedAt: status === "done" ? partial.completedAt ?? now : undefined,
     dueAt: partial.dueAt,
     position: partial.position,
     subtasks: partial.subtasks,

@@ -387,6 +387,53 @@ test("appendTask: second append mints the next sequential id", () => {
   assert.equal(c.tasks.length, 2);
 });
 
+test('appendTask: a task born "done" is stamped completedAt', () => {
+  const c = makeCase({ id: "CASE-1" });
+  const before = Date.now();
+  const t = appendTask(c, { title: "x", status: "done" } as Task);
+  assertRecentISO(t.completedAt, before);
+});
+
+test("appendTask: a non-done birth drops a supplied completedAt", () => {
+  const c = makeCase({ id: "CASE-1" });
+  const t1 = appendTask(c, {
+    title: "x",
+    status: "open",
+    completedAt: "2026-01-01T00:00:00.000Z",
+  } as Task);
+  assert.equal(t1.completedAt, undefined);
+  const t2 = appendTask(c, { title: "y", completedAt: "2026-01-01T00:00:00.000Z" } as Task);
+  assert.equal(t2.completedAt, undefined);
+});
+
+test("appendTask: an explicit completedAt on a done birth is preserved", () => {
+  const c = makeCase({ id: "CASE-1" });
+  const t = appendTask(c, {
+    title: "x",
+    status: "done",
+    completedAt: "2020-01-02T03:04:05.000Z",
+  } as Task);
+  assert.equal(t.completedAt, "2020-01-02T03:04:05.000Z");
+});
+
+test("appendTask: the case-create shape — in order from empty, shared timestamps, done item stamped", () => {
+  const c = makeCase({ id: "CASE-9" });
+  const shared = "2026-03-04T05:06:07.000Z";
+  const open = appendTask(c, { title: "a", createdAt: shared, completedAt: shared } as Task);
+  const done = appendTask(c, {
+    title: "b",
+    status: "done",
+    createdAt: shared,
+    completedAt: shared,
+  } as Task);
+  assert.equal(open.id, "CASE-9-T1");
+  assert.equal(done.id, "CASE-9-T2");
+  assert.equal(open.createdAt, shared);
+  assert.equal(done.createdAt, shared);
+  assert.equal(done.completedAt, shared);
+  assert.equal(open.completedAt, undefined);
+});
+
 // ── applyCaseUpdate ──────────────────────────────────────────────────────────
 test("applyCaseUpdate: only present keys are touched; absent keys untouched", () => {
   const c = makeCase({ id: "CASE-1", title: "Orig", summary: "keep", eta: "soon" });
