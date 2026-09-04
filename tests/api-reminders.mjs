@@ -25,6 +25,13 @@
 //   • validation                   → bad caseId / missing title / bad status / bad dueAt
 //                                   all 400 (the bad-case error mentions the case)
 //   • DELETE                       → 200; the id no longer appears in GET /api/reminders
+//   • close-out deposit (cos-ops#67) → depositCycle() pins the board contract the
+//                                   fitness/nutrition close-out skills compose: find-by-
+//                                   exact-title idempotence (two cycles → one reminder),
+//                                   the id-less full-task-replace with `done` explicit
+//                                   (a carried done:true SURVIVES, an omitted one is WIPED
+//                                   by applyReminderUpdate's coercion), empty-set completes
+//                                   the reminder, and absent+empty creates nothing.
 //
 // It snapshots board/data/cases.json first and restores it in a `finally`, so the
 // live board is left EXACTLY as found (net-zero) — db.reminders lives in cases.json
@@ -456,6 +463,126 @@ async function main() {
     check(!afterDel.has(remId), "deleted reminder drops from GET /api/reminders");
     const goneDetail = await GET(`/api/reminders/${encodeURIComponent(remId)}`);
     check(goneDetail.status === 404, `GET the deleted reminder → 404 (got ${goneDetail.status})`);
+
+    // ----------------------------------------------------------------------
+    // close-out deposit contract (cos-ops#67) — pins the BOARD half of the mechanics
+    // fitness-training-plan STEP 0.5 / nutrition-chef JOB 0 both compose (find-by-exact-
+    // title, create-or-update-or-complete, id-less task replace with `done` explicit on
+    // every item). depositCycle() is the procedure verbatim; the consumer gates pin that
+    // the skill PROSE states it, this pins that the BOARD CONTRACT it relies on holds.
+    // ----------------------------------------------------------------------
+    const TODAY = new Date().toISOString().slice(0, 10);
+
+    // depositCycle(title, items) — items: [{ title, done }], `done` REQUIRED explicit on
+    // every item (never omitted) — applyReminderUpdate coerces an absent `done` to false
+    // on the wholesale tasks replace (store.ts:971), so a resend that forgets this wipes
+    // Philip's tick. Absent + non-empty → create; present + non-empty → update (full
+    // id-less replacement); present + empty → complete; absent + empty → no write.
+    async function depositCycle(title, items) {
+      const open = (await GET("/api/reminders?status=open")).body.reminders || [];
+      const existing = open.find((r) => r.title === title);
+      if (!existing) {
+        if (items.length === 0) return { action: "none" };
+        return {
+          action: "created",
+          res: await POST("/api/reminders", {
+            title,
+            detail: "close-out deposit test fixture",
+            dueAt: TODAY,
+            domain: "life",
+            tasks: items.map((it) => ({ title: it.title, done: Boolean(it.done) })),
+          }),
+        };
+      }
+      if (items.length === 0) {
+        return {
+          action: "completed",
+          id: existing.id,
+          res: await PATCH(`/api/reminders/${encodeURIComponent(existing.id)}`, { status: "done" }),
+        };
+      }
+      return {
+        action: "updated",
+        id: existing.id,
+        res: await PATCH(`/api/reminders/${encodeURIComponent(existing.id)}`, {
+          // id-less, `done` EXPLICIT on every item — applyReminderUpdate coerces an
+          // absent `done` to false on the wholesale replace, so forwarding it here (not
+          // dropping it, as the pre-fix stub did) is what lets a carried tick survive.
+          tasks: items.map((it) => ({ title: it.title, done: Boolean(it.done) })),
+        }),
+      };
+    }
+
+    const depositTitle = `API deposit cycle ${marker}`;
+    const fixtureItems = [{ title: "Item A" }, { title: "Item B" }, { title: "Item C" }];
+
+    // 1/2 — running the cycle TWICE with the same fixture leaves exactly ONE open
+    // reminder with that title (AC 2's idempotency), 3 tasks, titles intact.
+    await depositCycle(depositTitle, fixtureItems);
+    await depositCycle(depositTitle, fixtureItems);
+    const afterTwice = (await GET("/api/reminders?status=open")).body.reminders.filter(
+      (r) => r.title === depositTitle,
+    );
+    check(afterTwice.length === 1, `running the deposit cycle twice leaves exactly ONE open reminder (got ${afterTwice.length})`);
+    const depositId = afterTwice[0]?.id;
+    const depositTasks = afterTwice[0]?.tasks || [];
+    check(depositTasks.length === 3, `the reminder carries 3 tasks (got ${depositTasks.length})`);
+    check(
+      ["Item A", "Item B", "Item C"].every((t) => depositTasks.some((dt) => dt.title === t)),
+      "the 3 task titles are intact after two cycles",
+    );
+
+    // 3 — the tick-wipe edge the design guards against. Simulate Philip ticking "Item B"
+    // in the UI: a raw PATCH by the task's real id (ids ARE visible over HTTP, just not
+    // through the board MCP's renderers — that's the whole reason the procedure keys on
+    // the item id in the TITLE instead).
+    const taskB = depositTasks.find((t) => t.title === "Item B");
+    await PATCH(`/api/reminders/${encodeURIComponent(depositId)}`, {
+      tasks: depositTasks.map((t) => ({ id: t.id, title: t.title, done: t.id === taskB.id ? true : t.done })),
+    });
+    const afterTick = (await GET(`/api/reminders/${encodeURIComponent(depositId)}`)).body.reminder.tasks;
+    check(afterTick.find((t) => t.title === "Item B")?.done === true, "the simulated Philip tick landed on Item B");
+
+    // Re-run the deposit cycle resending all 3 items with Item B's done:true CARRIED (the
+    // failed-consumption-write carry rule) → the tick must SURVIVE the wholesale replace.
+    await depositCycle(depositTitle, [
+      { title: "Item A", done: false },
+      { title: "Item B", done: true },
+      { title: "Item C", done: false },
+    ]);
+    const afterCarry = (await GET(`/api/reminders/${encodeURIComponent(depositId)}`)).body.reminder.tasks;
+    check(
+      afterCarry.find((t) => t.title === "Item B")?.done === true,
+      "carrying done:true through the replacement SURVIVES the tick",
+    );
+
+    // Control: resend all 3 with `done` OMITTED on Item B — demonstrates WHY the carry is
+    // load-bearing: applyReminderUpdate coerces an absent `done` to false, so the tick is
+    // WIPED. This is the assertion pair that documents the reason the procedure always
+    // sends `done` explicit rather than letting a caller omit it.
+    await depositCycle(depositTitle, [{ title: "Item A" }, { title: "Item B" }, { title: "Item C" }]);
+    const afterControl = (await GET(`/api/reminders/${encodeURIComponent(depositId)}`)).body.reminder.tasks;
+    check(
+      afterControl.find((t) => t.title === "Item B")?.done === false,
+      "omitting done on the resend WIPES the tick (why the procedure sends done explicitly)",
+    );
+
+    // 4 — the unresolved set empties → complete, with completedAt stamped (AC 3).
+    await depositCycle(depositTitle, []);
+    const completed = (await GET(`/api/reminders/${encodeURIComponent(depositId)}`)).body.reminder;
+    check(completed.status === "done", `the emptied cycle completes the reminder (got status ${completed.status})`);
+    check(
+      typeof completed.completedAt === "string" && completed.completedAt.length > 0,
+      "the completed reminder carries a completedAt timestamp",
+    );
+
+    // 5 — a fresh title with an empty item set creates nothing at all (AC 4's board half).
+    const cleanTitle = `API deposit cycle clean ${marker}`;
+    const countBeforeClean = (await listReminders()).length;
+    await depositCycle(cleanTitle, []);
+    const remindersAfterClean = await listReminders();
+    check(remindersAfterClean.length === countBeforeClean, "a clean deposit (absent + empty) creates no reminder");
+    check(!remindersAfterClean.some((r) => r.title === cleanTitle), `no reminder titled '${cleanTitle}' exists`);
   } finally {
     // Restore — leave the live board exactly as found (net-zero).
     await fs.writeFile(DATA_FILE, snapshot, "utf8");
@@ -467,7 +594,7 @@ async function main() {
     process.exit(1);
   }
   console.log(
-    "\nPASS — reminders API holds (create/list/filter/patch/done/link/unlink/validate/delete + v6 tasks/labels/linked-emails/message-relink).",
+    "\nPASS — reminders API holds (create/list/filter/patch/done/link/unlink/validate/delete + v6 tasks/labels/linked-emails/message-relink + cos-ops#67's close-out deposit cycle).",
   );
 }
 

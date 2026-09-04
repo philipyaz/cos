@@ -9,7 +9,7 @@
 // to get the field list, and greps ONLY JOB 0's own section of SKILL.md, not the whole file: a
 // whole-file grep passes on incidental mentions (an example line, a parenthetical) — the exact
 // shape of the pre-change bug — while the acceptance criterion is that JOB 0 itself consumes the
-// field. Fails loudly if fewer than 8 keys parse, so a refactor that moves the interface or drops
+// field. Fails loudly if fewer than 9 keys parse, so a refactor that moves the interface or drops
 // a key breaks THIS test rather than silently passing it with a shrunken field list.
 //
 //   node tests/nutrition-status-consumers.mjs
@@ -20,7 +20,7 @@ import { REPO_ROOT } from "../config/load-config.mjs";
 
 const ENGINE_FILE = join(REPO_ROOT, "board", "lib", "nutrition-status.ts");
 const SKILL_FILE = join(REPO_ROOT, "board", ".claude", "skills", "nutrition-chef", "SKILL.md");
-const MIN_KEYS = 8; // the post-change field count — see the header comment above.
+const MIN_KEYS = 9; // the post-change field count — see the header comment above.
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -68,6 +68,30 @@ for (const key of keys) {
     `JOB 0 consumes '${key}' (a defined action, or an explicit state-and-move-on) — not found as a ` +
       `literal substring of the JOB 0 section (an incidental mention elsewhere in SKILL.md does not count)`,
   );
+}
+
+// --- deposit-step contract, cos-ops#67: the close-out DEPOSIT — three tool identifiers
+// (case-sensitive plain substring, matching this file's existing field-check style above)
+// plus two canonical guardrail phrases that must land VERBATIM. Those two are long enough
+// to wrap at this file's line width, so they're matched with a whitespace/hyphen-tolerant
+// regex built from the phrase's own words, not a literal substring.
+const phraseRe = (phrase) =>
+  new RegExp(
+    phrase
+      .trim()
+      .split(/\s+/)
+      .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[\\s-]+"),
+    "i",
+  );
+for (const tool of ["create_reminder", "update_reminder", "complete_reminder"]) {
+  check(job0.includes(tool), `JOB 0 names '${tool}' (the close-out deposit, cos-ops#67)`);
+}
+for (const phrase of [
+  "keep exactly one open close-out reminder — find it by its exact title and update it in place; never mint a second",
+  "a clean run deposits nothing",
+]) {
+  check(phraseRe(phrase).test(job0), `JOB 0 states (wrap-tolerantly) '${phrase}'`);
 }
 
 if (failures) {

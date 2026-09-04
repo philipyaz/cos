@@ -62,6 +62,21 @@ export interface PlanReconciliation {
     count: number;
     days: { date: string; sport: string; type: string; provenDone: boolean; healthEntryId?: string }[];
   };
+  // Calendar-receipt coverage over the SAME deny-list universe (cos-ops#66) — which session
+  // days carry the push receipt (`eventId`, board-owned, stamped by push-plan-to-calendar)
+  // and which do not. Presence-only: a dangling receipt still counts as covered here (the
+  // push route live-checks and recreates; the receipt means "was pushed", ADR 0016).
+  // `missing` lists UNRESOLVED (effectively "planned") session days with no receipt — one
+  // plain definition, NOT "what a push would place": on a past week those dates are history
+  // (the placement engine skips `date < today` as reason "past", placement.ts:201-204) and
+  // the close-out reads them as such. A done/skipped/moved day with no receipt sits in
+  // neither bucket (the push skips it as `resolved`), so the numbers deliberately need not
+  // sum to sessionDays.
+  calendarCoverage: {
+    sessionDays: number; // the deny-list universe — same count as the top-level field
+    withEventId: number;
+    missing: { count: number; dates: string[] };
+  };
 }
 
 // Compute the reconciliation status. ALWAYS resolvable: a missing/non-array `days`, or a
@@ -77,6 +92,8 @@ export function computePlanReconciliation(input: {
   const outcomes = { done: 0, skipped: 0, moved: 0, planned: 0 };
   const unresolvedDays: PlanReconciliation["unresolvedDays"]["days"] = [];
   let sessionDays = 0;
+  let withEventId = 0;
+  const missingDates: string[] = [];
 
   for (const raw of rawDays) {
     if (!raw || typeof raw !== "object") continue;
@@ -88,6 +105,10 @@ export function computePlanReconciliation(input: {
     sessionDays++;
     const status = effectivePlanDayStatus(day);
     outcomes[status]++;
+
+    const hasReceipt = typeof day.eventId === "string" && day.eventId !== "";
+    if (hasReceipt) withEventId++;
+    else if (status === "planned") missingDates.push(date);
 
     if (status === "planned" && date < today) {
       // First match by array order — one healthEntryId per day, date-level only.
@@ -106,5 +127,6 @@ export function computePlanReconciliation(input: {
     sessionDays,
     outcomes,
     unresolvedDays: { count: unresolvedDays.length, days: unresolvedDays },
+    calendarCoverage: { sessionDays, withEventId, missing: { count: missingDates.length, dates: missingDates } },
   };
 }

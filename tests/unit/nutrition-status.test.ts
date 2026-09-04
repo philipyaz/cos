@@ -164,6 +164,37 @@ test("computeNutritionStatus: hasNutritionTargets + daysSinceLastTargets from ma
   assert.ok(s.daysSinceLastTargets! > 1000, "gap from the NEWEST periodKey (2020-01-10)");
 });
 
+// ── unpushedPlannedMeals (cos-ops#66): planned + today-or-later + no calendar receipt ──────────
+test("computeNutritionStatus: unpushedPlannedMeals — planned + today-or-later + no receipt only", () => {
+  const s = computeNutritionStatus({
+    mealPlanEntries: [
+      meal({ id: "MEAL-1", date: "2026-07-28" }), // planned, today+2, no eventId — counts
+      meal({ id: "MEAL-2", date: "2026-07-25" }), // planned, YESTERDAY, no eventId — stalePlannedMeals' business, not this
+      meal({ id: "MEAL-3", date: "2026-07-27", status: "cooked" }), // resolved — excluded regardless of date
+      meal({ id: "MEAL-4", date: "2026-07-26" }), // planned, TODAY, no eventId — counts (today included)
+    ],
+    foodLogs: [], pantryItems: [], nutritionTargets: [], today: "2026-07-26",
+  });
+  assert.equal(s.unpushedPlannedMeals.count, 2);
+  assert.deepEqual(new Set(s.unpushedPlannedMeals.ids), new Set(["MEAL-1", "MEAL-4"]));
+});
+
+test("computeNutritionStatus: unpushedPlannedMeals — a receipt excludes it; adding/removing eventId on a clone moves the count", () => {
+  const base = meal({ id: "MEAL-1", date: "2026-07-28" });
+
+  const withoutReceipt = computeNutritionStatus({
+    mealPlanEntries: [base], foodLogs: [], pantryItems: [], nutritionTargets: [], today: "2026-07-26",
+  });
+  assert.equal(withoutReceipt.unpushedPlannedMeals.count, 1);
+
+  const withReceipt = computeNutritionStatus({
+    mealPlanEntries: [{ ...base, eventId: "EVT-1" }],
+    foodLogs: [], pantryItems: [], nutritionTargets: [], today: "2026-07-26",
+  });
+  assert.equal(withReceipt.unpushedPlannedMeals.count, 0, "a receipted meal is covered — never counted as unpushed");
+  assert.deepEqual(withReceipt.unpushedPlannedMeals.ids, []);
+});
+
 // ── pantryLifecycleClass: precedence ──────────────────────────────────────────────────────────
 test("pantryLifecycleClass: spice beats everything, even a fridge location", () => {
   assert.equal(pantryLifecycleClass({ category: "spice", location: "fridge" }), "spice");

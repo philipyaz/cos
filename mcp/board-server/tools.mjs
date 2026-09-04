@@ -892,7 +892,8 @@ const CREATE_REMINDER_TOOL = {
   name: "create_reminder",
   description:
     "Open a REMINDER on the Cos board — a SIMPLE, lightweight NUDGE to CHECK or DO " +
-    "something, deliberately LIGHTER than a case (no tasks, no kanban lanes, no hierarchy of its own). " +
+    "something, deliberately LIGHTER than a case (no full Tasks — just the short `{ title, done }` " +
+    "checklist — no kanban lanes, no hierarchy of its own). " +
     "Use it for a one-line 'remember to …' / 'check whether …' nudge, not for a unit of work (open a " +
     "case for that). " +
     "PREFER LINKING: before creating one, this agent ALSO has the board case tools — call `search` " +
@@ -1000,8 +1001,10 @@ const UPDATE_REMINDER_TOOL = {
   name: "update_reminder",
   description:
     "Update a reminder's fields. Pass only what you want to change: `title`, `detail`, `status` " +
-    "('open'|'done'|'dismissed'), `dueAt` (ISO), `domain` ('work'|'life'), and/or `caseId` to relink " +
-    "it to the node it concerns (pass `caseId: null` to UNLINK it to standalone). Setting status to " +
+    "('open'|'done'|'dismissed'), `dueAt` (ISO), `domain` ('work'|'life'), `caseId` to relink " +
+    "it to the node it concerns (pass `caseId: null` to UNLINK it to standalone), `labels` " +
+    "(REPLACES the catalog label set), and/or `tasks` (REPLACES the whole checklist — send the " +
+    "full list, `done` included on every item). Setting status to " +
     "'done' stamps completedAt. `PATCH /api/reminders/{id}`.",
   inputSchema: {
     type: "object",
