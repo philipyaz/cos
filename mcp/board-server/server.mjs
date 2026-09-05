@@ -985,7 +985,9 @@ async function handleRecordTriageDecision(args) {
 
 // Read the decision record for ONE source (required — an unscoped ratio mixes gmail-only drops
 // against every source's promotions; see the tool description). Renders the summary line, the
-// first-time senders (the digest's review payload), then a compact row list.
+// first-time senders (the digest's review payload), then a compact row list; an empty ledger
+// renders a one-line "0 drops ever recorded, against N promoted" summary instead, so the digest
+// can tell "no new drops" from "never written" (cos-ops#72).
 async function handleListTriageDecisions(args) {
   if (!MESSAGE_SOURCE.includes(args.source)) {
     return err(`'source' must be one of: ${MESSAGE_SOURCE.join(", ")}.`);
@@ -1004,7 +1006,10 @@ async function handleListTriageDecisions(args) {
   const summary = data.summary ?? { dropped: 0, senders: 0, promoted: 0, firstTime: [] };
   const decisions = data.decisions ?? [];
   if (summary.dropped === 0 && decisions.length === 0) {
-    return text(`Nothing filtered yet for source '${args.source}'.`);
+    return text(
+      `No drop records for source '${args.source}' — 0 drops ever recorded, ` +
+        `against ${summary.promoted} promoted inbound message(s) on the board.`,
+    );
   }
 
   const lines = [
