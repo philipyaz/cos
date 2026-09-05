@@ -152,7 +152,9 @@ When it finishes, open the board at your `$BOARD_URL` (`http://localhost:$BOARD_
 > through its **UI** (it doesn't read the repo filesystem) — upload the committed
 > `board/.claude/skill-bundles/vault-operations.zip`, which drives the vault's async
 > **submit-then-poll** ingest, via **Customize → `+` (Skills) → Create skill**, the same as every
-> other bundle in `board/.claude/skill-bundles/`. (Even without it, the `ingest`/`ingest_status`
+> other bundle in `board/.claude/skill-bundles/` — then record it with
+> `node scripts/mark-skill-uploaded.mjs vault-operations`, so `/cos-upgrade` can later compute
+> exact bundle drift. (Even without it, the `ingest`/`ingest_status`
 > tool descriptions carry the same guidance.)
 
 ### Manual quickstart (just the board)
