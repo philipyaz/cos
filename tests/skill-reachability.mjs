@@ -1,4 +1,4 @@
-// tests/skill-reachability.mjs — this file owns THREE reachability contracts, in both directions:
+// tests/skill-reachability.mjs — this file owns FOUR reachability contracts, in both directions:
 //
 // SCAN 1 (delegation -> target): a skill may only delegate to a slash-skill that exists in ITS
 // OWN runtime (board/.claude/CLAUDE.md: "a skill may only compose tools that already exist").
@@ -25,6 +25,23 @@
 // checked per SECTION, not per file: a whole-file check would go permanently green the moment ANY
 // section anywhere mentions `classify_text`, which is the exact insufficiency
 // tests/triage-decisions-consumers.mjs:20-23 documents for its own sibling gates.
+//
+// SCAN 4 (upload -> receipt, cos-ops#74): a root setup-skill SECTION that instructs a Cowork
+// bundle upload must, in that SAME section, instruct writing the per-machine upload receipt
+// (scripts/mark-skill-uploaded.mjs) — the receipt is what makes upgrade-check's exact-drift branch
+// (scripts/upgrade-check.mjs item 10) reachable; without it every upgrade falls back to a
+// git-range guess. That is exactly how cos-ops#74 happened: the receipt shipped (cos#115) and the
+// two paths that DO the uploading (cos-setup Step 5, setup-vault) never mentioned it, so it never
+// existed on the only machine in the fleet. Scoped like SCAN 3 (per section, whole-string), but
+// walks the ROOT .claude/skills/ tree, not board/.claude/skills/ — and that tree splits
+// differently: sectionsOf()'s heading regex also matches line-start `#` shell comments inside
+// fenced code blocks, which 13 of 16 root skills contain (zero board skills do), so a "section"
+// here can be a fenced-comment-delimited slice rather than a markdown heading's. This is SCAN 2's
+// family (a setup orchestrator must reference a named thing), not an ADR 0030 *-consumers gate:
+// no board field or MCP tool is asserted, and cos-setup/setup-vault are root-tree, Claude
+// Code-only setup skills that are never bundled (ADR 0015) — clause 1's "this file owns
+// delegation-target existence" premise stopped being a single-subject truth the moment SCAN 3
+// (itself a prose-pairing check) landed, one scan before this one.
 //
 //   node tests/skill-reachability.mjs
 //
@@ -214,6 +231,70 @@ for (const file of files) {
 
 const scan3Count = violations.length - scan1Count - scan2Count
 
+// SCAN 4 (upload -> receipt, cos-ops#74): a root setup-skill SECTION that instructs a Cowork
+// bundle upload must, in that SAME section, instruct writing the per-machine upload receipt
+// (scripts/mark-skill-uploaded.mjs) — the receipt is what makes upgrade-check's exact-drift branch
+// (scripts/upgrade-check.mjs item 10) reachable; without it every upgrade falls back to the
+// git-range guess. That is exactly how cos-ops#74 happened: the receipt shipped (cos#115) and the
+// two paths that DO the uploading (cos-setup Step 5, setup-vault) never mentioned it, so it never
+// existed on the only machine in the fleet. Section-scoped and whole-string-matched like SCAN 3.
+// This is SCAN 2's family — a setup orchestrator must reference a named step — NOT an ADR 0030
+// *-consumers gate: no board field or MCP tool is asserted, and these are root-tree Claude
+// Code-only setup skills that are never bundled (ADR 0015), so ADR 0030 clause 1 does not govern
+// the home. NOTE the tree difference: sectionsOf() splits on every line-start `#{1,6} ` including
+// shell comments inside fenced code blocks, and 13 of 16 root skills carry such lines (zero board
+// skills do) — so a "section" here can be a fenced-comment-delimited slice, not a markdown
+// heading's. Every miss direction is loud for the two floored files below; keep added receipt
+// lines free of line-start `#` comments so they stay in the upload's slice.
+const RECEIPT_TOKEN = 'mark-skill-uploaded' // a script identifier: matched case-sensitively, exact
+const RECEIPT_FLOOR_SKILLS = ['cos-setup', 'setup-vault'] // cos-ops#74's two upload paths: each MUST stay visible to the detector
+let uploadSectionsChecked = 0
+const uploadSectionsBySkill = new Map()
+for (const entry of readdirSync(ROOT_SKILLS_DIR, { withFileTypes: true })) {
+  if (!entry.isDirectory() || isIgnored(entry.name)) continue
+  const abs = join(ROOT_SKILLS_DIR, entry.name, 'SKILL.md')
+  let content
+  try {
+    content = readFileSync(abs, 'utf8')
+  } catch {
+    continue // a directory without SKILL.md is not a skill
+  }
+  const rel = relative(REPO_ROOT, abs)
+  let detected = 0
+  for (const { start, text } of sectionsOf(content)) {
+    // Conjunctive detector: an upload verb AND the bundle directory's literal path token in one
+    // section. Measured 2026-09-05 over all 16 root skills: exactly 3 detecting sections, one
+    // each in cos-setup (Step 5), setup-vault (the :113-166 slice holding the upload paragraphs)
+    // and cos-upgrade (whose Step 5 residue bullet already pairs the token) — zero elsewhere.
+    const uploadMatches = [...text.matchAll(/upload/gi)]
+    if (uploadMatches.length === 0 || !text.includes('skill-bundles')) continue
+    detected++
+    uploadSectionsChecked++
+    if (!text.includes(RECEIPT_TOKEN)) {
+      const line = content.slice(0, start + uploadMatches[0].index).split('\n').length
+      violations.push(
+        `${rel}:${line} — this section instructs a Cowork bundle upload but never writes the ` +
+          'per-machine upload receipt: add `node scripts/mark-skill-uploaded.mjs …` right after ' +
+          'the upload (cos-ops#74; scripts/upgrade-check.mjs item 10 reads it). If the upload ' +
+          'mention here became incidental, reword it — never a place to launder an actual ' +
+          'unreceipted upload path.',
+      )
+    }
+  }
+  uploadSectionsBySkill.set(entry.name, detected)
+}
+for (const name of RECEIPT_FLOOR_SKILLS) {
+  if (!(uploadSectionsBySkill.get(name) > 0)) {
+    violations.push(
+      `.claude/skills/${name}/SKILL.md — SCAN 4 found no section matching its upload detector ` +
+        '(/upload/i plus the literal "skill-bundles"): the upload procedure moved or was ' +
+        'reworded, so this scan can no longer see a path cos-ops#74 receipted — re-anchor the ' +
+        'detector or RECEIPT_FLOOR_SKILLS deliberately.',
+    )
+  }
+}
+const scan4Count = violations.length - scan1Count - scan2Count - scan3Count
+
 if (violations.length) {
   console.error('[skill-reachability] reachability violation(s):')
   for (const v of violations) console.error(`  ${v}`)
@@ -236,6 +317,13 @@ if (violations.length) {
         'external web fetch must also reference classify_text (see cos-ops#26).',
     )
   }
+  if (scan4Count > 0) {
+    contracts.push(
+      `${scan4Count} across ${uploadSectionsBySkill.size} root setup skill(s) scanned — a section ` +
+        'that instructs a Cowork bundle upload must also write the machine\'s upload receipt ' +
+        '(see cos-ops#74).',
+    )
+  }
   console.error(`[skill-reachability] ${violations.length} violation(s) total. ${contracts.join(' ')}`)
   process.exit(1)
 }
@@ -243,6 +331,7 @@ if (violations.length) {
 console.log(
   `[skill-reachability] ${files.length} file(s) scanned, ${refsChecked} delegation ref(s) checked, ` +
     `${setupSkills.size} registry setup skill(s) reachable from cos-setup, ` +
-    `${filesWithFetch} fetch-instructing file(s) screened — all reachable.`,
+    `${filesWithFetch} fetch-instructing file(s) screened, ` +
+    `${uploadSectionsChecked} upload section(s) receipted — all reachable.`,
 )
 process.exit(0)

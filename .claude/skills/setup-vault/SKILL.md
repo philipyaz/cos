@@ -143,6 +143,15 @@ In Claude Cowork Desktop: **Customize → `+` next to Skills → Create skill �
 across all Cowork sessions; a future edit to the skill is picked up by re-uploading the bundle
 `scripts/pack-skills.mjs` rewrites.
 
+Then record the upload on this machine's receipt — the single-skill form (the receipt merges:
+other recorded bundles are untouched), so the next `/cos-upgrade` here can compute exact bundle
+drift instead of guessing from the git range:
+
+```sh
+source "$(git rev-parse --show-toplevel)/config/load-config.sh"   # gives $REPO_ROOT (fresh shell)
+node "$REPO_ROOT/scripts/mark-skill-uploaded.mjs" vault-operations
+```
+
 > Belt-and-braces: even if the skill isn't loaded, the `ingest` / `ingest_status` tool **descriptions**
 > already instruct the model to submit-then-poll and not to re-submit an in-flight job — the skill
 > reinforces that guidance, it isn't strictly required for correctness.
