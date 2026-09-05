@@ -44,6 +44,17 @@ updates:
     # PRs. A bare dependency-name ignore would suppress those too
     # (dependabot/dependabot-core#4027) — the exact inversion of this block's purpose.
     # tests/unit/dependabot-config.test.ts gates the qualifier; never drop it.
+    # Known failure mode (cos-ops#73): a VERSION-update PR that bumps a vulnerable
+    # transitive dependency to a still-vulnerable version makes Dependabot close its own
+    # SECURITY PR as "no longer updatable", and it does not reopen it on later runs
+    # (cos#104 moved nanoid 3.3.12→3.3.17, one patch short of the 3.3.18 fix; cos#108
+    # self-closed; the next weekly run did not re-carry it). So when an open alert has
+    # no open Dependabot PR offering its fix, the bot is not coming back — a human
+    # bumps the lockfile:
+    #   cd board && npm update <pkg> --package-lock-only
+    # (NOT `npm install <pkg>@x.y.z --package-lock-only`, which records the package in
+    # package.json as a side effect.) Alert state lives outside the repo, so this stays
+    # prose, not a gate (ADR 0024).
     ignore:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
