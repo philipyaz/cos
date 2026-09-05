@@ -545,14 +545,22 @@ Cowork-only.)
 - **Run**:
   1. **Cowork Desktop → Settings → Capabilities → Skills → Upload skill**, once per `.zip` in
      `$REPO_ROOT/board/.claude/skill-bundles/`.
-  2. **Cowork Desktop → Scheduled Tasks → new task**, one per row of the **scheduled** table in
+  2. **Record the upload receipt** — `node scripts/mark-skill-uploaded.mjs --all` (any shell at
+     `$REPO_ROOT`; the script needs no env — it resolves the repo from its own location). This is
+     what makes the next `/cos-upgrade`'s bundle list exact — every zip whose bytes differ from
+     what THIS machine last uploaded — instead of a git-range guess (`scripts/upgrade-check.mjs`
+     item 10 reads it).
+  3. **Cowork Desktop → Scheduled Tasks → new task**, one per row of the **scheduled** table in
      `board/.claude/skills/README.md` — paste that row's trigger, and pick a cadence (the table's
      column is a **suggestion**; the schedule is yours to set and adjust — see `docs/architecture/
      triage-skills.md`).
 - **CHECKPOINT** — manual, and honest about it: nothing on this machine can read Cowork's installed
   state back (ADR 0020's standing consequence), so this is a look, not a `curl`. In **Cowork Desktop
   → Settings → Capabilities → Skills**, every bundle you uploaded is listed; in **Scheduled Tasks**,
-  every task you chose to create is listed, at the cadence you picked.
+  every task you chose to create is listed, at the cadence you picked. The receipt is the
+  machine-readable half: `node scripts/mark-skill-uploaded.mjs --list` shows every bundle
+  `up to date (marked …)` — your own statement of what you uploaded (it reads nothing back from
+  Cowork), and the input the next upgrade's exact drift list is computed from.
 
 ## Day-to-day: running Cos in later sessions
 After setup, most of it runs itself — make sure the user knows how to live with it and how to check health:
