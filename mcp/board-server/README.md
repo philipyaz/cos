@@ -349,7 +349,10 @@ digest — never drop their mail; surface the thread instead, and do not waterma
 allows an unscoped read for generality, but an unscoped ratio would divide gmail-only drops by an
 all-source message count). Read-only. Renders the dropped:promoted summary line, the first-time
 senders (each with its reasons×counts and the `TD-<n>` ids to resolve), then a compact row list.
-`status` (`active` | `reversed`) narrows the row list only — the summary always spans both.
+`status` (`active` | `reversed`) narrows the row list only — the summary always spans both. An
+empty ledger (no rows) renders a one-line `No drop records … 0 drops ever recorded, against N
+promoted inbound message(s) on the board` instead — the digest's zero-drops anomaly signal
+(cos-ops#72), never a bare "nothing filtered" reassurance.
 
 #### `resolve_triage_decision(id, resolution)`
 `PATCH /api/triage-decisions/{id}` `{ resolution }`. `resolution: "confirm"` stamps the review time

@@ -17,6 +17,12 @@
 // `cos/processed` — a mechanical proxy for "record, then watermark" that a reordering edit would
 // trip.
 //
+// Also carries (cos-ops#72) the digest's zero-drops BRANCH contract: the empty-ledger render
+// in server.mjs must interpolate summary.promoted (the only carrier the digest ever sees) and
+// open with the "No drop records" recognition prefix, and STEP 5's own section must carry the
+// anomaly branch — skill phrases + a server render fragment pinned together, the
+// whatsapp-shopping-capture.mjs shape.
+//
 // Static, read-only, zero deps — parses interfaces/tool arrays by TEXT (no TS compiler) and
 // greps ONLY each skill's OWN section, never the whole file: a whole-file grep passes on
 // incidental mentions (an example line, a parenthetical) — the exact shape of the pre-change bug
@@ -140,6 +146,48 @@ for (const key of ["firstTime", "dropped", "senders"]) {
 }
 check(digest.includes("resolve_triage_decision"), "reminders-review's digest section names 'resolve_triage_decision'");
 check(digest.includes("list_triage_decisions"), "reminders-review's digest section names 'list_triage_decisions'");
+
+// --- check 5 (cos-ops#72): the digest's zero-drops anomaly branch, + the render that feeds it ---
+// An empty ledger (`dropped` 0 while mail was promoted) must be reported as an anomaly, never as
+// the "nothing new" reassurance — and the tool's empty-ledger render must interpolate
+// summary.promoted, or the branch is unreachable-by-construction (the early return at
+// handleListTriageDecisions is the ONLY carrier the Cowork digest ever sees). Skill phrases + a
+// server render fragment pinned together — the whatsapp-shopping-capture.mjs shape. Phrases are
+// prose: case-insensitive, wrap-tolerant `[\s-]+` joins (ADR 0030 clause 4; idiom from
+// tests/task-list-consumers.mjs). Identifiers/source fragments stay case-sensitive.
+const phraseRe = (phrase) => new RegExp(phrase.split(/[\s-]+/).join("[\\s-]+"), "i");
+check(
+  phraseRe("nothing new was filtered from your mail").test(digest),
+  "the digest keeps the healthy no-op line (the dropped > 0 path — criterion 4)",
+);
+check(
+  phraseRe("the filter's receipt has never been written").test(digest),
+  "the digest carries the zero-drops anomaly branch (criterion 1)",
+);
+check(
+  phraseRe("a receipt count, never a drop rate").test(digest),
+  "the anomaly line scopes its numbers honestly — receipt count, never a drop rate (Correction 1)",
+);
+check(
+  phraseRe("predates the drop ledger").test(digest),
+  "the anomaly branch names candidate cause (a): a Cowork bundle predating the ledger",
+);
+check(
+  phraseRe("genuinely never fired").test(digest),
+  "the anomaly branch names candidate cause (b): the five-test gate genuinely never firing",
+);
+check(
+  phraseRe("No drop records").test(digest),
+  "the digest quotes the render's recognition prefix — the branch's trigger is stated, not implied",
+);
+check(
+  serverSrc.includes("No drop records for source"),
+  "server.mjs's empty-ledger render opens with the recognition prefix the skill branch keys on",
+);
+check(
+  serverSrc.includes("against ${summary.promoted} promoted inbound message(s) on the board"),
+  "server.mjs's empty-ledger render interpolates summary.promoted — the number the branch needs",
+);
 
 if (failures) {
   console.error(`\nFAIL — ${failures} check(s) failed.`);

@@ -207,10 +207,12 @@ reconcilers already draw (above).
 `list_triage_decisions({ source: "gmail" })` and surfaces only senders being filtered for the
 **first time** (an active row with no `reviewedAt`), so the digest is bounded by *new* senders,
 not by mail volume, and stays a one-line no-op ("nothing new was filtered from your mail") on
-most runs. Answering **confirm** stamps the review time and the sweep keeps filtering; answering
-**keep** reverses the row and the sweep stops. Both the ratio (`dropped:promoted`) and the
-first-time set are **computed on read, never persisted** — the same discipline the rest of the
-board's derived state follows.
+most runs — a line the digest emits only when the ledger actually holds drops; an empty ledger
+(zero drops ever recorded while inbound mail was promoted) is reported as an anomaly, never as
+that reassurance (cos-ops#72). Answering **confirm** stamps the review time and the sweep keeps
+filtering; answering **keep** reverses the row and the sweep stops. Both the ratio
+(`dropped:promoted`) and the first-time set are **computed on read, never persisted** — the same
+discipline the rest of the board's derived state follows.
 
 **Both surfaces, per the platform's own rule (no capability is UI-only):** an HTTP route pair —
 `/api/triage-decisions`, `/api/triage-decisions/{id}` (see [Platform API](platform-api.md)) — and

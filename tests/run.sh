@@ -47,7 +47,8 @@
 #      triage-decisions-consumers.mjs (cos-ops#41) — the same ADR 0014 shape for
 #      TriageDecisionSummary's fields + the three triage MCP tools, consumed by
 #      mail-to-board's drop region (which also records BEFORE it watermarks) and
-#      reminders-review's digest STEP — a parser-grade gate rides an existing id
+#      reminders-review's digest STEP (incl. the zero-drops anomaly branch + the
+#      empty-ledger render pin, cos-ops#72) — a parser-grade gate rides an existing id
 #      rather than minting a new one.
 #      [2f] also rides
 #      whatsapp-shopping-capture.mjs (cos-ops#39) — the same ADR 0014 shape for
