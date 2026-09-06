@@ -1,5 +1,7 @@
 // Unit tests for board/lib/staleness.ts — the shared home for the whole-day-difference
-// idiom (wholeDaysBetween) and the unified idle threshold (STALE_AFTER_DAYS). Pure,
+// idiom (wholeDaysBetween), the unified idle threshold (STALE_AFTER_DAYS), and the
+// timestamp→local-day derivation (localDayOf — its zone-pinned tests live on their own,
+// tests/unit/local-day.test.ts, since the tests in THIS file stay zone-free). Pure,
 // deterministic, no clock, no disk — runs headless under `node --test`.
 //
 // Run from repo root:

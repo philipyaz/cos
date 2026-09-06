@@ -12,7 +12,7 @@
 // one seam where the clock is read, exactly like bodyBaseline.
 
 import type { FoodLogEntry, MealPlanEntry, NutritionTargetArtifact, PantryCategory, PantryItem, PantryLocation } from "./types";
-import { wholeDaysBetween } from "./staleness";
+import { localDayOf, wholeDaysBetween } from "./staleness";
 
 // True when `text` (typically a FoodLogEntry.description) names `mealId` (e.g. "MEAL-12") with a
 // DIGIT BOUNDARY immediately after it — so "MEAL-1" never matches inside "MEAL-10". Exported so the
@@ -123,9 +123,10 @@ export function computeNutritionStatus(input: {
   );
   const daysSinceLastFoodLog = lastFoodLogDate != null ? wholeDaysBetween(lastFoodLogDate, today) : null;
 
-  // PantryItem.updatedAt is a full ISO datetime; take the calendar day before diffing.
+  // PantryItem.updatedAt is a full ISO datetime; take the LOCAL calendar day (localDayOf — the
+  // same frame as the injected `today`) before diffing.
   const lastPantryWriteDay = pantryItems.reduce<string | null>((max, p) => {
-    const day = p.updatedAt.slice(0, 10);
+    const day = localDayOf(p.updatedAt);
     return max == null || day > max ? day : max;
   }, null);
   const daysSinceLastPantryWrite =
@@ -155,7 +156,7 @@ export function computeNutritionStatus(input: {
     if (p.expiresAt != null) continue;
     const horizonDays = freshnessHorizonDays(p);
     if (horizonDays == null) continue;
-    const ageDays = wholeDaysBetween(p.updatedAt.slice(0, 10), today);
+    const ageDays = wholeDaysBetween(localDayOf(p.updatedAt), today);
     if (ageDays > horizonDays) pastHorizon.push({ id: p.id, ageDays, horizonDays });
   }
 

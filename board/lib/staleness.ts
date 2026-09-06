@@ -9,8 +9,9 @@
 // instead ride an EXISTING domain GET when the issue forbids a new route — cos-ops#19's fitness
 // reconciliation (riding the existing `GET /api/fitness/coaching/[id]`) is the worked example.
 //
-// This module owns the VOCABULARY — the whole-day-difference idiom + the idle thresholds + this
-// rule — not an engine registry. Each status read's engine stays in its own domain module
+// This module owns the VOCABULARY — the whole-day-difference idiom + the idle thresholds + the
+// timestamp→local-day derivation (`localDayOf`) + this rule — not an engine registry. Each status
+// read's engine stays in its own domain module
 // (nutrition-status, body-baseline, selectors, and fitness-plan-status keep their own modules;
 // they do not move here — the fitness read compares dates with strict lexicographic string
 // comparison and imports `wholeDaysBetween` only if a whole-day diff there is ever actually
@@ -18,13 +19,25 @@
 // `wholeDaysBetween` below — NEVER mint a private day-diff (the last private one, body-baseline's
 // `dayDiff`, died in this change). Idle thresholds are named constants here, never inline numbers.
 //
-// Two frames that never compose — pick the one that matches your input, never mix them in one
+// Three frames that never compose — pick the one that matches your input, never mix them in one
 // predicate:
 //   (a) `wholeDaysBetween` answers in CALENDAR DAYS: a UTC-midnight floor over "YYYY-MM-DD"
 //       strings (nutrition-status's daysSince* figures).
 //   (b) `STALE_AFTER_DAYS` is consumed as ROLLING MILLISECONDS over ISO timestamps
 //       (`now − updatedAt > STALE_AFTER_DAYS × 24h`, in `./selectors`).
-//   The two frames disagree at boundaries by up to a day — pick the one that matches your input,
+//   (c) DERIVATION — how a stored ISO timestamp becomes a "YYYY-MM-DD" day at all. The board has
+//       two deliberate day conventions: the LOCAL wall day (`toISODay` in ./nutrition-format, and
+//       `localDayOf` below for stored timestamps) used by the nutrition/body/fitness surfaces, and
+//       the UTC day (`todayISO` in ./selectors, plus its private stored-timestamp twin `dayOf` at
+//       selectors.ts:1203) that the calendar/due/events family pins to on purpose. `.slice(0, 10)`
+//       is the UTC day wearing the local day's type. THE RULE: a day that will be compared against
+//       a `toISODay`-derived day (an injected `today`, a window bound, an agent-authored plan day)
+//       must come through `localDayOf` — never a private derivation (a slice, or an inline
+//       `todayISO(new Date(x))` in the wrong frame). A slice is legitimate only when both operands
+//       stay UTC end to end (the fitness report/correlations family) or for pure display. Only the
+//       local helper needs the bare-"YYYY-MM-DD" pass-through guard — the UTC frame round-trips a
+//       date-only value for free, and that asymmetry is why one helper cannot serve both frames.
+//   The three frames disagree at boundaries by up to a day — pick the one that matches your input,
 //   never mix them in one predicate.
 //
 // Perimeter: this rule covers `board/lib` only. Skill-prose staleness (e.g. reminders-review's
@@ -36,8 +49,13 @@
 // `./nutrition-format` — there is nothing drifted to fix there, so moving it would only grow the
 // diff without removing a concept.
 //
-// No I/O, no clock, imports nothing app-specific — same purity contract as `./nutrition-format`
-// (safe from server components, route handlers, AND client components alike).
+// No I/O, no clock — the one import is `toISODay` from `./nutrition-format` (same purity
+// contract: no I/O, no clock), safe from server components, route handlers, AND client
+// components alike. `localDayOf` below reads no clock itself (input-driven); it is TZ-sensitive
+// BY DESIGN — that is the point of naming it. No import cycle: staleness → nutrition-format →
+// types only.
+
+import { toISODay } from "./nutrition-format";
 
 // Whole-day difference (toDay − fromDay) between two "YYYY-MM-DD" strings, UTC-MIDNIGHT anchored
 // (floor, not rounded) — the age-in-days arithmetic every staleness figure uses.
@@ -47,6 +65,23 @@ export function wholeDaysBetween(fromDay: string, toDay: string): number {
   const from = Date.UTC(fy, fm - 1, fd);
   const to = Date.UTC(ty, tm - 1, td);
   return Math.floor((to - from) / 86_400_000);
+}
+
+// A stored ISO-8601 timestamp → the LOCAL wall-calendar day it fell on ("YYYY-MM-DD") — frame (c)
+// in the header, via `toISODay` (the lib-level local-parts reader — never a new one, and never
+// `.slice(0, 10)`, which is the UTC day; the one component-local clone is case-detail-drawer's
+// `toDateInput` (:2107), a named fold target, not licence for a third). A bare "YYYY-MM-DD" input
+// passes through unchanged: it is already a calendar day, and `new Date("YYYY-MM-DD")` would
+// REINTERPRET it as UTC midnight and shift the day west of UTC (the same hazard
+// ./nutrition-format's formatDay names). This guard is the LOCAL frame's burden alone — the UTC
+// frame round-trips a date-only value for free — and its live caller is the domain shape, not a
+// converted site: HealthEntry.ts legally carries both shapes (types.ts:544) even though every
+// workout ts is full ISO today, so do not "simplify" it away for want of one. Unparseable input
+// yields a "NaN-NaN-NaN" day, never a throw — matching the never-throws discipline of the engines
+// calling this.
+export function localDayOf(iso: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  return toISODay(new Date(iso));
 }
 
 // THE unified idle threshold (days). Was three different numbers under three names: 3

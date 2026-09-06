@@ -32,6 +32,7 @@
 // private day-diff, body-baseline's `dayDiff`, as deliberately killed).
 
 import type { HealthEntry } from "./types";
+import { localDayOf } from "./staleness";
 
 export type PlanDayOutcome = "planned" | "done" | "skipped" | "moved";
 export const VALID_PLAN_DAY_OUTCOME: PlanDayOutcome[] = ["planned", "done", "skipped", "moved"];
@@ -112,7 +113,7 @@ export function computePlanReconciliation(input: {
 
     if (status === "planned" && date < today) {
       // First match by array order — one healthEntryId per day, date-level only.
-      const proof = healthEntries.find((e) => e.type === "workout" && e.ts.slice(0, 10) === date);
+      const proof = healthEntries.find((e) => e.type === "workout" && localDayOf(e.ts) === date);
       unresolvedDays.push({
         date,
         sport: typeof day.sport === "string" ? day.sport : "",

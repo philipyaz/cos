@@ -3,8 +3,10 @@
 // hrv carries data.value=ms (type "hrv", NOT "heart_rate_variability"), resting_hr data.value=bpm,
 // sleep_night data.value=hours + data.metadata.deep, workouts data.duration_min. The four
 // sub-scorers each return 0..100; the overall is their weighted blend. No HTTP, no console.log:
-// the form-score route is a thin GET over computeFormScore, and the weekly-review +
-// pre-workout-brief routes call computeFormScore IN-PROCESS (no loopback fetch).
+// the form-score route (app/api/fitness/form-score/route.ts) is a thin GET over computeFormScore
+// and requires an explicit `date` (400 otherwise) — there are no weekly-review/pre-workout-brief
+// in-process callers. Agents reach it via the fitness MCP's `get_form_score`, which likewise
+// requires an agent-supplied `date` (no server-side default).
 
 import { listEntries } from "./fitness";
 
