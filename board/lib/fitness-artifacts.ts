@@ -11,6 +11,7 @@
 import { VALID_COACHING_ARTIFACT_KIND, VALID_ARTIFACT_SOURCE } from "@/lib/types";
 import type { CoachingArtifactKind, ArtifactSource } from "@/lib/types";
 import { VALID_PLAN_DAY_OUTCOME } from "@/lib/fitness-plan-status";
+import { toISODay } from "@/lib/nutrition-format";
 
 // A "YYYY-MM-DD" calendar-day string check (the brief's periodKey + the date field shape).
 function isYmd(v: unknown): v is string {
@@ -40,7 +41,7 @@ export function derivePeriodKey(
     case "weekly_review":
       return isNonEmptyString(payload.week) ? (payload.week as string).trim() : null;
     case "pre_workout_brief":
-      return isYmd(payload.date) ? (payload.date as string) : new Date().toISOString().slice(0, 10);
+      return isYmd(payload.date) ? (payload.date as string) : toISODay(new Date());
     case "correlations":
       return isNonEmptyString(payload.from) && isNonEmptyString(payload.to)
         ? `${(payload.from as string).trim()}_${(payload.to as string).trim()}`
