@@ -4,11 +4,12 @@ description: >
   Scheduled integrity pass over the domain-split knowledge wiki. Runs over
   work/wiki, life/wiki, and shared/wiki independently and flags: filename != H1,
   broken [[wikilinks]], orphan pages, strong-index integrity gaps, cross-domain
-  leaks, stray task checkboxes (knowledge-only violations), and legacy
-  priorities.md / reminders/ that should not exist. Read-only health check —
-  it FLAGS, it does not write the board. Use when the user says "audit", "health
+  leaks, stray task checkboxes (knowledge-only violations), bloat / fragmentation
+  (merge-or-prune candidates), and legacy priorities.md / reminders/ that should
+  not exist. Auto-fixes the safe, deterministic issues and proposes the rest;
+  never writes the board. Use when the user says "audit", "health
   check", "lint", "find problems", or on a schedule.
-allowed-tools: Read Glob Grep
+allowed-tools: Read Glob Grep Edit Write
 ---
 
 # Second Brain — Lint (knowledge integrity pass)
@@ -16,11 +17,45 @@ allowed-tools: Read Glob Grep
 A **scheduled integrity pass** over the domain-split wiki. This is **not** an MCP route —
 it is a periodic health check. It runs over the three wiki trees — `work/wiki`,
 `life/wiki`, and `shared/wiki` — **independently**, and reports issues with actionable
-fixes. The vault is **knowledge-only**: this lint **flags** problems, it never writes the
-board (it has no board access) and never auto-mutates pages unless the user asks.
+fixes. The vault is **knowledge-only**: this lint never writes the board (it has no board
+access). It **auto-fixes the safe, deterministic issues** itself and **proposes** the
+judgment or destructive ones — see the auto-fix policy below.
 
-Run every check below for **each** domain tree, then present one consolidated report with
-findings grouped by domain and severity.
+Run every check below for **each** domain tree, applying the safe auto-fixes as you go, then
+present one consolidated report (grouped by domain and severity) that separates what was
+**auto-fixed** from what is **proposed**.
+
+## Auto-fix policy — repair the safe, propose the rest
+
+Lint does not just flag; it **fixes what is safe to fix automatically** and **proposes**
+everything that needs judgment. Two tiers:
+
+**AUTO-FIX (apply the edit, then record it in the report)** — only when the repair is
+*deterministic and unambiguous*:
+
+- **Filename ≠ H1** → rewrite the H1 to match the filename (the filename is what
+  `[[wikilinks]]` resolve to, so it is canonical).
+- **Broken `[[wikilink]]` with a single unambiguous target** → repoint it via an exact
+  `aliases.md` mapping or a one-to-one rename (e.g. `[[Jane]]` → `[[Jane Doe]]`). If the
+  link is a same-page section reference that — per the *reinforce-before-spawn* doctrine —
+  should not get its own page, **de-link** it to plain text instead.
+- **A genuinely homeless page** → add it to the index under `## Unfiled` (additive, never
+  lossy). Choosing its *real* theme is a proposal, not an auto-fix.
+
+**PROPOSE ONLY (never auto-apply — describe the fix, leave the page untouched)** — anything
+destructive, lossy, or a judgment call:
+
+- **Bloat merges / prunes** (Check 9), page deletions, folding one page into another.
+- **Contradictions / stale claims** (Check 8) — re-synthesis is a judgment rewrite.
+- **Cross-domain moves**, orphan resolution, and strong-index *theme placement*.
+- **Stray task checkboxes** — these signal an item that belongs on the **board**; lint has
+  no board access, so it flags the item for routing rather than silently deleting the action.
+- **Legacy `priorities.md` / `reminders/`** — flag for removal; never delete unread.
+
+**Discipline:** when a fix is the least bit ambiguous, *flag it, don't guess*. Record every
+auto-fix in the report (What / Where / the edit applied) so it is reviewable — `git` history
+makes each one reversible. Auto-fix is bounded to the wiki: lint still **never** writes the
+board, deletes a page, or merges pages on its own.
 
 ## Checks (run per domain: work/wiki, life/wiki, shared/wiki)
 
@@ -39,6 +74,14 @@ grep -roh '\[\[[^]]*\]\]' work/wiki/ | sort -u
 ```
 
 (Repeat for `life/wiki/` and `shared/wiki/`.) Cross-reference against actual files.
+
+**Ignore `[[links]]` inside code spans or fenced code blocks** — a literal `` `[[wikilinks]]` ``
+written as an example is not a live link, so not broken. **`log.md` is append-only history:**
+auto-fix a renamed entity (e.g. `[[Jane]]` → `[[Jane Doe]]`), but don't rewrite the
+substance of a past entry; a link to a deliberately-deleted page may be left or de-linked,
+not recreated. **Auto-fix** a broken link only when the target is unambiguous (an `aliases.md`
+mapping or a one-to-one rename), or de-link a same-page section reference with no page of its
+own; flag anything ambiguous rather than guessing.
 
 ### 3. Orphan pages
 
@@ -103,6 +146,27 @@ Read pages that share entities/concepts and flag conflicting claims (opposing fa
 divergent dates/figures) and stale claims (a concept citing only old sources when newer
 ones on the same topic exist). These are quality warnings, not structural errors.
 
+### 9. Bloat & fragmentation (selectivity, not completeness)
+
+The vault is **selective** — a lean, high-signal wiki is the health target, and bloat is as
+much a defect as a gap. Flag the following as **merge / prune candidates**, judged by *lack
+of value* and **never** by a page merely being short (a brief page that is heavily
+inbound-linked is *dense*, not a stub — measure inbound links with
+`grep -rl '\[\[Title\]\]' <domain>/wiki/ | wc -l`, and never flag on length alone):
+
+- **Pages nothing leans on** — zero inbound `[[wikilinks]]`, not named in the strong index,
+  and not referenced by any `cases:`. Candidate to merge into a parent page or retire.
+- **Mutual-definition stub clusters** — thin pages that mostly define each other ("A is the
+  counterpart to B", "B is a sibling of A") or share most of their links / sources. These
+  are facets of **one** page — candidate to merge into a single page with `## Sections`.
+- **One-mention residue** — a page that appears in exactly one source's frontmatter, was
+  never re-synthesized (`created` == `updated`, single source), and that nothing references.
+  The classic "documented everything" leftover — candidate to fold into context elsewhere.
+
+Surface the top few candidates by thinness / staleness; **flag only**, never delete. Every
+proposed merge must re-assert the cross-domain (check 5) and checkbox (check 6) checks on
+the surviving page, so consolidation never crosses domains or drags in actionable state.
+
 ## Report Format
 
 Group findings by **domain** (work / life / shared), then by severity:
@@ -116,29 +180,34 @@ Group findings by **domain** (work / life / shared), then by severity:
 
 ### Warnings (should fix)
 - Orphan pages with no inbound links
+- **Bloat / fragmentation** — pages nothing leans on, mutual-definition stub clusters, one-mention residue (merge or prune candidates)
 - Strong-index gaps (page under no theme; theme that doesn't group multiple concepts)
 - Contradictions / stale claims
 
 ### Info (nice to fix)
-- Missing pages for frequently-referenced topics
-- Thin themes / coverage gaps
+- A genuinely missing page for a topic referenced by **multiple** sources — only when the gap actually costs clarity, not a nudge toward more coverage
 
 For each finding: **What** (the issue), **Where** (file + line), **Fix** (what to do).
 
 ## After the report
 
-> "Found N errors, N warnings, N info items across work / life / shared. Want me to fix
-> any of these?"
+Separate what was **auto-fixed** from what is **proposed**, e.g.:
 
-This skill **flags**; it does not write the board and does not mutate pages on its own.
-Fix wiki-side issues only if the user asks.
+> "Auto-fixed N safe issues (filename≠H1, unambiguous broken links / de-links) across work /
+> life / shared — listed below. Proposing M more that need a judgment call (merges / prunes,
+> contradictions, checkbox routing). Want me to apply any of the proposals?"
+
+Lint applies the safe auto-fixes itself (and lists each one: What / Where / the edit applied);
+it leaves the propose-tier untouched until the user okays it. It never writes the board, and
+never deletes or merges a page on its own.
 
 ## Conventions
 
 - **Per-domain, independent.** Run every check over `work/wiki`, `life/wiki`, and
   `shared/wiki` separately and report by domain.
-- **It flags, never writes the board.** No board access; no auto-mutation without consent.
+- **Auto-fixes the safe, proposes the rest.** Applies deterministic repairs (filename ≠ H1, unambiguous broken-link repair / de-link, homeless-page → `## Unfiled`) and records each; everything destructive or judgment-laden (merges, prunes, contradictions, checkbox routing, cross-domain moves) is proposed, not applied. Never writes the board; never deletes or merges a page on its own; when ambiguous, **flag, don't guess**.
 - **`shared/` is the documented cross-domain exception** — links to/from shared entities
   are not leaks.
 - **Knowledge-only is enforced** — no task checkboxes, no `priorities.md`, no `reminders/`.
 - **Strong index is structural** — every page under exactly one theme; no dangling entries.
+- **Flag bloat, not just gaps.** A lean, high-signal wiki is the health target — surface pages nothing leans on and mutual-definition stub clusters as merge / prune candidates, and don't nudge toward more coverage. **Never** flag a page for being short: a brief, densely inbound-linked page is signal, not a stub. Lint flags; it never deletes.

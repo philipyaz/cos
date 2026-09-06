@@ -1,4 +1,4 @@
-// tests/skill-reachability.mjs — this file owns FOUR reachability contracts, in both directions:
+// tests/skill-reachability.mjs — this file owns FIVE reachability contracts, in both directions:
 //
 // SCAN 1 (delegation -> target): a skill may only delegate to a slash-skill that exists in ITS
 // OWN runtime (board/.claude/CLAUDE.md: "a skill may only compose tools that already exist").
@@ -43,11 +43,43 @@
 // delegation-target existence" premise stopped being a single-subject truth the moment SCAN 3
 // (itself a prose-pairing check) landed, one scan before this one.
 //
+// SCAN 5 (tracked-template doctrine, cos-ops#78): vault/example-vault/ is the repo's ONLY tracked
+// copy of the second-brain-* skills and the CLAUDE.md that governs them — every live
+// vault/<name>/ is produced from it once by setup-vault's `cp -R` (SKILL.md:62) and never synced
+// back in either direction. The template's own banner used to instruct "Do not edit here", so the
+// tracked copy sat frozen while the live copy accreted doctrine: 126 net lines of drift across 3 of
+// its 4 files, silent for 40 days — one un-ported authoring event, not ongoing divergence (ADR 0013
+// recorded this exact drift in its Consequences and named its own revisit trigger: "the
+// pinned-phrase set outgrows a handful and needs a real structured check"). SCAN 5 is that check.
+// It pins doctrine phrases in the TRACKED template only — deliberately never a live
+// vault/<name>/ tree, which would stand permanently red over user data this repo cannot repair
+// (the ADR 0014 discount-the-reds hazard) — so a whole-file `includes()` per pin is enough;
+// sectionsOf()'s heading/fenced-comment splitter is deliberately unused, since nothing here needs
+// pairing. It also asserts an RFC 2606 email allowlist (every email-shaped string under the
+// template must end @example.com / @example.org) and a personal-path ban, because the ported
+// doctrine is authored prose, not a mechanical copy, and a privacy scrub is exactly the kind of
+// check a human read alone cannot be trusted to hold. This is NOT an ADR 0030 *-consumers gate: no
+// board field or MCP tool is asserted, and the vault tree is never bundled (ADR 0015 is the
+// decision that created step [2b], this scan's home). SCAN 5's sibling is gate `3c` in
+// tests/run.sh (run.sh:742-800): `3c` pins three guardrail phrases into EVERY vault, over the
+// sandbox copy, so it already covers second-brain-query live and template alike; SCAN 5 covers the
+// other two skills plus CLAUDE.md, but only in the tracked template — the per-vault producer-phrase
+// check and the tracked-template doctrine check are deliberately two different mechanisms with two
+// different failure tokens, not one gate stretched thin. Cost, named rather than silently
+// accumulated (plan #74's precedent): five heterogeneous contracts now share one [2b]
+// `fail_reasons` token (the ADR 0020 trade-off), mitigated by the per-scan `contracts.push` prefix
+// below. Bound: this pins a SNAPSHOT, so it catches regression of the ported doctrine, not
+// recurrence of the founding incident — a future live-first authoring event that adds NEW doctrine
+// stays invisible here until it, too, is ported by hand.
+//
 //   node tests/skill-reachability.mjs
 //
 // Read-only, no deps — scans the checked-in tree directly (board-lint.mjs is the precedent for a
 // static invariant checker living in tests/; this is a fourth, disjoint gate: pack-skills --check
-// owns bundle FRESHNESS + catalog SYNC, this owns delegation-target EXISTENCE in both directions).
+// owns bundle FRESHNESS + catalog SYNC, this file owns five narrower contracts instead — delegation
+// reachability, registry reachability, fetch screening, upload receipting, and (as of SCAN 5) the
+// tracked vault template's doctrine + privacy — not the single EXISTENCE claim this sentence used
+// to make).
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -205,9 +237,12 @@ function sectionsOf(content) {
   return out
 }
 
-// Scoped deliberately to board/.claude/skills/ — the same `files` list SCAN 1 walks. The root
-// .claude/skills/ and the vault/*/.claude/skills/ trees are unscanned; zero detector hits there
-// today — widening is a future decision, not an accident of this regex.
+// Scoped deliberately to board/.claude/skills/ — the same `files` list SCAN 1 walks. This fetch
+// detector does not walk the root `.claude/skills/` tree (SCAN 4 walks that tree for a different
+// contract) or any `vault/*/.claude/skills/` tree; zero fetch-detector hits there today — widening
+// THIS detector is a future decision, not an accident of the regex. SCAN 5 separately pins the
+// TRACKED vault/example-vault/ template's doctrine; a live vault/<name>/ tree stays unscanned by
+// every scan in this file (gate `3c` in tests/run.sh is its per-vault complement).
 let filesWithFetch = 0
 for (const file of files) {
   const rel = relative(REPO_ROOT, file)
@@ -295,6 +330,158 @@ for (const name of RECEIPT_FLOOR_SKILLS) {
 }
 const scan4Count = violations.length - scan1Count - scan2Count - scan3Count
 
+// SCAN 5 (tracked-template doctrine, cos-ops#78): vault/example-vault/ is the repo's only tracked
+// copy of the second-brain-* skills and the CLAUDE.md that governs them (see the file header for
+// why this scan exists and why it is scoped to the TRACKED template, never a live vault/<name>/).
+const TEMPLATE_VAULT = join(REPO_ROOT, 'vault', 'example-vault')
+
+/** Every regular file, recursively — unlike collectMarkdownFiles, not `.md`-only (the privacy scan
+ * below must also see aliases.md, index.md, log.md, not just skills and CLAUDE.md). */
+function collectAllFiles(dir) {
+  const out = []
+  const walk = (d) => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      if (isIgnored(entry.name)) continue
+      const abs = join(d, entry.name)
+      if (entry.isDirectory()) walk(abs)
+      else if (entry.isFile()) out.push(abs)
+    }
+  }
+  walk(dir)
+  return out.sort()
+}
+
+// Doctrine pins — every span below is single-line in the ported text, byte-exact from the live
+// wording (em-dashes are U+2014; the lint apostrophe is the straight ASCII '), and contains no
+// `*`/backtick/`**` inside the span itself. A missing FILE is its own violation, never a silent
+// skip (mirrors RECEIPT_FLOOR_SKILLS's floor discipline above).
+const DOCTRINE_PINS = {
+  'CLAUDE.md': [
+    'source of record',
+    'selective, not exhaustive',
+    'Critical intake — information vs. bloat',
+    'ceiling that flags an unusually rich source, never a target to hit',
+    'Reinforce before you spawn',
+  ],
+  '.claude/skills/second-brain-ingest/SKILL.md': [
+    'Triage — information vs. bloat',
+    'relational facts are never NOTHING',
+    'handed to ingest always counts as at least ONE LINE',
+    'Reinforce before you spawn',
+  ],
+  '.claude/skills/second-brain-lint/SKILL.md': [
+    'Auto-fix policy — repair the safe, propose the rest',
+    "flag it, don't guess",
+    'Bloat & fragmentation',
+  ],
+}
+
+let doctrinePinsHeld = 0
+for (const [rel, pins] of Object.entries(DOCTRINE_PINS)) {
+  const abs = join(TEMPLATE_VAULT, rel)
+  let content
+  try {
+    content = readFileSync(abs, 'utf8')
+  } catch {
+    violations.push(
+      `vault/example-vault/${rel} does not exist — SCAN 5 cannot check its doctrine pins (cos-ops#78)`,
+    )
+    continue
+  }
+  for (const pin of pins) {
+    if (content.includes(pin)) {
+      doctrinePinsHeld++
+    } else {
+      violations.push(
+        `vault/example-vault/${rel} — missing doctrine pin: "${pin}" (the tracked template must ` +
+          'carry the ported doctrine verbatim; see cos-ops#78)',
+      )
+    }
+  }
+}
+
+// Banner inversion, both directions (CLAUDE.md only): the old "Do not edit here" instruction must
+// be GONE, not merely joined by the new banner — a doctrine pin alone can't catch a half-inverted
+// banner that kept both sentences.
+{
+  const rel = 'CLAUDE.md'
+  try {
+    const content = readFileSync(join(TEMPLATE_VAULT, rel), 'utf8')
+    if (content.includes('Do not edit here')) {
+      violations.push(
+        `vault/example-vault/${rel} — still instructs "Do not edit here"; the banner must be ` +
+          'inverted so the template is the source of record (cos-ops#78)',
+      )
+    }
+  } catch {
+    // already reported as a missing-file violation above
+  }
+}
+
+// allowed-tools exact line (lint only) — a full-line match, not a substring, so a partial widening
+// (e.g. adding only `Write`) can't pass.
+{
+  const rel = '.claude/skills/second-brain-lint/SKILL.md'
+  try {
+    const content = readFileSync(join(TEMPLATE_VAULT, rel), 'utf8')
+    if (!/^allowed-tools: Read Glob Grep Edit Write$/m.test(content)) {
+      violations.push(
+        `vault/example-vault/${rel} — front matter must read exactly ` +
+          '"allowed-tools: Read Glob Grep Edit Write" (cos-ops#78)',
+      )
+    }
+  } catch {
+    // already reported as a missing-file violation above
+  }
+}
+
+// Email allowlist (RFC 2606) + personal-path ban, over EVERY regular file under the template —
+// correction 1 from cos-ops#78's review: an allowlist, not a denylist, so it does not depend on
+// anyone enumerating personal referents correctly.
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
+const PERSONAL_PATH_RE = /\/Users\/|\/home\/|~\//g
+const templateFiles = collectAllFiles(TEMPLATE_VAULT)
+const templateMdFiles = templateFiles.filter((f) => f.endsWith('.md'))
+let emailsChecked = 0
+for (const file of templateFiles) {
+  const rel = relative(REPO_ROOT, file)
+  const lines = readFileSync(file, 'utf8').split('\n')
+  lines.forEach((line, i) => {
+    for (const match of line.matchAll(EMAIL_RE)) {
+      emailsChecked++
+      const email = match[0]
+      if (!(email.endsWith('@example.com') || email.endsWith('@example.org'))) {
+        violations.push(
+          `${rel}:${i + 1} — email-shaped string "${email}" is not @example.com / @example.org ` +
+            '(RFC 2606 reserved-for-documentation; cos-ops#78)',
+        )
+      }
+    }
+    for (const match of line.matchAll(PERSONAL_PATH_RE)) {
+      violations.push(
+        `${rel}:${i + 1} — personal-path token "${match[0]}" under the tracked template (cos-ops#78)`,
+      )
+    }
+  })
+}
+
+// Floors (the vacuous-pass discipline, mirroring RECEIPT_FLOOR_SKILLS): either one breaking means
+// the walk or a detector lost its input, not that the template is clean — say so, don't pass quietly.
+if (templateMdFiles.length < 9) {
+  violations.push(
+    `vault/example-vault/ — only ${templateMdFiles.length} markdown file(s) found; SCAN 5's walk ` +
+      'may have lost its input — re-anchor deliberately (cos-ops#78)',
+  )
+}
+if (emailsChecked < 1) {
+  violations.push(
+    'vault/example-vault/ — zero email-shaped strings found tree-wide; the allowlist detector may ' +
+      'have lost its input — re-anchor deliberately (cos-ops#78)',
+  )
+}
+
+const scan5Count = violations.length - scan1Count - scan2Count - scan3Count - scan4Count
+
 if (violations.length) {
   console.error('[skill-reachability] reachability violation(s):')
   for (const v of violations) console.error(`  ${v}`)
@@ -324,6 +511,13 @@ if (violations.length) {
         '(see cos-ops#74).',
     )
   }
+  if (scan5Count > 0) {
+    contracts.push(
+      `${scan5Count} across the vault/example-vault template — the tracked template is the source ` +
+        'of record for vault doctrine and the second-brain-* skills; pins + RFC 2606 email ' +
+        'allowlist + personal-path ban (see cos-ops#78).',
+    )
+  }
   console.error(`[skill-reachability] ${violations.length} violation(s) total. ${contracts.join(' ')}`)
   process.exit(1)
 }
@@ -332,6 +526,8 @@ console.log(
   `[skill-reachability] ${files.length} file(s) scanned, ${refsChecked} delegation ref(s) checked, ` +
     `${setupSkills.size} registry setup skill(s) reachable from cos-setup, ` +
     `${filesWithFetch} fetch-instructing file(s) screened, ` +
-    `${uploadSectionsChecked} upload section(s) receipted — all reachable.`,
+    `${uploadSectionsChecked} upload section(s) receipted, ` +
+    `${templateMdFiles.length} template file(s) privacy-clean, ${doctrinePinsHeld} doctrine ` +
+    'pin(s) held — all reachable.',
 )
 process.exit(0)

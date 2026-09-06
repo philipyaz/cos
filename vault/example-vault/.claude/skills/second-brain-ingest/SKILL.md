@@ -3,6 +3,7 @@ name: second-brain-ingest
 description: >
   Ingests an item (inline text and/or attached on-device files) into the
   domain-split knowledge wiki. Classifies the item's domain (work | life),
+  critically triages each fact (information vs. bloat → document / one line / nothing),
   writes a factual source page, copies attached artifacts into raw/assets,
   re-synthesizes the affected entity and concept pages, resolves entities to
   canonical [[wikilinks]] via aliases.md, and maintains the strong per-domain
@@ -53,6 +54,36 @@ Other shared resources at the vault root:
 
 ## CORE LOOP
 
+### 0. Triage — information vs. bloat (do this FIRST)
+
+Read the incoming item with an **executive assistant's critical eye** before writing
+anything. The vault is selective — not everything that arrives deserves ink. Sort each
+discrete fact into one of three tiers:
+
+- **DOCUMENT** — a durable, genuinely new concept / entity, or a fact that *changes* an
+  existing page → full synthesis (steps 1–6 below).
+- **ONE LINE** — a fact that only sharpens or confirms an existing page → fold a sentence
+  in, bump `updated:` / `sources:`, spawn no new page or section.
+- **NOTHING** — a passing mention, one-off logistics, a restatement of what a page already
+  holds, or anything with no plausible future value → write no page; append a one-line
+  `triaged: no change — <gist>` to the domain `log.md`, then stop.
+
+The test is **signal + durability, not strategy or priority**: *"Would a future reader be
+worse off if this were never written?"* If no — one line, or nothing. When unsure, take the
+lighter tier (a sentence is cheap; a page is costly to keep current).
+
+**Guardrails so the filter never drops something real:**
+
+- A fact that only makes sense *in relation to* another page always clears the bar —
+  **relational facts are never NOTHING**.
+- A **board case id** handed to ingest always counts as at least ONE LINE.
+- For an **inline thought** with no `raw/` artifact, a NOTHING verdict still records the
+  verbatim gist in the `triaged: no change` log line, so the raw text survives for a later
+  pass to reconsider — nothing is ever *silently* lost.
+
+If the whole item triages to NOTHING, log the one-liner and you're done — no source page,
+no synthesis, no index touch.
+
 ### 1. Classify the DOMAIN
 
 Decide whether the item is **work** or **life** from its content:
@@ -97,7 +128,7 @@ For **each absolute file path** handed to you in the inputs:
    file and `Write` to write the copy (or `Read`+`Write` for text; for binary you cannot
    transform, copy by reading then writing the bytes through — preserve the original).
 2. **Reference** the preserved copy from the source page via a **relative markdown link**,
-   e.g. `[Original deck](../../raw/assets/2026-05-12-guadeloupe-deck.pdf)` from a page in
+   e.g. `[Original deck](../../raw/assets/2026-05-12-example-trip-deck.pdf)` from a page in
    `<domain>/wiki/sources/`. (Sources sit two levels under the vault root, so the relative
    path back to `raw/assets/` is `../../raw/assets/<file>`.)
 
@@ -112,9 +143,20 @@ everything now known — do **not** tack new bullets onto the end:
 - Fold the new facts into the existing prose; resolve any contradiction in place and note
   it with both sources cited.
 - Add the source to the page's `sources:` frontmatter and bump `updated:`.
-- Create new entity / concept pages where the item introduces something with no page yet.
-- A single **substantive** source touches **10-15 pages** — that cross-page re-synthesis
-  is the entire value. If you only wrote the source page and the index, you missed it.
+- **Reinforce before you spawn.** Default to folding new knowledge into the best existing
+  page; create a *new* entity / concept page only when the topic **earns it** — **durable**
+  (matters in 6 months, not a passing mention), **standalone** (explainable without leaning
+  on a sibling to define it), **referenced** (named by 2+ distinct sources, genuinely
+  emphasised, or an entity actually transacted with), and **non-absorbable** (no existing
+  page can hold it as a section without distorting scope). One source fanning out into a
+  fan of 5 mutually-defining stubs is a merge candidate, not a win.
+- Touch **only the pages the triaged facts actually move** — an unchanged page stays
+  unchanged (at most a `sources:` / `updated:` touch). A genuinely pivotal source may reach
+  ~10–15 pages; most change a few or one. Don't manufacture edits to hit a count — if
+  you're about to touch 10+ pages or mint several new ones, stop and re-check the triage;
+  breadth is usually over-documentation.
+- **Re-synthesis trims, not only grows.** Each rewrite is a chance to cut what no longer
+  earns its place; a touched page should come out **sharper, not just longer**.
 
 ### 5. Resolve entities to canonical [[wikilinks]]
 
@@ -192,7 +234,12 @@ themselves are the "overarching concepts".
 - **Knowledge-only.** Never write `- [ ]` task checkboxes into any wiki page.
 - **Rewrite, don't append.** Re-synthesize each touched page to reflect everything known.
 - **Source pages are factual.** Save interpretation/synthesis for concept pages.
-- **A substantive source touches 10-15 pages.** The cross-page work is the value.
+- **Triage before you write — information vs. bloat.** Filter each fact to DOCUMENT / ONE
+  LINE / NOTHING; a restatement bumps `updated:` and stops, a marginal mention is logged
+  `triaged: no change` and not paged. ~10–15 pages is a *ceiling* for a pivotal source, not
+  a target — most ingests create 0–1 new pages.
+- **Reinforce before you spawn; re-synthesis trims as well as adds.** Fold into an existing
+  page by default, and keep pages lean and sharp.
 - **`[[wikilinks]]` for every internal reference.** Never raw file paths.
 - **Filename == H1** on every page.
 - **Domain-split is real.** Keep work knowledge in `work/wiki`, life in `life/wiki`;
