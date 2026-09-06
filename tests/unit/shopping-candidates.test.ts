@@ -139,7 +139,12 @@ test("computeShoppingCandidates: bought on/after the window start is suppressed 
 test("computeShoppingCandidates: bought BEFORE the window start is NOT suppressed — a re-offer is correct", () => {
   const r = compute({
     mealPlanEntries: [meal({ ingredients: ["flour"] })],
-    shoppingItems: [shoppingRow({ id: "SHOP-1", name: "flour", status: "bought", boughtAt: "2026-08-09T23:59:59.000Z" })],
+    // Mid-day UTC (not a UTC-boundary instant): the local day is 2026-08-09 from UTC−9 to
+    // UTC+14, so this pins "bought the day before the window" in every zone, including the
+    // hub's (CEST) — a boundary instant like 23:59:59Z would cross into the window start on
+    // any zone east of UTC now that boughtAt is compared via localDayOf (cos-ops#77). The true
+    // boundary behaviour is covered deterministically in tests/unit/local-day.test.ts instead.
+    shoppingItems: [shoppingRow({ id: "SHOP-1", name: "flour", status: "bought", boughtAt: "2026-08-09T09:00:00.000Z" })],
   });
   assert.equal(r.candidates.length, 1, "bought before the window doesn't suppress — under-suppression is the right bias");
   assert.deepEqual(r.suppressed, { onList: 0, inPantry: 0, boughtInWindow: 0 });

@@ -15,6 +15,7 @@
 import type { FoodLogEntry, MealPlanEntry, NutritionTargetArtifact, PantryItem, ShoppingItem } from "./types";
 import { computeNutritionStatus } from "./nutrition-status";
 import { normalizePantryName } from "./nutrition-format";
+import { localDayOf } from "./staleness";
 
 export interface ShoppingCandidate {
   name: string; // display name (trimmed original — the ingredient line or pantry item name)
@@ -91,14 +92,11 @@ export function computeShoppingCandidates(input: {
   function listSuppression(name: string): "onList" | "boughtInWindow" | null {
     if (shoppingItems.some((s) => s.status === "needed" && namesMatch(name, s.name))) return "onList";
     if (
-      shoppingItems.some(
-        (s) =>
-          s.status === "bought" &&
-          !!s.boughtAt &&
-          s.boughtAt.slice(0, 10) >= from &&
-          s.boughtAt.slice(0, 10) <= to &&
-          namesMatch(name, s.name),
-      )
+      shoppingItems.some((s) => {
+        if (s.status !== "bought" || !s.boughtAt) return false;
+        const boughtDay = localDayOf(s.boughtAt); // same frame as `from`/`to` (both toISODay-derived)
+        return boughtDay >= from && boughtDay <= to && namesMatch(name, s.name);
+      })
     ) {
       return "boughtInWindow";
     }
