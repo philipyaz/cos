@@ -23,6 +23,7 @@ import {
 import { formatArtifactLabel, formatTimestampDay } from "@/lib/fitness-format";
 import { useLiveBoard } from "@/lib/use-live-board";
 import { IconRunner, IconChevronRight } from "@/components/icons";
+import { PrimaryButton } from "@/components/shared/action-button";
 import type { CoachingArtifact, CoachingArtifactKind } from "@/lib/types";
 
 export interface ArtifactFeedProps {
@@ -150,13 +151,9 @@ export function ArtifactFeed({
           )}
 
           {generate && (
-            <button
-              onClick={handleGenerate}
-              disabled={pending}
-              className="px-4 py-1.5 rounded-md bg-ink-900 text-white text-[13px] font-medium hover:bg-ink-800 disabled:opacity-50 transition"
-            >
+            <PrimaryButton onClick={handleGenerate} disabled={pending} className="px-4">
               {pending ? "Generating…" : generate.label}
-            </button>
+            </PrimaryButton>
           )}
         </div>
       </div>

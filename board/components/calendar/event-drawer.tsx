@@ -22,6 +22,7 @@ import { domainLabel, domainClasses } from "@/lib/format";
 import { createEvent, updateEvent, deleteEvent } from "@/lib/board-client";
 import { IconWarning, IconDot, IconSearch } from "@/components/icons";
 import { TextInput, TextArea, Field } from "@/components/shared/field";
+import { PrimaryButton } from "@/components/shared/action-button";
 
 export function EventDrawer({
   event,
@@ -280,13 +281,9 @@ export function EventDrawer({
             >
               Cancel
             </button>
-            <button
-              onClick={onSave}
-              disabled={saving}
-              className="text-[12px] px-3 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition disabled:opacity-50"
-            >
+            <PrimaryButton onClick={onSave} disabled={saving} className="px-3">
               {saving ? "Saving…" : isEdit ? "Save changes" : "Create appointment"}
-            </button>
+            </PrimaryButton>
           </div>
         </div>
       </aside>

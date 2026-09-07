@@ -11,6 +11,7 @@ import { VALID_BIOLOGICAL_SEX, VALID_TRAINING_STATUS } from "@/lib/types";
 import { setBodyProfile } from "@/lib/body-client";
 import { IconWarning } from "@/components/icons";
 import { TextInput, Select, Field } from "@/components/shared/field";
+import { PrimaryButton } from "@/components/shared/action-button";
 
 const SEX_LABEL: Record<BiologicalSex, string> = { male: "Male", female: "Female" };
 const TRAINING_LABEL: Record<TrainingStatus, string> = {
@@ -136,7 +137,7 @@ export function BodyProfileDrawer({
         <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           <div className="ml-auto flex items-center gap-2">
             <button onClick={onClose} disabled={saving} className="text-[12px] text-ink-600 hover:text-ink-900 px-2.5 py-1 rounded-md border border-ink-200 hover:bg-white disabled:opacity-50">Cancel</button>
-            <button onClick={onSave} disabled={saving} className="text-[12px] px-3 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+            <PrimaryButton onClick={onSave} disabled={saving} className="px-3">{saving ? "Saving…" : "Save"}</PrimaryButton>
           </div>
         </div>
       </aside>

@@ -37,6 +37,7 @@ import {
   IconX,
   IconCopy,
 } from "@/components/icons";
+import { PrimaryButton } from "@/components/shared/action-button";
 
 // The copy/paste command for the not-ready helper — the text the user pastes into Claude
 // Code, which triggers the backup-recovery skill. Mirrors the guard's setupCommand().
@@ -261,17 +262,17 @@ function HealthHeader({
               <IconRefresh className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
               {refreshing ? "Refreshing…" : "Refresh"}
             </button>
-            <button
+            <PrimaryButton
               type="button"
               onClick={onRunNow}
               disabled={disabled}
               aria-label="Back up now"
               title="Take an encrypted snapshot now (bypasses the 12h freshness gate)"
-              className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition disabled:opacity-50"
+              className="px-2.5"
             >
               <IconArchive className={`w-3.5 h-3.5 ${running ? "animate-pulse" : ""}`} />
               {running ? "Backing up…" : "Back up now"}
-            </button>
+            </PrimaryButton>
           </div>
         </div>
         <p className="mt-1.5 text-[12px] leading-relaxed text-ink-500 max-w-[640px]">

@@ -24,6 +24,7 @@ import { VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION } from "@/lib/types";
 import { createPantryItem, updatePantryItem, deletePantryItem } from "@/lib/nutrition-client";
 import { IconWarning } from "@/components/icons";
 import { TextInput, TextArea, Select, Field } from "@/components/shared/field";
+import { PrimaryButton } from "@/components/shared/action-button";
 
 // Category / location → a human label for the select options (mirrors PantryView's
 // CATEGORY_LABEL / LOCATION_LABEL; kept local so the drawer stays self-contained).
@@ -318,13 +319,9 @@ export function PantryItemDrawer({
             >
               Cancel
             </button>
-            <button
-              onClick={onSave}
-              disabled={saving}
-              className="text-[12px] px-3 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition disabled:opacity-50"
-            >
+            <PrimaryButton onClick={onSave} disabled={saving} className="px-3">
               {saving ? "Saving…" : isEdit ? "Save changes" : "Add item"}
-            </button>
+            </PrimaryButton>
           </div>
         </div>
       </aside>

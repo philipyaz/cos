@@ -14,6 +14,7 @@ import {
   type BundleView,
 } from "@/lib/board-client";
 import { IconPlus } from "@/components/icons";
+import { PrimaryButton } from "@/components/shared/action-button";
 
 // The Labels manager — a slide-over for configuring the board's taxonomy entirely
 // from the UI: install role/life bundles in one click, add custom labels, and edit
@@ -221,14 +222,10 @@ export function LabelManager({
                 />
                 <div className="flex items-center gap-2">
                   <ColorPicker value={nColor} onChange={setNColor} />
-                  <button
-                    onClick={addLabel}
-                    disabled={!nTitle.trim() || busy}
-                    className="ml-auto inline-flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-md bg-ink-900 text-white disabled:opacity-40"
-                  >
+                  <PrimaryButton onClick={addLabel} disabled={!nTitle.trim() || busy} className="ml-auto px-2.5">
                     <IconPlus className="w-3.5 h-3.5" />
                     Add
-                  </button>
+                  </PrimaryButton>
                 </div>
               </div>
 

@@ -24,6 +24,7 @@ import {
 import { trustClasses, trustLabel, relativeTime, formatDateTime } from "@/lib/format";
 import { IconPlus, IconShield, IconTrash } from "@/components/icons";
 import { TextInput, Select } from "@/components/shared/field";
+import { PrimaryButton } from "@/components/shared/action-button";
 
 // Same loose-but-real email shape the POST route validates with — we check it
 // CLIENT-side first so the inline add form can show a fast, precise error before a
@@ -176,14 +177,10 @@ export function WhitelistView({ initial, now }: { initial: TrustListResponse; no
             <option value="trusted">Trusted</option>
             <option value="blocked">Blocked</option>
           </Select>
-          <button
-            type="submit"
-            disabled={!nEmail.trim() || busyKey !== null}
-            className="inline-flex items-center justify-center gap-1 text-[12px] px-2.5 py-1.5 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition disabled:opacity-40"
-          >
+          <PrimaryButton type="submit" disabled={!nEmail.trim() || busyKey !== null} className="px-2.5">
             <IconPlus className="w-3.5 h-3.5" />
             Add
-          </button>
+          </PrimaryButton>
         </div>
         <TextInput
           value={nReason}

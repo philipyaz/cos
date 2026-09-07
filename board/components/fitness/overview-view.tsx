@@ -19,6 +19,7 @@ import { useLiveBoard } from "@/lib/use-live-board";
 import { getProfile, setProfile } from "@/lib/fitness-client";
 import { formatDay } from "@/lib/fitness-format";
 import { TextInput, TextArea, Select } from "@/components/shared/field";
+import { PrimaryButton } from "@/components/shared/action-button";
 import { IconRunner, IconWarning } from "@/components/icons";
 import {
   VALID_ATHLETE_GOAL,
@@ -441,13 +442,9 @@ export function FitnessOverviewView() {
               Saved
             </span>
           )}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-1.5 rounded-md bg-ink-900 text-white text-[13px] font-medium hover:bg-ink-800 disabled:opacity-50 transition"
-          >
+          <PrimaryButton onClick={handleSave} disabled={saving} className="px-4">
             {saving ? "Saving…" : "Save"}
-          </button>
+          </PrimaryButton>
         </div>
       </div>
     </div>

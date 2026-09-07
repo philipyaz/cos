@@ -32,6 +32,7 @@ import {
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
 import { TextInput, TextArea, Select, Field } from "@/components/shared/field";
+import { PrimaryButton } from "@/components/shared/action-button";
 import { messageDeepLink } from "@/lib/message-url";
 import { IconWarning, IconDot, IconSearch, IconPlus, IconCircle, IconCheckCircle } from "@/components/icons";
 
@@ -336,13 +337,9 @@ export function ReminderDrawer({
             >
               Cancel
             </button>
-            <button
-              onClick={onSave}
-              disabled={saving}
-              className="text-[12px] px-3 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition disabled:opacity-50"
-            >
+            <PrimaryButton onClick={onSave} disabled={saving} className="px-3">
               {saving ? "Saving…" : isEdit ? "Save changes" : "Create reminder"}
-            </button>
+            </PrimaryButton>
           </div>
         </div>
       </aside>

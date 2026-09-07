@@ -11,6 +11,7 @@ import type { DietProfile } from "@/lib/types";
 import { setDietProfile } from "@/lib/nutrition-client";
 import { IconWarning } from "@/components/icons";
 import { Field } from "@/components/shared/field";
+import { PrimaryButton } from "@/components/shared/action-button";
 
 const parseList = (raw: string): string[] => raw.split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -127,7 +128,7 @@ export function DietProfileDrawer({
         <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           <div className="ml-auto flex items-center gap-2">
             <button onClick={onClose} disabled={saving} className="text-[12px] text-ink-600 hover:text-ink-900 px-2.5 py-1 rounded-md border border-ink-200 hover:bg-white disabled:opacity-50">Cancel</button>
-            <button onClick={onSave} disabled={saving} className="text-[12px] px-3 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+            <PrimaryButton onClick={onSave} disabled={saving} className="px-3">{saving ? "Saving…" : "Save"}</PrimaryButton>
           </div>
         </div>
       </aside>

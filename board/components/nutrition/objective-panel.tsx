@@ -21,6 +21,7 @@ import type { NutritionTargetArtifact } from "@/lib/types";
 import { upsertWeight } from "@/lib/body-client";
 import { formatDay, kgToDisplay, displayToKg } from "@/lib/nutrition-format";
 import { IconScale, IconTrend, IconChevronDown, IconChevronRight, IconWarning } from "@/components/icons";
+import { PrimaryButton } from "@/components/shared/action-button";
 import { GoalDrawer } from "./goal-drawer";
 import { WeightChart } from "./weight-chart";
 
@@ -131,9 +132,9 @@ function ColdStart({ onSetGoal }: { onSetGoal: () => void }) {
         &ldquo;lean recomposition&rdquo;, &ldquo;build muscle&rdquo; — and (optionally) a target weight. Your
         chief of staff reads it to plan your daily targets.
       </p>
-      <button onClick={onSetGoal} className="text-[12px] px-3 py-1.5 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition">
+      <PrimaryButton onClick={onSetGoal} className="px-3">
         Set up goal
-      </button>
+      </PrimaryButton>
     </div>
   );
 }
@@ -352,9 +353,9 @@ function LogWeightButton({ today, unit, weights, onLogged }: { today: string; un
         className={`w-20 bg-white border rounded-md px-1.5 py-1 text-[16px] text-ink-900 tabular-nums outline-none focus:ring-2 focus:ring-sky-100 ${error ? "border-rose-300" : "border-ink-200 focus:border-sky-300"}`}
       />
       <span className="text-[11px] text-ink-400">{unit}</span>
-      <button onClick={() => void submit()} disabled={saving} className="text-[11px] px-2 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 disabled:opacity-50">
+      <PrimaryButton onClick={() => void submit()} disabled={saving} className="px-2">
         {saving ? "…" : "Save"}
-      </button>
+      </PrimaryButton>
       <button onClick={() => setOpen(false)} disabled={saving} aria-label="Cancel logging weight" className="text-[11px] px-1.5 py-1 rounded-md text-ink-500 hover:text-ink-900 hover:bg-ink-50">
         ×
       </button>

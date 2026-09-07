@@ -29,6 +29,7 @@ import {
 import { useLiveBoard } from "@/lib/use-live-board";
 import { dueLabel, dueClasses, domainLabel, domainClasses, tierAccent, labelChipClasses } from "@/lib/format";
 import { IconPlus, IconDot, IconCheckCircle, IconCircle, IconChevronRight, IconChevronDown, IconWarning } from "@/components/icons";
+import { PrimaryButton } from "@/components/shared/action-button";
 import { ReminderDrawer } from "./reminder-drawer";
 
 // What the drawer is doing: composing a new reminder, or editing an existing one.
@@ -124,13 +125,10 @@ export function RemindersView({
         <span className="text-[12px] text-ink-400 tabular-nums">
           {open.length} open
         </span>
-        <button
-          onClick={() => setCompose({ mode: "create" })}
-          className="ml-auto inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition"
-        >
+        <PrimaryButton onClick={() => setCompose({ mode: "create" })} className="ml-auto px-2.5">
           <IconPlus className="w-3.5 h-3.5" />
           New reminder
-        </button>
+        </PrimaryButton>
       </div>
 
       {/* Body */}
@@ -235,13 +233,10 @@ function EmptyState({ onCompose }: { onCompose: () => void }) {
       <p className="text-[12.5px] text-ink-500 max-w-[420px] mx-auto mb-4">
         Capture a quick check or to-do, optionally linked to a case/initiative/workstream.
       </p>
-      <button
-        onClick={onCompose}
-        className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition"
-      >
+      <PrimaryButton onClick={onCompose} className="px-2.5">
         <IconPlus className="w-3.5 h-3.5" />
         New reminder
-      </button>
+      </PrimaryButton>
     </div>
   );
 }

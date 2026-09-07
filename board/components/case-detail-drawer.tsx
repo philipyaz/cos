@@ -63,6 +63,7 @@ import {
 } from "@/components/icons";
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
+import { PrimaryButton } from "@/components/shared/action-button";
 import { messageDeepLink } from "@/lib/message-url";
 import { Markdown, ReadMore } from "@/components/shared/markdown";
 
@@ -1734,13 +1735,9 @@ function NotesSection({
         />
         <div className="flex items-center justify-between mt-1">
           <span className="text-[10.5px] text-ink-400">⌘/Ctrl + Enter to add</span>
-          <button
-            onClick={submit}
-            disabled={!draft.trim()}
-            className="text-[12px] px-2 py-1 rounded bg-ink-900 text-white hover:bg-ink-700 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
+          <PrimaryButton onClick={submit} disabled={!draft.trim()} className="px-2 disabled:cursor-not-allowed">
             Add note
-          </button>
+          </PrimaryButton>
         </div>
       </div>
     </Section>

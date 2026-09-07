@@ -45,6 +45,7 @@ import {
 } from "@/components/icons";
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
+import { PrimaryButton } from "@/components/shared/action-button";
 import { messageDeepLink } from "@/lib/message-url";
 import {
   createCase,
@@ -833,12 +834,9 @@ function TriagePanel({
 
       {!picking ? (
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => onCreateCase("work")}
-            className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition"
-          >
+          <PrimaryButton onClick={() => onCreateCase("work")} className="px-2.5">
             <IconPlus className="w-3.5 h-3.5" /> Create case
-          </button>
+          </PrimaryButton>
           <span className="text-[11px] text-ink-400">as</span>
           <button
             onClick={() => onCreateCase("work")}
