@@ -10,6 +10,7 @@ import type { BodyProfile, BiologicalSex, TrainingStatus } from "@/lib/types";
 import { VALID_BIOLOGICAL_SEX, VALID_TRAINING_STATUS } from "@/lib/types";
 import { setBodyProfile } from "@/lib/body-client";
 import { IconWarning } from "@/components/icons";
+import { TextInput, Select, Field } from "@/components/shared/field";
 
 const SEX_LABEL: Record<BiologicalSex, string> = { male: "Male", female: "Female" };
 const TRAINING_LABEL: Record<TrainingStatus, string> = {
@@ -83,17 +84,17 @@ export function BodyProfileDrawer({
           <div className="flex gap-3">
             <div className="flex-1">
               <Field label="Sex">
-                <select value={sex} onChange={(e) => setSex(e.target.value as "" | BiologicalSex)} aria-label="Biological sex"
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100">
+                <Select value={sex} onChange={(e) => setSex(e.target.value as "" | BiologicalSex)} aria-label="Biological sex"
+                  className="w-full">
                   <option value="">Select…</option>
                   {VALID_BIOLOGICAL_SEX.map((s) => <option key={s} value={s}>{SEX_LABEL[s]}</option>)}
-                </select>
+                </Select>
               </Field>
             </div>
             <div className="flex-1">
               <Field label="Date of birth">
-                <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} aria-label="Date of birth"
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100" />
+                <TextInput type="date" value={dob} onChange={(e) => setDob(e.target.value)} aria-label="Date of birth"
+                  className="w-full" />
               </Field>
             </div>
           </div>
@@ -101,9 +102,9 @@ export function BodyProfileDrawer({
           <div className="flex gap-3">
             <div className="flex-1">
               <Field label="Height (cm)">
-                <input type="number" inputMode="decimal" min="1" step="any" value={heightCm} onChange={(e) => setHeightCm(e.target.value)}
+                <TextInput type="number" inputMode="decimal" min="1" step="any" value={heightCm} onChange={(e) => setHeightCm(e.target.value)}
                   placeholder="e.g. 178" aria-label="Height in centimetres"
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 tabular-nums outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400" />
+                  className="w-full tabular-nums" />
               </Field>
             </div>
             <div className="flex-1">
@@ -119,10 +120,10 @@ export function BodyProfileDrawer({
           </div>
 
           <Field label="Training status">
-            <select value={trainingStatus} onChange={(e) => setTrainingStatus(e.target.value as TrainingStatus)} aria-label="Training status"
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100">
+            <Select value={trainingStatus} onChange={(e) => setTrainingStatus(e.target.value as TrainingStatus)} aria-label="Training status"
+              className="w-full">
               {VALID_TRAINING_STATUS.map((t) => <option key={t} value={t}>{TRAINING_LABEL[t]}</option>)}
-            </select>
+            </Select>
           </Field>
 
           <label className="flex items-center gap-2 text-[12.5px] text-ink-700 cursor-pointer">
@@ -140,14 +141,5 @@ export function BodyProfileDrawer({
         </div>
       </aside>
     </>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wide text-ink-400 mb-1">{label}</div>
-      {children}
-    </div>
   );
 }

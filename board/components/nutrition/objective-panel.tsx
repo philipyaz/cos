@@ -349,7 +349,7 @@ function LogWeightButton({ today, unit, weights, onLogged }: { today: string; un
         }}
         placeholder={unit}
         aria-label={`Today's weight in ${unit}`}
-        className={`w-20 bg-white border rounded-md px-1.5 py-1 text-[12px] text-ink-900 tabular-nums outline-none focus:ring-2 focus:ring-sky-100 ${error ? "border-rose-300" : "border-ink-200 focus:border-sky-300"}`}
+        className={`w-20 bg-white border rounded-md px-1.5 py-1 text-[16px] text-ink-900 tabular-nums outline-none focus:ring-2 focus:ring-sky-100 ${error ? "border-rose-300" : "border-ink-200 focus:border-sky-300"}`}
       />
       <span className="text-[11px] text-ink-400">{unit}</span>
       <button onClick={() => void submit()} disabled={saving} className="text-[11px] px-2 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 disabled:opacity-50">

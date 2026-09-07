@@ -31,6 +31,7 @@ import {
 } from "@/lib/board-client";
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
+import { TextInput, TextArea, Select, Field } from "@/components/shared/field";
 import { messageDeepLink } from "@/lib/message-url";
 import { IconWarning, IconDot, IconSearch, IconPlus, IconCircle, IconCheckCircle } from "@/components/icons";
 
@@ -220,14 +221,14 @@ export function ReminderDrawer({
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {/* Title — the nudge itself. */}
           <Field label="Title">
-            <input
+            <TextInput
               type="text"
               autoFocus
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What to check or do?"
               aria-label="Title"
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[13px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
+              className="w-full"
             />
           </Field>
 
@@ -246,54 +247,54 @@ export function ReminderDrawer({
           <div className="flex gap-3">
             <div className="flex-1">
               <Field label="Due date">
-                <input
+                <TextInput
                   type="date"
                   value={dueAt}
                   onChange={(e) => setDueAt(e.target.value)}
                   aria-label="Due date"
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                  className="w-full"
                 />
               </Field>
             </div>
             <div className="flex-1">
               <Field label="Status">
-                <select
+                <Select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as ReminderStatus)}
                   aria-label="Status"
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                  className="w-full"
                 >
                   <option value="open">Open</option>
                   <option value="done">Done</option>
                   <option value="dismissed">Dismissed</option>
-                </select>
+                </Select>
               </Field>
             </div>
           </div>
 
           {/* Domain — optional/advisory work/life tag. */}
           <Field label="Domain">
-            <select
+            <Select
               value={domain}
               onChange={(e) => setDomain(e.target.value as "" | "work" | "life")}
               aria-label="Domain"
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+              className="w-full"
             >
               <option value="">No domain</option>
               <option value="work">Work</option>
               <option value="life">Life</option>
-            </select>
+            </Select>
           </Field>
 
           {/* Detail — optional elaboration / context. */}
           <Field label="Detail">
-            <textarea
+            <TextArea
               value={detail}
               onChange={(e) => setDetail(e.target.value)}
               rows={3}
               placeholder="Optional context…"
               aria-label="Detail"
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400 resize-y"
+              className="w-full resize-y"
             />
           </Field>
 
@@ -346,16 +347,6 @@ export function ReminderDrawer({
         </div>
       </aside>
     </>
-  );
-}
-
-// A labelled form row (mirrors the EventDrawer's Field).
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wide text-ink-400 mb-1">{label}</div>
-      {children}
-    </div>
   );
 }
 
@@ -459,7 +450,7 @@ function NodePicker({
             }}
             placeholder="Search initiatives, workstreams, cases…"
             aria-label="Search nodes to link"
-            className="flex-1 min-w-0 text-[12px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
+            className="flex-1 min-w-0 text-[16px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
           />
         </div>
         <button
@@ -675,7 +666,7 @@ function TasksEditor({
             onChange={(e) => setAt(i, { title: e.target.value })}
             placeholder="Task…"
             aria-label="Task title"
-            className={`flex-1 min-w-0 bg-white border border-ink-200 rounded-md px-2 py-1 text-[12.5px] outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400 ${
+            className={`flex-1 min-w-0 bg-white border border-ink-200 rounded-md px-2 py-1 text-[16px] outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400 ${
               t.done ? "text-ink-400 line-through" : "text-ink-900"
             }`}
           />

@@ -23,6 +23,7 @@ import type { PantryItem, PantryCategory, PantryLocation } from "@/lib/types";
 import { VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION } from "@/lib/types";
 import { createPantryItem, updatePantryItem, deletePantryItem } from "@/lib/nutrition-client";
 import { IconWarning } from "@/components/icons";
+import { TextInput, TextArea, Select, Field } from "@/components/shared/field";
 
 // Category / location → a human label for the select options (mirrors PantryView's
 // CATEGORY_LABEL / LOCATION_LABEL; kept local so the drawer stays self-contained).
@@ -183,14 +184,14 @@ export function PantryItemDrawer({
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {/* Name — the item itself. */}
           <Field label="Name">
-            <input
+            <TextInput
               type="text"
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="What's on hand?"
               aria-label="Name"
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[13px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
+              className="w-full"
             />
           </Field>
 
@@ -198,7 +199,7 @@ export function PantryItemDrawer({
           <div className="flex gap-3">
             <div className="flex-1">
               <Field label="Quantity">
-                <input
+                <TextInput
                   type="number"
                   inputMode="decimal"
                   step="any"
@@ -207,19 +208,19 @@ export function PantryItemDrawer({
                   onChange={(e) => setQuantity(e.target.value)}
                   placeholder="e.g. 2"
                   aria-label="Quantity"
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 tabular-nums outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
+                  className="w-full tabular-nums"
                 />
               </Field>
             </div>
             <div className="flex-1">
               <Field label="Unit">
-                <input
+                <TextInput
                   type="text"
                   value={unit}
                   onChange={(e) => setUnit(e.target.value)}
                   placeholder="g, cans, bunch…"
                   aria-label="Unit"
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
+                  className="w-full"
                 />
               </Field>
             </div>
@@ -229,11 +230,11 @@ export function PantryItemDrawer({
           <div className="flex gap-3">
             <div className="flex-1">
               <Field label="Category">
-                <select
+                <Select
                   value={category}
                   onChange={(e) => setCategory(e.target.value as "" | PantryCategory)}
                   aria-label="Category"
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                  className="w-full"
                 >
                   <option value="">No category</option>
                   {VALID_PANTRY_CATEGORY.map((c) => (
@@ -241,16 +242,16 @@ export function PantryItemDrawer({
                       {CATEGORY_LABEL[c]}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
             </div>
             <div className="flex-1">
               <Field label="Location">
-                <select
+                <Select
                   value={location}
                   onChange={(e) => setLocation(e.target.value as "" | PantryLocation)}
                   aria-label="Location"
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                  className="w-full"
                 >
                   <option value="">No location</option>
                   {VALID_PANTRY_LOCATION.map((l) => (
@@ -258,19 +259,19 @@ export function PantryItemDrawer({
                       {LOCATION_LABEL[l]}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
             </div>
           </div>
 
           {/* Expiry — optional calendar day. */}
           <Field label="Expires">
-            <input
+            <TextInput
               type="date"
               value={expiresAt}
               onChange={(e) => setExpiresAt(e.target.value)}
               aria-label="Expiry date"
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+              className="w-full"
             />
           </Field>
 
@@ -287,13 +288,13 @@ export function PantryItemDrawer({
 
           {/* Note — optional freeform note. */}
           <Field label="Note">
-            <textarea
+            <TextArea
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={2}
               placeholder="Optional note…"
               aria-label="Note"
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400 resize-y"
+              className="w-full resize-y"
             />
           </Field>
         </div>
@@ -328,15 +329,5 @@ export function PantryItemDrawer({
         </div>
       </aside>
     </>
-  );
-}
-
-// A labelled form row (mirrors the ReminderDrawer's Field).
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wide text-ink-400 mb-1">{label}</div>
-      {children}
-    </div>
   );
 }

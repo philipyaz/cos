@@ -415,7 +415,7 @@ function NoteComposer({
             void commit();
           }
         }}
-        className="flex-1 bg-white border border-ink-200 rounded-md px-2.5 py-1.5 text-[13px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
+        className="flex-1 bg-white border border-ink-200 rounded-md px-2.5 py-1.5 text-[16px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
       />
       <button
         onClick={() => void commit()}
@@ -506,7 +506,7 @@ function NoteRow({
               void commit();
             }
           }}
-          className="flex-1 min-w-0 bg-white border border-sky-300 rounded px-1.5 py-1 text-[13px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
+          className="flex-1 min-w-0 bg-white border border-sky-300 rounded px-1.5 py-1 text-[16px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
         />
       ) : (
         <button

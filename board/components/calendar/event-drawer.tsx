@@ -21,6 +21,7 @@ import { LANES } from "@/lib/types";
 import { domainLabel, domainClasses } from "@/lib/format";
 import { createEvent, updateEvent, deleteEvent } from "@/lib/board-client";
 import { IconWarning, IconDot, IconSearch } from "@/components/icons";
+import { TextInput, TextArea, Field } from "@/components/shared/field";
 
 export function EventDrawer({
   event,
@@ -161,14 +162,14 @@ export function EventDrawer({
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {/* Title */}
           <Field label="Title">
-            <input
+            <TextInput
               type="text"
               autoFocus
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What's the appointment?"
               aria-label="Title"
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[13px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
+              className="w-full"
             />
           </Field>
 
@@ -176,12 +177,12 @@ export function EventDrawer({
           <div className="flex items-end gap-3">
             <div className="flex-1">
               <Field label="Date">
-                <input
+                <TextInput
                   type="date"
                   value={day}
                   onChange={(e) => setDay(e.target.value)}
                   aria-label="Date"
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                  className="w-full"
                 />
               </Field>
             </div>
@@ -201,23 +202,23 @@ export function EventDrawer({
             <div className="flex gap-3">
               <div className="flex-1">
                 <Field label="Start time">
-                  <input
+                  <TextInput
                     type="time"
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
                     aria-label="Start time"
-                    className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                    className="w-full"
                   />
                 </Field>
               </div>
               <div className="flex-1">
                 <Field label="End time">
-                  <input
+                  <TextInput
                     type="time"
                     value={endTime}
                     onChange={(e) => setEndTime(e.target.value)}
                     aria-label="End time"
-                    className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                    className="w-full"
                   />
                 </Field>
               </div>
@@ -237,25 +238,25 @@ export function EventDrawer({
 
           {/* Location */}
           <Field label="Location">
-            <input
+            <TextInput
               type="text"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               placeholder="Optional — where is it?"
               aria-label="Location"
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
+              className="w-full"
             />
           </Field>
 
           {/* Description */}
           <Field label="Description">
-            <textarea
+            <TextArea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               placeholder="Optional notes…"
               aria-label="Description"
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400 resize-y"
+              className="w-full resize-y"
             />
           </Field>
         </div>
@@ -290,16 +291,6 @@ export function EventDrawer({
         </div>
       </aside>
     </>
-  );
-}
-
-// A labelled form row (mirrors the drawer's FieldRow uppercase-label look).
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wide text-ink-400 mb-1">{label}</div>
-      {children}
-    </div>
   );
 }
 
@@ -393,7 +384,7 @@ function CasePicker({
             }}
             placeholder="Search cases by id or title…"
             aria-label="Search cases to link"
-            className="flex-1 min-w-0 text-[12px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
+            className="flex-1 min-w-0 text-[16px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
           />
         </div>
         <button

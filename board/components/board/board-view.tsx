@@ -1021,21 +1021,21 @@ export function BoardView({
             onChange={(e) => patchQuery({ q: e.target.value || undefined })}
             placeholder="Search title, summary, tasks…"
             aria-label="Filter cases by text"
-            className="text-[12px] px-2 py-1 rounded-md border border-ink-200 outline-none focus:border-ink-300 w-52 placeholder:text-ink-400"
+            className="text-[16px] px-2 py-1 rounded-md border border-ink-200 outline-none focus:border-ink-300 w-52 placeholder:text-ink-400"
           />
           <input
             value={query.tag ?? ""}
             onChange={(e) => patchQuery({ tag: e.target.value || undefined })}
             placeholder="Tag"
             aria-label="Filter by tag"
-            className="text-[12px] px-2 py-1 rounded-md border border-ink-200 outline-none focus:border-ink-300 w-28 placeholder:text-ink-400"
+            className="text-[16px] px-2 py-1 rounded-md border border-ink-200 outline-none focus:border-ink-300 w-28 placeholder:text-ink-400"
           />
           <label className="flex items-center gap-1.5 text-ink-500">
             <span>Sort</span>
             <select
               value={query.sort ?? "updated"}
               onChange={(e) => patchQuery({ sort: e.target.value as BoardSort })}
-              className="text-[12px] px-1.5 py-1 rounded-md border border-ink-200 outline-none bg-white"
+              className="text-[16px] px-1.5 py-1 rounded-md border border-ink-200 outline-none bg-white"
             >
               {SORTS.map((s) => (
                 <option key={s.key} value={s.key}>
@@ -1056,7 +1056,7 @@ export function BoardView({
             <select
               value={query.group ?? "none"}
               onChange={(e) => patchQuery({ group: e.target.value as BoardGroup })}
-              className="text-[12px] px-1.5 py-1 rounded-md border border-ink-200 outline-none bg-white"
+              className="text-[16px] px-1.5 py-1 rounded-md border border-ink-200 outline-none bg-white"
             >
               {GROUPS.map((g) => (
                 <option key={g.key} value={g.key}>

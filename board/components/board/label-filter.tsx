@@ -226,7 +226,7 @@ export function LabelFilter({
                 value={scope}
                 onChange={(e) => setScope(e.target.value)}
                 aria-label="Filter labels by category"
-                className="w-full appearance-none text-[12.5px] pl-2 pr-7 py-1.5 rounded-md border border-ink-200 bg-white outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                className="w-full appearance-none text-[16px] pl-2 pr-7 py-1.5 rounded-md border border-ink-200 bg-white outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
               >
                 <option value="all">All categories ({catalog.length})</option>
                 {CAT_ORDER.map((c) => {
@@ -264,7 +264,7 @@ export function LabelFilter({
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search labels…"
                 aria-label="Search labels"
-                className="w-full text-[12.5px] pl-7 pr-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
+                className="w-full text-[16px] pl-7 pr-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
               />
             </div>
           </div>

@@ -394,7 +394,7 @@ export function InboxView({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search mail…"
               aria-label="Search mail"
-              className="flex-1 min-w-0 text-[12.5px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
+              className="flex-1 min-w-0 text-[16px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
             />
             {/* Inline state: spinner while in flight, then the engine badge so the
                 user knows which path (semantic vs keyword) answered. */}
@@ -494,7 +494,7 @@ export function InboxView({
                     }
                     placeholder={`Filter ${field}…`}
                     aria-label={`Filter by ${field}`}
-                    className="flex-1 min-w-0 text-[12px] px-2 py-1 rounded border border-ink-200 bg-white outline-none text-ink-900 placeholder:text-ink-400 focus:ring-1 focus:ring-ink-300"
+                    className="flex-1 min-w-0 text-[16px] px-2 py-1 rounded border border-ink-200 bg-white outline-none text-ink-900 placeholder:text-ink-400 focus:ring-1 focus:ring-ink-300"
                   />
                 </label>
               ))}
@@ -878,7 +878,7 @@ function TriagePanel({
                 }}
                 placeholder="Search cases by id or title…"
                 aria-label="Search cases to link"
-                className="flex-1 min-w-0 text-[12px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
+                className="flex-1 min-w-0 text-[16px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
               />
             </div>
             <button

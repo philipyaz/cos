@@ -319,7 +319,7 @@ export function CorrelationsView() {
     <select
       value={days}
       onChange={(e) => setDays(Number(e.target.value))}
-      className="rounded-md border border-ink-200 bg-white px-2 py-1.5 text-[13px] text-ink-700"
+      className="rounded-md border border-ink-200 bg-white px-2 py-1.5 text-[16px] text-ink-700"
     >
       <option value={14}>14 days</option>
       <option value={30}>30 days</option>

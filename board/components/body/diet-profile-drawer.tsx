@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import type { DietProfile } from "@/lib/types";
 import { setDietProfile } from "@/lib/nutrition-client";
 import { IconWarning } from "@/components/icons";
+import { Field } from "@/components/shared/field";
 
 const parseList = (raw: string): string[] => raw.split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -79,7 +80,7 @@ export function DietProfileDrawer({
               onChange={(e) => setAllergies(e.target.value)}
               placeholder="e.g. peanuts, shellfish, sesame"
               aria-label="Allergies, comma separated"
-              className="w-full bg-white border border-rose-200 rounded-md px-2.5 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100 placeholder:text-ink-400"
+              className="w-full bg-white border border-rose-200 rounded-md px-2.5 py-1.5 text-[16px] text-ink-900 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100 placeholder:text-ink-400"
             />
             <p className="text-[11px] text-ink-400 mt-1">Comma-separated. Your chief of staff never plans a meal containing these — but always double-check ingredients yourself; this is best-effort, not a guarantee.</p>
           </div>
@@ -91,7 +92,7 @@ export function DietProfileDrawer({
               onChange={(e) => setDietType(e.target.value)}
               placeholder="e.g. vegan  ·  halal, no-pork  ·  keto"
               aria-label="Diet type, comma separated"
-              className="w-full bg-white border border-ink-200 rounded-md px-2.5 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
+              className="w-full bg-white border border-ink-200 rounded-md px-2.5 py-1.5 text-[16px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
             />
           </Field>
 
@@ -104,7 +105,7 @@ export function DietProfileDrawer({
               maxLength={2000}
               placeholder="e.g. gluten leaves me bloated; not a fan of cilantro; prefer fish over red meat; intermittent fasting until noon."
               aria-label="Dietary notes"
-              className="w-full bg-white border border-ink-200 rounded-md px-2.5 py-2 text-[12.5px] text-ink-900 leading-snug outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400 resize-none"
+              className="w-full bg-white border border-ink-200 rounded-md px-2.5 py-2 text-[16px] text-ink-900 leading-snug outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400 resize-none"
             />
           </Field>
 
@@ -117,7 +118,7 @@ export function DietProfileDrawer({
               rows={10}
               maxLength={24000}
               aria-label="Diet philosophy"
-              className="w-full mt-1 bg-white border border-ink-200 rounded-md px-2.5 py-2 text-[12px] text-ink-700 leading-snug font-mono outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 resize-y"
+              className="w-full mt-1 bg-white border border-ink-200 rounded-md px-2.5 py-2 text-[16px] text-ink-700 leading-snug font-mono outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 resize-y"
             />
             <p className="text-[11px] text-ink-400 mt-1">The study-grounded methodology your chief of staff follows to set targets. Overwrite it for a specific approach (keto, vegan, your coach&rsquo;s plan); clear it entirely to restore the shipped default.</p>
           </details>
@@ -131,14 +132,5 @@ export function DietProfileDrawer({
         </div>
       </aside>
     </>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wide text-ink-400 mb-1">{label}</div>
-      {children}
-    </div>
   );
 }

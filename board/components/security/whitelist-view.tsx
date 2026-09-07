@@ -23,6 +23,7 @@ import {
 } from "@/lib/board-client";
 import { trustClasses, trustLabel, relativeTime, formatDateTime } from "@/lib/format";
 import { IconPlus, IconShield, IconTrash } from "@/components/icons";
+import { TextInput, Select } from "@/components/shared/field";
 
 // Same loose-but-real email shape the POST route validates with — we check it
 // CLIENT-side first so the inline add form can show a fast, precise error before a
@@ -158,24 +159,23 @@ export function WhitelistView({ initial, now }: { initial: TrustListResponse; no
       >
         <div className="text-[11px] uppercase tracking-wide text-ink-400 mb-2">Add a sender</div>
         <div className="flex flex-col sm:flex-row gap-2">
-          <input
+          <TextInput
             value={nEmail}
             onChange={(e) => setNEmail(e.target.value)}
             type="email"
             placeholder="name@example.com"
             aria-label="Sender email"
             autoComplete="off"
-            className="flex-1 min-w-0 font-mono text-[13px] px-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+            className="flex-1 min-w-0 font-mono"
           />
-          <select
+          <Select
             value={nTier}
             onChange={(e) => setNTier(e.target.value as Exclude<TrustTier, "unknown">)}
             aria-label="Trust tier"
-            className="text-[13px] px-2 py-1.5 rounded-md border border-ink-200 bg-white outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
           >
             <option value="trusted">Trusted</option>
             <option value="blocked">Blocked</option>
-          </select>
+          </Select>
           <button
             type="submit"
             disabled={!nEmail.trim() || busyKey !== null}
@@ -185,12 +185,12 @@ export function WhitelistView({ initial, now }: { initial: TrustListResponse; no
             Add
           </button>
         </div>
-        <input
+        <TextInput
           value={nReason}
           onChange={(e) => setNReason(e.target.value)}
           placeholder="Reason (optional) — why this tier?"
           aria-label="Reason"
-          className="w-full mt-2 text-[12.5px] px-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+          className="w-full mt-2"
         />
       </form>
 
@@ -207,7 +207,7 @@ export function WhitelistView({ initial, now }: { initial: TrustListResponse; no
           type="search"
           placeholder="Search senders…"
           aria-label="Search whitelist"
-          className="ml-auto w-full max-w-[240px] text-[12.5px] px-2.5 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+          className="ml-auto w-full max-w-[240px] text-[16px] px-2.5 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
         />
       </div>
 

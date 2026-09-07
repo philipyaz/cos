@@ -1152,7 +1152,7 @@ function InlineComposer({
             onSubmit(value);
           }
         }}
-        className="flex-1 bg-white border border-sky-300 rounded px-2 py-1.5 text-[13px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100 disabled:opacity-50"
+        className="flex-1 bg-white border border-sky-300 rounded px-2 py-1.5 text-[16px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100 disabled:opacity-50"
       />
       <button
         type="button"
