@@ -37,6 +37,7 @@ import {
   IconCopy,
   IconExternalLink,
 } from "@/components/icons";
+import { PrimaryLink } from "@/components/shared/action-button";
 
 export function VaultView({ initial }: { initial: VaultStatus }) {
   // The live vault envelope, seeded from SSR. We keep the WHOLE response because
@@ -176,17 +177,17 @@ function HeaderCard({
               {refreshing ? "Refreshing…" : "Refresh"}
             </button>
             {canOpen ? (
-              <a
+              <PrimaryLink
                 href={data.deepLink ?? "#"}
                 target="_blank"
                 rel="noreferrer"
                 aria-label="Open the vault in Obsidian"
                 title="Open this vault in Obsidian"
-                className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition"
+                className="px-2.5"
               >
                 <IconExternalLink className="w-3.5 h-3.5" />
                 Open in Obsidian
-              </a>
+              </PrimaryLink>
             ) : (
               <span
                 aria-disabled="true"

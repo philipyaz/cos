@@ -479,7 +479,7 @@ function RetentionSection({
             disabled={disabled}
             aria-label="Retention window in days"
             aria-invalid={invalid}
-            className={`w-20 text-[13px] tabular-nums px-2 py-1 rounded-md border bg-white text-ink-900 focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+            className={`w-20 text-[16px] tabular-nums px-2 py-1 rounded-md border bg-white text-ink-900 focus:outline-none focus:ring-2 focus:ring-offset-1 ${
               invalid ? "border-rose-300 focus:ring-rose-200" : "border-ink-200 focus:ring-ink-200"
             } disabled:opacity-50`}
           />

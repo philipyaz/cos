@@ -169,7 +169,7 @@ export function ShoppingView({
                 placeholder="Add an item — milk, batteries…"
                 aria-label="Add an item"
                 disabled={addBusy}
-                className="flex-1 text-[13px] px-3 py-2 rounded-lg border border-ink-200 bg-white placeholder:text-ink-300 focus:outline-none focus:ring-2 focus:ring-ink-900/10 disabled:opacity-50"
+                className="flex-1 text-[16px] px-3 py-2 rounded-lg border border-ink-200 bg-white placeholder:text-ink-300 focus:outline-none focus:ring-2 focus:ring-ink-900/10 disabled:opacity-50"
               />
             </form>
             {addError && (

@@ -20,6 +20,7 @@ import { monthGrid, eventsForDay, todayISO } from "@/lib/selectors";
 import { fetchEvents } from "@/lib/board-client";
 import { useLiveBoard } from "@/lib/use-live-board";
 import { IconChevronRight, IconPlus } from "@/components/icons";
+import { PrimaryButton } from "@/components/shared/action-button";
 import { EventDrawer } from "./event-drawer";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -155,13 +156,10 @@ export function CalendarView({
           </button>
         </div>
 
-        <button
-          onClick={() => setCompose({ mode: "create", date: todayKey })}
-          className="ml-auto inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition"
-        >
+        <PrimaryButton onClick={() => setCompose({ mode: "create", date: todayKey })} className="ml-auto px-2.5">
           <IconPlus className="w-3.5 h-3.5" />
           New appointment
-        </button>
+        </PrimaryButton>
       </div>
 
       {/* Grid */}

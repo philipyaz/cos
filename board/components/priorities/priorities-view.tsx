@@ -36,6 +36,7 @@ import {
 } from "@/lib/board-client";
 import { useLiveBoard } from "@/lib/use-live-board";
 import { IconStar, IconTrash, IconPlus, IconDot } from "@/components/icons";
+import { PrimaryButton } from "@/components/shared/action-button";
 import { CaseDetailDrawer } from "@/components/case-detail-drawer";
 
 export function PrioritiesView({
@@ -415,16 +416,12 @@ function NoteComposer({
             void commit();
           }
         }}
-        className="flex-1 bg-white border border-ink-200 rounded-md px-2.5 py-1.5 text-[13px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
+        className="flex-1 bg-white border border-ink-200 rounded-md px-2.5 py-1.5 text-[16px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
       />
-      <button
-        onClick={() => void commit()}
-        disabled={!draft.trim() || busy}
-        className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1.5 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition disabled:opacity-40"
-      >
+      <PrimaryButton onClick={() => void commit()} disabled={!draft.trim() || busy} className="px-2.5">
         <IconPlus className="w-3.5 h-3.5" />
         Add
-      </button>
+      </PrimaryButton>
     </div>
   );
 }
@@ -506,7 +503,7 @@ function NoteRow({
               void commit();
             }
           }}
-          className="flex-1 min-w-0 bg-white border border-sky-300 rounded px-1.5 py-1 text-[13px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
+          className="flex-1 min-w-0 bg-white border border-sky-300 rounded px-1.5 py-1 text-[16px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
         />
       ) : (
         <button

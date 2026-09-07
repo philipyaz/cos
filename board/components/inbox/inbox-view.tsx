@@ -45,6 +45,7 @@ import {
 } from "@/components/icons";
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
+import { PrimaryButton } from "@/components/shared/action-button";
 import { messageDeepLink } from "@/lib/message-url";
 import {
   createCase,
@@ -394,7 +395,7 @@ export function InboxView({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search mail…"
               aria-label="Search mail"
-              className="flex-1 min-w-0 text-[12.5px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
+              className="flex-1 min-w-0 text-[16px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
             />
             {/* Inline state: spinner while in flight, then the engine badge so the
                 user knows which path (semantic vs keyword) answered. */}
@@ -494,7 +495,7 @@ export function InboxView({
                     }
                     placeholder={`Filter ${field}…`}
                     aria-label={`Filter by ${field}`}
-                    className="flex-1 min-w-0 text-[12px] px-2 py-1 rounded border border-ink-200 bg-white outline-none text-ink-900 placeholder:text-ink-400 focus:ring-1 focus:ring-ink-300"
+                    className="flex-1 min-w-0 text-[16px] px-2 py-1 rounded border border-ink-200 bg-white outline-none text-ink-900 placeholder:text-ink-400 focus:ring-1 focus:ring-ink-300"
                   />
                 </label>
               ))}
@@ -833,12 +834,9 @@ function TriagePanel({
 
       {!picking ? (
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => onCreateCase("work")}
-            className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition"
-          >
+          <PrimaryButton onClick={() => onCreateCase("work")} className="px-2.5">
             <IconPlus className="w-3.5 h-3.5" /> Create case
-          </button>
+          </PrimaryButton>
           <span className="text-[11px] text-ink-400">as</span>
           <button
             onClick={() => onCreateCase("work")}
@@ -878,7 +876,7 @@ function TriagePanel({
                 }}
                 placeholder="Search cases by id or title…"
                 aria-label="Search cases to link"
-                className="flex-1 min-w-0 text-[12px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
+                className="flex-1 min-w-0 text-[16px] outline-none bg-transparent text-ink-900 placeholder:text-ink-400"
               />
             </div>
             <button

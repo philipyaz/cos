@@ -274,7 +274,7 @@ export function QuarantineView({ initial, now }: { initial: QuarantineListRespon
             aria-label="Search quarantined messages"
             // flex-1 (not w-full) with a sane min so the box fills slack without squeezing
             // the segmented control; it wraps to its own line before it ever crowds the tabs.
-            className="flex-1 min-w-[150px] max-w-[220px] text-[12.5px] px-2.5 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+            className="flex-1 min-w-[150px] max-w-[220px] text-[16px] px-2.5 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
           />
         </div>
       </div>

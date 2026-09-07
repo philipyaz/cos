@@ -16,6 +16,8 @@ import { VALID_BIOLOGICAL_SEX, VALID_ACTIVITY_LEVEL, VALID_TRAINING_STATUS } fro
 import { setBodyObjective, setBodyProfile, getBodyProfile, upsertWeight } from "@/lib/body-client";
 import { kgToDisplay, displayToKg } from "@/lib/nutrition-format";
 import { IconWarning } from "@/components/icons";
+import { TextInput, Select, Field } from "@/components/shared/field";
+import { PrimaryButton } from "@/components/shared/action-button";
 
 const SEX_LABEL: Record<BiologicalSex, string> = { male: "Male", female: "Female" };
 const ACTIVITY_LABEL: Record<ActivityLevel, string> = {
@@ -178,7 +180,7 @@ export function GoalDrawer({
               maxLength={2000}
               placeholder="e.g. Lose some fat but keep my strength — I lift 3×/week and want to lean out for summer without losing muscle."
               aria-label="Describe your goal"
-              className="w-full bg-white border border-ink-200 rounded-md px-2.5 py-2 text-[12.5px] text-ink-900 leading-snug outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400 resize-none"
+              className="w-full bg-white border border-ink-200 rounded-md px-2.5 py-2 text-[16px] text-ink-900 leading-snug outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400 resize-none"
             />
             <p className="text-[11px] text-ink-400 mt-1">Your chief of staff reads this to set your daily calorie + macro targets.</p>
           </Field>
@@ -187,19 +189,19 @@ export function GoalDrawer({
           <div className="flex gap-3">
             <div className="flex-1">
               <Field label={`Target weight (${unit}) — optional`}>
-                <input
+                <TextInput
                   type="number" inputMode="decimal" min="0" step="any"
                   value={targetWeight} onChange={(e) => setTargetWeight(e.target.value)}
                   placeholder={unit === "lb" ? "e.g. 165" : "e.g. 75"} aria-label={`Target weight in ${unit}`}
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 tabular-nums outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400"
+                  className="w-full tabular-nums"
                 />
               </Field>
             </div>
             <div className="flex-1">
               <Field label="Target date — optional">
-                <input
+                <TextInput
                   type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} aria-label="Target date"
-                  className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                  className="w-full"
                 />
               </Field>
             </div>
@@ -207,14 +209,14 @@ export function GoalDrawer({
 
           {/* Activity — the TDEE multiplier. */}
           <Field label="Activity level">
-            <select
+            <Select
               value={activity} onChange={(e) => setActivity(e.target.value as ActivityLevel)} aria-label="Activity level"
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+              className="w-full"
             >
               {VALID_ACTIVITY_LEVEL.map((a) => (
                 <option key={a} value={a}>{ACTIVITY_LABEL[a]}</option>
               ))}
-            </select>
+            </Select>
           </Field>
 
           {/* Identity — the BMR inputs (required on first run, prefilled on edit). */}
@@ -223,34 +225,34 @@ export function GoalDrawer({
             <div className="flex gap-3">
               <div className="flex-1">
                 <Field label="Sex">
-                  <select value={sex} onChange={(e) => setSex(e.target.value as "" | BiologicalSex)} aria-label="Biological sex"
-                    className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100">
+                  <Select value={sex} onChange={(e) => setSex(e.target.value as "" | BiologicalSex)} aria-label="Biological sex"
+                    className="w-full">
                     <option value="">Select…</option>
                     {VALID_BIOLOGICAL_SEX.map((s) => <option key={s} value={s}>{SEX_LABEL[s]}</option>)}
-                  </select>
+                  </Select>
                 </Field>
               </div>
               <div className="flex-1">
                 <Field label="Date of birth">
-                  <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} aria-label="Date of birth"
-                    className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100" />
+                  <TextInput type="date" value={dob} onChange={(e) => setDob(e.target.value)} aria-label="Date of birth"
+                    className="w-full" />
                 </Field>
               </div>
             </div>
             <div className="flex gap-3 mt-3">
               <div className="flex-1">
                 <Field label="Height (cm)">
-                  <input type="number" inputMode="decimal" min="1" step="any" value={heightCm} onChange={(e) => setHeightCm(e.target.value)}
+                  <TextInput type="number" inputMode="decimal" min="1" step="any" value={heightCm} onChange={(e) => setHeightCm(e.target.value)}
                     placeholder="e.g. 178" aria-label="Height in centimetres"
-                    className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 tabular-nums outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400" />
+                    className="w-full tabular-nums" />
                 </Field>
               </div>
               <div className="flex-1">
                 <Field label="Training status">
-                  <select value={trainingStatus} onChange={(e) => setTrainingStatus(e.target.value as TrainingStatus)} aria-label="Training status"
-                    className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100">
+                  <Select value={trainingStatus} onChange={(e) => setTrainingStatus(e.target.value as TrainingStatus)} aria-label="Training status"
+                    className="w-full">
                     {VALID_TRAINING_STATUS.map((t) => <option key={t} value={t}>{TRAINING_LABEL[t]}</option>)}
-                  </select>
+                  </Select>
                 </Field>
               </div>
             </div>
@@ -262,30 +264,21 @@ export function GoalDrawer({
 
           {/* Today's weight — optional opening weigh-in. */}
           <Field label={`Today's weight (${unit}) — optional`}>
-            <input type="number" inputMode="decimal" min="0" step="any" value={todayWeight} onChange={(e) => setTodayWeight(e.target.value)}
+            <TextInput type="number" inputMode="decimal" min="0" step="any" value={todayWeight} onChange={(e) => setTodayWeight(e.target.value)}
               placeholder="Record your current weight" aria-label={`Today's weight in ${unit}`}
-              className="w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 tabular-nums outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400" />
+              className="w-full tabular-nums" />
           </Field>
         </div>
 
         <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           <div className="ml-auto flex items-center gap-2">
             <button onClick={onClose} disabled={saving} className="text-[12px] text-ink-600 hover:text-ink-900 px-2.5 py-1 rounded-md border border-ink-200 hover:bg-white disabled:opacity-50">Cancel</button>
-            <button onClick={onSave} disabled={saving || hasProfile === null} className="text-[12px] px-3 py-1 rounded-md bg-ink-900 text-white hover:bg-ink-700 transition disabled:opacity-50">
+            <PrimaryButton onClick={onSave} disabled={saving || hasProfile === null} className="px-3">
               {saving ? "Saving…" : isEdit ? "Save goal" : "Set goal"}
-            </button>
+            </PrimaryButton>
           </div>
         </div>
       </aside>
     </>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wide text-ink-400 mb-1">{label}</div>
-      {children}
-    </div>
   );
 }
