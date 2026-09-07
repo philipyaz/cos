@@ -4,7 +4,10 @@
 // server directly — NO supergateway, NO COS_MCP_IDLE_EXIT_MS (Cowork holds one long-lived child;
 // idle-exit there surfaces as "server transport closed unexpectedly"). Secrets are INLINED into env
 // (Cowork can't run the macOS secret-wrapper). Same manifest, so the entry set never drifts from the
-// launchd/Windows supervisors.
+// launchd/Windows supervisors. The pure decisions — which entries to build, how to redact them for
+// --print, and how to merge them into an existing config — live in scripts/cowork-entries.mjs, kept
+// free of machine-config imports so they're testable with in-memory fixtures (ADR 0029); this file
+// keeps argv parsing, config/secrets.env + config/cos.env loading, the backup, and the write.
 //
 //   node scripts/gen-cowork-config.mjs --print   # print the generated mcpServers block (no file touch)
 //   node scripts/gen-cowork-config.mjs           # merge into $COWORK_CONFIG (backup-first to .bak)
@@ -16,11 +19,7 @@ import { readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { getManifest, currentRole } from '../mcp/service-manifest.mjs'
 import { loadConfig, REPO_ROOT } from '../config/load-config.mjs'
-import {
-  classifySecret,
-  anthropicKeyShapeWarning,
-  secretRefusalMessage,
-} from '../config/secret-validation.mjs'
+import { buildEntries, redactEntries, mergeServers } from './cowork-entries.mjs'
 
 // Cowork's config is PER-MACHINE (unlike the committed .mcp.json), so it is scoped to
 // this machine's device role: a spoke's Cowork gets only the board-facing wrappers
@@ -50,52 +49,13 @@ const FULL_SYNC = NAMES.length === 0
 // server actually IN this run's set, so a named merge that excludes the secret-carrying server
 // (`… board calendar`) can't trip on it, and neither can a spoke (vault is roles:["hub"], so it isn't
 // in a spoke's manifest at all).
-const refusals = []
-const warnings = []
-
-function buildEntries() {
-  const secrets = loadSecrets()
-  const out = {}
-  for (const e of getManifest({ client: 'cowork', role: ROLE })) {
-    if (!FULL_SYNC && !NAMES.includes(e.name)) continue
-    const env = { ...e.env } // e.env has NO PATH / idle-exit (those are bridge/plist-only) — correct for Cowork
-    for (const k of e.secrets || []) {
-      const value = secrets[k]
-      // Cowork gets a SNAPSHOT of this value, not a reference to secrets.env (it can't run the macOS
-      // secret-wrapper). So a placeholder captured here is PERMANENT: the server 401s and never
-      // recovers, even after the real key lands in secrets.env — which is exactly the bug this guard
-      // exists to stop. Full write-up in config/secret-validation.mjs.
-      const state = classifySecret(value)
-      if (state !== 'present') {
-        refusals.push(secretRefusalMessage(k, state, e.name))
-        continue // never write a known-dead credential into the entry
-      }
-      if (k === 'ANTHROPIC_API_KEY') {
-        // SOFT check only, never a hard gate: Anthropic's key format isn't a contract we control, so a
-        // strict validator here would break setup the day it changes. This only nudges on an
-        // obviously-truncated paste.
-        const w = anthropicKeyShapeWarning(value)
-        if (w) warnings.push(`${k} for '${e.name}' ${w}`)
-      }
-      env[k] = value
-    }
-    // The stdio command IS the direct command Cowork runs (node server.mjs / uv run … main.py).
-    out[e.name] = { command: e.stdio[0], args: e.stdio.slice(1), env }
-  }
-  return out
-}
-
-const entries = buildEntries()
+const manifestEntries = getManifest({ client: 'cowork', role: ROLE }).filter((e) => FULL_SYNC || NAMES.includes(e.name))
+const { entries, refusals, warnings } = buildEntries(manifestEntries, loadSecrets())
 
 for (const w of warnings) process.stderr.write(`[gen-cowork-config] WARNING: ${w}\n`)
 
 if (process.argv.includes('--print')) {
-  // Redact secret VALUES in the printed preview so a console/log never shows the key.
-  const redacted = JSON.parse(JSON.stringify(entries))
-  for (const e of getManifest({ client: 'cowork', role: ROLE })) {
-    if (!redacted[e.name]) continue
-    for (const k of e.secrets || []) if (redacted[e.name].env[k]) redacted[e.name].env[k] = '«from config/secrets.env»'
-  }
+  const redacted = redactEntries(entries, manifestEntries)
   // --print touches no file, so a bad secret is a WARNING here rather than a refusal — you can still
   // inspect the shape of what WOULD be written. The write path below is where it's fatal.
   for (const r of refusals) process.stderr.write(`[gen-cowork-config] WOULD REFUSE TO WRITE: ${r}\n`)
@@ -137,25 +97,19 @@ if (process.argv.includes('--print')) {
       process.exit(1)
     }
   }
-  // In FULL-SYNC mode (no names) prune cos-owned entries the manifest no longer defines (descriptor
-  // deleted, or an add-on's clients no longer lists cowork) so the Cowork config can't drift stale —
-  // WITHOUT touching a third-party server the user added by hand. We track the set we last full-synced
-  // in a sidecar file (a current getManifest() can't tell us what we used to manage — a deleted
-  // descriptor simply isn't in it). A NAMED merge is additive and never prunes.
+  // We track the set we last full-synced in a sidecar file (a current getManifest() can't tell us
+  // what we used to manage — a deleted descriptor simply isn't in it).
   const trackFile = join(REPO_ROOT, 'mcp', 'logs', '.cowork-managed.json')
-  const fresh = new Set(Object.keys(entries))
-  const servers = { ...(current.mcpServers || {}) }
+  let prior = []
   if (FULL_SYNC) {
-    let prior = []
     try {
       prior = JSON.parse(readFileSync(trackFile, 'utf8'))
     } catch {
       /* first run */
     }
-    for (const name of prior) if (!fresh.has(name)) delete servers[name]
   }
-  current.mcpServers = { ...servers, ...entries }
+  current.mcpServers = mergeServers(current.mcpServers || {}, entries, { prior, fullSync: FULL_SYNC })
   writeFileSync(target, JSON.stringify(current, null, 2) + '\n')
-  if (FULL_SYNC) writeFileSync(trackFile, JSON.stringify([...fresh], null, 2) + '\n')
+  if (FULL_SYNC) writeFileSync(trackFile, JSON.stringify(Object.keys(entries), null, 2) + '\n')
   process.stdout.write(`[gen-cowork-config] merged ${Object.keys(entries).length} bridges into ${target} (backup at .bak). ⌘Q + reopen Cowork.\n`)
 }
