@@ -333,7 +333,7 @@ export function CommandPalette() {
             }}
             onKeyDown={onKeyDown}
             placeholder="Search cases, or type a command (move, archive, complete, add, create)…"
-            className="flex-1 bg-transparent text-[14px] text-ink-900 placeholder:text-ink-400 outline-none"
+            className="flex-1 bg-transparent text-[16px] text-ink-900 placeholder:text-ink-400 outline-none"
             role="combobox"
             aria-expanded={rows.length > 0}
             aria-controls="cp-listbox"

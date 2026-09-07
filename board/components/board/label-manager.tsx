@@ -14,6 +14,7 @@ import {
   type BundleView,
 } from "@/lib/board-client";
 import { IconPlus } from "@/components/icons";
+import { PrimaryButton } from "@/components/shared/action-button";
 
 // The Labels manager — a slide-over for configuring the board's taxonomy entirely
 // from the UI: install role/life bundles in one click, add custom labels, and edit
@@ -210,25 +211,21 @@ export function LabelManager({
                   onChange={(e) => setNTitle(e.target.value)}
                   placeholder="Title (e.g. Access request)"
                   aria-label="New label title"
-                  className="w-full text-[13px] px-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 mb-2"
+                  className="w-full text-[16px] px-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 mb-2"
                 />
                 <input
                   value={nDesc}
                   onChange={(e) => setNDesc(e.target.value)}
                   placeholder="Description — when does this label apply?"
                   aria-label="New label description"
-                  className="w-full text-[12.5px] px-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 mb-2"
+                  className="w-full text-[16px] px-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 mb-2"
                 />
                 <div className="flex items-center gap-2">
                   <ColorPicker value={nColor} onChange={setNColor} />
-                  <button
-                    onClick={addLabel}
-                    disabled={!nTitle.trim() || busy}
-                    className="ml-auto inline-flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-md bg-ink-900 text-white disabled:opacity-40"
-                  >
+                  <PrimaryButton onClick={addLabel} disabled={!nTitle.trim() || busy} className="ml-auto px-2.5">
                     <IconPlus className="w-3.5 h-3.5" />
                     Add
-                  </button>
+                  </PrimaryButton>
                 </div>
               </div>
 
@@ -398,7 +395,7 @@ function LabelRow({
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           }}
           aria-label={`Title for ${label.id}`}
-          className="flex-1 text-[13px] font-medium text-ink-900 px-1.5 py-1 rounded border border-transparent hover:border-ink-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
+          className="flex-1 text-[16px] font-medium text-ink-900 px-1.5 py-1 rounded border border-transparent hover:border-ink-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
         />
         {label.bundle && (
           <span className="text-[10px] text-ink-400 px-1.5 py-0.5 rounded-full bg-ink-50" title={`From bundle: ${label.bundle}`}>
@@ -423,7 +420,7 @@ function LabelRow({
         }}
         placeholder="Description — when does this label apply?"
         aria-label={`Description for ${label.id}`}
-        className="w-full mt-1 text-[12px] text-ink-500 px-1.5 py-1 rounded border border-transparent hover:border-ink-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
+        className="w-full mt-1 text-[16px] text-ink-500 px-1.5 py-1 rounded border border-transparent hover:border-ink-200 focus:border-sky-300 focus:ring-2 focus:ring-sky-100 outline-none"
       />
     </div>
   );

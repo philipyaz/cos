@@ -16,6 +16,7 @@ import {
   subscribeToBoard,
   starCase,
 } from "@/lib/board-client";
+import { PrimaryButton } from "@/components/shared/action-button";
 
 // ── Strategy view ──────────────────────────────────────────────────────────────
 // The OUTLINE ROADMAP, the strategy twin of the operational kanban. It renders the
@@ -1152,16 +1153,16 @@ function InlineComposer({
             onSubmit(value);
           }
         }}
-        className="flex-1 bg-white border border-sky-300 rounded px-2 py-1.5 text-[13px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100 disabled:opacity-50"
+        className="flex-1 bg-white border border-sky-300 rounded px-2 py-1.5 text-[16px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100 disabled:opacity-50"
       />
-      <button
+      <PrimaryButton
         type="button"
         onClick={() => onSubmit(value)}
         disabled={busy || !value.trim()}
-        className="text-[12px] px-2 py-1.5 rounded bg-ink-900 text-white hover:bg-ink-700 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="px-2 disabled:cursor-not-allowed"
       >
         {busy ? "Adding…" : "Add"}
-      </button>
+      </PrimaryButton>
       <button
         type="button"
         onClick={onCancel}

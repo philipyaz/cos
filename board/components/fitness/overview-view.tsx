@@ -18,6 +18,8 @@ import { FormScoreWidget } from "@/components/form-score-widget";
 import { useLiveBoard } from "@/lib/use-live-board";
 import { getProfile, setProfile } from "@/lib/fitness-client";
 import { formatDay } from "@/lib/fitness-format";
+import { TextInput, TextArea, Select } from "@/components/shared/field";
+import { PrimaryButton } from "@/components/shared/action-button";
 import { IconRunner, IconWarning } from "@/components/icons";
 import {
   VALID_ATHLETE_GOAL,
@@ -128,12 +130,6 @@ const EQUIPMENT = VALID_ATHLETE_EQUIPMENT.map((value) => ({
   value,
   label: EQUIPMENT_LABELS[value] ?? value,
 }));
-
-// The canonical board text-input class — matches every other input on the board (sky focus
-// ring, ink palette). Replaces the deleted styled-jsx `.input-field` (whose var(--ink-*)
-// fallbacks were broken). Applied to every select / input / textarea below.
-const INPUT_CLASS =
-  "w-full bg-white border border-ink-200 rounded-md px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 // Mirrors AthleteProfile from @/lib/types (the route's GET returns {profile} with these
@@ -300,32 +296,32 @@ export function FitnessOverviewView() {
           {/* Row 1: Goal + Goal date */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Training focus">
-              <select
+              <Select
                 value={form.goal}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, goal: e.target.value }))
                 }
-                className={INPUT_CLASS}
+                className="w-full"
               >
                 {GOALS.map((g) => (
                   <option key={g.value} value={g.value}>
                     {g.label}
                   </option>
                 ))}
-              </select>
+              </Select>
               <p className="mt-1 text-[11px] text-ink-400">
                 Your sport/event focus. Your body goal (fat loss, muscle, recomp) lives in{" "}
                 <a href="/body" className="underline hover:text-ink-600">Body</a>.
               </p>
             </Field>
             <Field label="Goal date">
-              <input
+              <TextInput
                 type="date"
                 value={form.goalDate}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, goalDate: e.target.value }))
                 }
-                className={INPUT_CLASS}
+                className="w-full"
               />
             </Field>
           </div>
@@ -334,7 +330,7 @@ export function FitnessOverviewView() {
               body add-on's trainingStatus (v14). */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Days / week">
-              <input
+              <TextInput
                 type="number"
                 min={1}
                 max={7}
@@ -348,11 +344,11 @@ export function FitnessOverviewView() {
                   }))
                 }
                 placeholder="1-7"
-                className={INPUT_CLASS}
+                className="w-full"
               />
             </Field>
             <Field label="Max session (min)">
-              <input
+              <TextInput
                 type="number"
                 min={10}
                 value={form.maxSessionMinutes ?? ""}
@@ -365,7 +361,7 @@ export function FitnessOverviewView() {
                   }))
                 }
                 placeholder="60"
-                className={INPUT_CLASS}
+                className="w-full"
               />
             </Field>
           </div>
@@ -427,13 +423,13 @@ export function FitnessOverviewView() {
 
           {/* Notes */}
           <Field label="Free notes">
-            <textarea
+            <TextArea
               value={form.notes}
               onChange={(e) =>
                 setForm((f) => ({ ...f, notes: e.target.value }))
               }
               rows={3}
-              className={`${INPUT_CLASS} resize-y`}
+              className="w-full resize-y"
               placeholder="Injuries, constraints, preferences…"
             />
           </Field>
@@ -446,13 +442,9 @@ export function FitnessOverviewView() {
               Saved
             </span>
           )}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-1.5 rounded-md bg-ink-900 text-white text-[13px] font-medium hover:bg-ink-800 disabled:opacity-50 transition"
-          >
+          <PrimaryButton onClick={handleSave} disabled={saving} className="px-4">
             {saving ? "Saving…" : "Save"}
-          </button>
+          </PrimaryButton>
         </div>
       </div>
     </div>

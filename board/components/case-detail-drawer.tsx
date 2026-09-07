@@ -63,6 +63,7 @@ import {
 } from "@/components/icons";
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
+import { PrimaryButton } from "@/components/shared/action-button";
 import { messageDeepLink } from "@/lib/message-url";
 import { Markdown, ReadMore } from "@/components/shared/markdown";
 
@@ -496,7 +497,7 @@ function HierarchySection({
           aria-label="Tier"
           title="Change tier — illegal changes are rejected by the board"
           onChange={(e) => changeKind(e.target.value as CaseKind)}
-          className="ml-auto bg-white border border-ink-200 rounded px-1.5 py-1 text-[11.5px] text-ink-700 outline-none focus:border-sky-300"
+          className="ml-auto bg-white border border-ink-200 rounded px-1.5 py-1 text-[16px] text-ink-700 outline-none focus:border-sky-300"
         >
           {TIERS.map((t) => (
             <option key={t.kind} value={t.kind}>
@@ -526,7 +527,7 @@ function HierarchySection({
             value={caseRec.parentId ?? ""}
             aria-label="Parent"
             onChange={(e) => setParentTo(e.target.value)}
-            className="bg-white border border-ink-200 rounded px-1.5 py-1 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 max-w-full"
+            className="bg-white border border-ink-200 rounded px-1.5 py-1 text-[16px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 max-w-full"
           >
             {/* Keep an out-of-list current parent (e.g. archived) visible. */}
             {caseRec.parentId && !parentOptions.some((o) => o.value === caseRec.parentId) && (
@@ -711,7 +712,7 @@ function EditableText({
         }
       },
       className:
-        "w-full bg-white border border-sky-300 rounded px-1.5 py-1 text-[13px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100",
+        "w-full bg-white border border-sky-300 rounded px-1.5 py-1 text-[16px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100",
     };
     return multiline ? (
       <textarea {...common} rows={3} placeholder={placeholder} />
@@ -798,7 +799,7 @@ function SelectInline({
             setEditing(false);
           }
         }}
-        className="bg-white border border-sky-300 rounded px-1.5 py-1 text-[12.5px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
+        className="bg-white border border-sky-300 rounded px-1.5 py-1 text-[16px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -853,7 +854,7 @@ function DateInline({ value, onSave }: { value?: string; onSave: (v: string | nu
             (e.target as HTMLInputElement).blur();
           }
         }}
-        className="bg-white border border-sky-300 rounded px-1.5 py-1 text-[12.5px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
+        className="bg-white border border-sky-300 rounded px-1.5 py-1 text-[16px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
       />
     );
   }
@@ -926,7 +927,7 @@ function CsvInline({
             commit();
           }
         }}
-        className="w-full bg-white border border-sky-300 rounded px-1.5 py-1 text-[12.5px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
+        className="w-full bg-white border border-sky-300 rounded px-1.5 py-1 text-[16px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
       />
     );
   }
@@ -1092,7 +1093,7 @@ function LaneInline({ status, onSave }: { status: CaseStatus; onSave: (v: CaseSt
             setEditing(false);
           }
         }}
-        className="bg-white border border-sky-300 rounded px-1.5 py-0.5 text-[11.5px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
+        className="bg-white border border-sky-300 rounded px-1.5 py-0.5 text-[16px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
       >
         {LANES.map((l) => (
           <option key={l.key} value={l.key}>
@@ -1373,7 +1374,7 @@ function TasksSection({
                   commitAdd();
                 }
               }}
-              className="flex-1 bg-white border border-sky-300 rounded px-1.5 py-1 text-[13px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
+              className="flex-1 bg-white border border-sky-300 rounded px-1.5 py-1 text-[16px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
             />
           </div>
         )}
@@ -1538,7 +1539,7 @@ function TaskRow({
                   addSub();
                 }
               }}
-              className="flex-1 bg-white border border-ink-200 rounded px-1.5 py-0.5 text-[12px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+              className="flex-1 bg-white border border-ink-200 rounded px-1.5 py-0.5 text-[16px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
             />
           </div>
         </div>
@@ -1648,7 +1649,7 @@ function DateInlineCompact({ value, onSave }: { value?: string; onSave: (v: stri
             (e.target as HTMLInputElement).blur();
           }
         }}
-        className="bg-white border border-sky-300 rounded px-1 py-0.5 text-[11px] text-ink-900 outline-none"
+        className="bg-white border border-sky-300 rounded px-1 py-0.5 text-[16px] text-ink-900 outline-none"
       />
     );
   }
@@ -1730,17 +1731,13 @@ function NotesSection({
               submit();
             }
           }}
-          className="w-full bg-white border border-ink-200 rounded px-2 py-1.5 text-[12.5px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 resize-none"
+          className="w-full bg-white border border-ink-200 rounded px-2 py-1.5 text-[16px] text-ink-900 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 resize-none"
         />
         <div className="flex items-center justify-between mt-1">
           <span className="text-[10.5px] text-ink-400">⌘/Ctrl + Enter to add</span>
-          <button
-            onClick={submit}
-            disabled={!draft.trim()}
-            className="text-[12px] px-2 py-1 rounded bg-ink-900 text-white hover:bg-ink-700 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
+          <PrimaryButton onClick={submit} disabled={!draft.trim()} className="px-2 disabled:cursor-not-allowed">
             Add note
-          </button>
+          </PrimaryButton>
         </div>
       </div>
     </Section>
@@ -1979,7 +1976,7 @@ function RemindersSection({
                       commitAdd();
                     }
                   }}
-                  className="flex-1 bg-white border border-sky-300 rounded px-1.5 py-1 text-[13px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
+                  className="flex-1 bg-white border border-sky-300 rounded px-1.5 py-1 text-[16px] text-ink-900 outline-none focus:ring-2 focus:ring-sky-100"
                 />
               </div>
             )}

@@ -113,7 +113,7 @@ export function MobileNav({
                     reachable here with zero palette changes. */}
                 <button
                   data-command-palette="search"
-                  className="w-full flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-500 hover:bg-ink-100/80 transition"
+                  className="w-full flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-500 hover:bg-ink-100/80 transition pointer-coarse:min-h-11 active:bg-ink-200"
                 >
                   <IconSearch className="w-4 h-4" />
                   <span className="flex-1 text-left">Search...</span>
@@ -202,7 +202,7 @@ function SheetItem({
   return (
     <Link
       href={href}
-      className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition ${
+      className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition pointer-coarse:min-h-11 active:bg-ink-200 ${
         active ? "bg-ink-100 text-ink-900 font-medium" : "text-ink-700 hover:bg-ink-100/80"
       }`}
     >
