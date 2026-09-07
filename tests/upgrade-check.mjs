@@ -127,6 +127,7 @@ check(/mark-skill-uploaded\.mjs b$/m.test(pr.steps.find((s) => s.id === "bundles
 const pr2 = plan({ changedPaths: ["board/.claude/skill-bundles/a.zip"], changedBundles: ["board/.claude/skill-bundles/a.zip"], receipt: { a: "aaa", b: "bbb", c: "ccc" }, bundleHashes: hashes });
 check(!ids(pr2).includes("bundles"), "a receipt that matches every zip → nothing to upload, even when the git range touched a bundle");
 check(ids(p9).includes("cowork-config"), "a descriptor change → regenerate the Cowork config too");
+check(ids(plan({ changedPaths: ["scripts/cowork-entries.mjs"] })).includes("cowork-config"), "the extracted cowork-entries module counts as a generator change → regenerate the Cowork snapshot");
 
 const p10 = plan({ changedPaths: ["config/cos.env.example", "config/secrets.env.example"], newCosEnvKeys: ["NEW_PORT"], newSecretKeys: ["NEW_KEY"] });
 check(ids(p10).includes("config-cos-env") && /NEW_PORT/.test(p10.steps.find((s) => s.id === "config-cos-env").title), "a new cos.env key is a manual step naming the key");
