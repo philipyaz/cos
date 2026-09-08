@@ -14,7 +14,7 @@ import {
   type BundleView,
 } from "@/lib/board-client";
 import { IconPlus } from "@/components/icons";
-import { PrimaryButton } from "@/components/shared/action-button";
+import { PrimaryButton, DestructiveButton } from "@/components/shared/action-button";
 
 // The Labels manager — a slide-over for configuring the board's taxonomy entirely
 // from the UI: install role/life bundles in one click, add custom labels, and edit
@@ -293,24 +293,29 @@ export function LabelManager({
                       <button
                         onClick={() => onInstall(b.id)}
                         disabled={busy}
-                        className="text-[12px] px-2.5 py-1 rounded-md border border-ink-200 text-ink-900 hover:bg-ink-50 transition"
+                        className="text-[12px] px-2.5 py-1 rounded-md border border-ink-200 text-ink-900 hover:bg-ink-50 transition inline-flex items-center justify-center active:bg-ink-100 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
                       >
                         {/* "Add missing" only when THIS bundle already owns some of its
                             labels (partially installed). A bundle the user never installed
                             can still have labels present via a shared id from another
-                            bundle (installedCount > 0) — that must read as "Install". */}
+                            bundle (installedCount > 0) — that must read as "Install". This
+                            button can't route through SecondaryButton — its text-ink-900/
+                            hover:bg-ink-50 conflict with that primitive's base
+                            text-ink-600/hover:bg-white (ADR 0035's trap) — so cos-ops#86
+                            bumped its floors in place instead, to keep this cluster's two
+                            buttons symmetric. */}
                         {owned ? "Add missing" : "Install"}
                       </button>
                     )}
                     {owned ? (
-                      <button
+                      <DestructiveButton
                         onClick={() => onUninstall(b)}
                         disabled={busy}
                         title={`Remove the ${b.ownedCount} label(s) this bundle added`}
-                        className="text-[12px] px-2.5 py-1 rounded-md border border-rose-200 text-rose-600 hover:bg-rose-50 transition"
+                        className="px-2.5"
                       >
                         Uninstall
-                      </button>
+                      </DestructiveButton>
                     ) : allIn ? (
                       <span className="text-[12px] px-2.5 py-1 rounded-md border border-ink-100 bg-ink-50 text-ink-400">
                         Installed

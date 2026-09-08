@@ -157,7 +157,7 @@ export function CaseCard({
               e.stopPropagation();
               setMenuOpen((v) => !v);
             }}
-            className="w-5 h-5 grid place-items-center rounded text-ink-300 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-ink-100 hover:text-ink-700 transition"
+            className="w-5 h-5 grid place-items-center rounded text-ink-300 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 focus:opacity-100 hover:bg-ink-100 hover:text-ink-700 transition"
           >
             <IconMore className="w-3.5 h-3.5" />
           </button>

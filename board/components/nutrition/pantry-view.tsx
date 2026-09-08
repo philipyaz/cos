@@ -19,9 +19,8 @@ import { useMemo, useRef, useState } from "react";
 import type { PantryItem, PantryCategory, PantryLocation } from "@/lib/types";
 import { VALID_PANTRY_CATEGORY } from "@/lib/types";
 import { useLiveBoard } from "@/lib/use-live-board";
-import { deletePantryItem } from "@/lib/nutrition-client";
 import { toISODay, formatDay, addDays } from "@/lib/nutrition-format";
-import { IconFridge, IconPlus, IconTrash, IconWarning } from "@/components/icons";
+import { IconFridge, IconPlus } from "@/components/icons";
 import { PrimaryButton } from "@/components/shared/action-button";
 import { PantryItemDrawer } from "./pantry-item-drawer";
 
@@ -139,7 +138,6 @@ export function PantryView({
                       today={today}
                       soonCutoff={soonCutoff}
                       onOpen={() => setCompose({ mode: "edit", item: it })}
-                      onDeleted={refetch}
                     />
                   ))}
                 </div>
@@ -161,46 +159,24 @@ export function PantryView({
 }
 
 // One pantry row: the item name, the optional quantity/unit, an optional storage-location
-// chip, a low-stock chip when flagged, an expiry chip (plain / "use soon" / "expired" by
-// the SSR clock), and a quick-delete that reveals on hover/focus. Clicking the row (or
-// Enter/Space) opens the editor drawer; the delete button stops propagation so it doesn't.
+// chip, a low-stock chip when flagged, and an expiry chip (plain / "use soon" / "expired" by
+// the SSR clock). Clicking the row (or Enter/Space) opens the editor drawer, which carries its
+// own visible Delete — cos-ops#86 removed this row's own quick-delete (hover-only, so
+// undiscoverable on a coarse pointer) rather than give it a coarse-pointer route, since
+// the drawer's Delete was already an equivalent, always-visible path to the same action.
 function PantryRow({
   item,
   today,
   soonCutoff,
   onOpen,
-  onDeleted,
 }: {
   item: PantryItem;
   today: string;
   soonCutoff: string;
   onOpen: () => void;
-  onDeleted: () => void;
 }) {
   const qty = formatQuantity(item.quantity, item.unit);
   const expiry = item.expiresAt ? classifyExpiry(item.expiresAt, today, soonCutoff) : null;
-
-  // Row-level quick-delete state. `busy` guards against a double-submit; `error` surfaces
-  // a failed delete inline (rose, mirroring the drawer's banner) instead of silently
-  // no-op-ing. A hard delete has no undo, so we confirm first (like the drawer's Delete);
-  // onDeleted() refetches the list on success.
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const onDelete = async (e: React.MouseEvent) => {
-    e.stopPropagation(); // never open the editor when deleting
-    if (busy) return;
-    if (!window.confirm(`Remove “${item.name}” from the pantry? This cannot be undone.`)) return;
-    setError(null);
-    setBusy(true);
-    try {
-      await deletePantryItem(item.id);
-      onDeleted();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove the item.");
-      setBusy(false);
-    }
-  };
 
   return (
     <div
@@ -263,35 +239,6 @@ function PantryRow({
         >
           {expiry.label}
         </span>
-      )}
-
-      {/* Quick delete — hidden until row hover / keyboard focus. On failure it's replaced
-          by an inline error chip (click to dismiss). Both stop propagation so the row's
-          click/keydown never opens the editor while deleting. */}
-      {error ? (
-        <span
-          role="alert"
-          onClick={(e) => {
-            e.stopPropagation();
-            setError(null);
-          }}
-          title={`${error} · click to dismiss`}
-          className="shrink-0 inline-flex items-center gap-1 max-w-[180px] text-[10.5px] px-1.5 py-0.5 rounded-full font-medium bg-rose-50 text-rose-700 cursor-pointer"
-        >
-          <IconWarning className="w-3 h-3 shrink-0" />
-          <span className="truncate">{error}</span>
-        </span>
-      ) : (
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={busy}
-          aria-label={`Delete ${item.name}`}
-          title="Delete item"
-          className="shrink-0 text-ink-300 hover:text-rose-600 transition opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50"
-        >
-          <IconTrash className="w-3.5 h-3.5" />
-        </button>
       )}
     </div>
   );

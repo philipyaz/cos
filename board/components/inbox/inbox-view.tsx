@@ -638,7 +638,7 @@ function InboxRow({
           onClick={onToggleRead}
           title={message.read ? "Mark as unread" : "Mark as read"}
           aria-label={message.read ? "Mark as unread" : "Mark as read"}
-          className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition text-ink-300 hover:text-ink-600"
+          className="opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 focus:opacity-100 transition text-ink-300 hover:text-ink-600"
         >
           {message.read ? (
             <IconCircle className="w-3.5 h-3.5" />

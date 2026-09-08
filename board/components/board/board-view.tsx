@@ -1305,7 +1305,7 @@ export function BoardView({
                 className={`absolute top-1.5 left-1.5 z-10 grid place-items-center w-5 h-5 rounded transition ${
                   c.starred
                     ? "text-amber-500 hover:bg-amber-50"
-                    : "text-ink-300 opacity-0 group-hover/card:opacity-100 focus:opacity-100 hover:text-amber-500 hover:bg-ink-100"
+                    : "text-ink-300 opacity-0 group-hover/card:opacity-100 pointer-coarse:opacity-100 focus:opacity-100 hover:text-amber-500 hover:bg-ink-100"
                 }`}
               >
                 <IconStar className="w-3.5 h-3.5" fill={c.starred ? "currentColor" : "none"} />

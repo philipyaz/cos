@@ -22,7 +22,7 @@ import { domainLabel, domainClasses } from "@/lib/format";
 import { createEvent, updateEvent, deleteEvent } from "@/lib/board-client";
 import { IconWarning, IconDot, IconSearch } from "@/components/icons";
 import { TextInput, TextArea, Field } from "@/components/shared/field";
-import { PrimaryButton } from "@/components/shared/action-button";
+import { PrimaryButton, SecondaryButton, DestructiveButton } from "@/components/shared/action-button";
 
 export function EventDrawer({
   event,
@@ -265,22 +265,14 @@ export function EventDrawer({
         {/* Footer — Save (create/patch) + Delete on an existing event */}
         <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           {isEdit && (
-            <button
-              onClick={onDelete}
-              disabled={saving}
-              className="text-[12px] text-rose-600 hover:text-rose-700 px-2.5 py-1 rounded-md hover:bg-rose-50 border border-rose-200 disabled:opacity-50"
-            >
+            <DestructiveButton onClick={onDelete} disabled={saving} className="px-2.5">
               Delete
-            </button>
+            </DestructiveButton>
           )}
           <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={onClose}
-              disabled={saving}
-              className="text-[12px] text-ink-600 hover:text-ink-900 px-2.5 py-1 rounded-md border border-ink-200 hover:bg-white disabled:opacity-50"
-            >
+            <SecondaryButton onClick={onClose} disabled={saving} className="px-2.5">
               Cancel
-            </button>
+            </SecondaryButton>
             <PrimaryButton onClick={onSave} disabled={saving} className="px-3">
               {saving ? "Saving…" : isEdit ? "Save changes" : "Create appointment"}
             </PrimaryButton>

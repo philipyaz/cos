@@ -9,9 +9,11 @@
 // freeform note.
 //
 // It writes through the typed nutrition-client (createPantryItem / updatePantryItem /
-// deletePantryItem) — the SAME safe path the row's quick-delete uses — and calls
-// onSaved() after each success so the parent (PantryView) refetches and closes. API
-// errors surface in the banner (the thrown Error.message).
+// deletePantryItem) and calls onSaved() after each success so the parent (PantryView)
+// refetches and closes. API errors surface in the banner (the thrown Error.message). Its
+// Delete is this item's only route since cos-ops#86 removed the row's own hover-only
+// quick-delete (undiscoverable on a coarse pointer; this was already the equivalent
+// visible route).
 //
 // One payload builder serves both create and edit: it sends explicit `null` for the
 // cleared optionals. The POST route ignores nulls/empties, and the PATCH route's
@@ -24,7 +26,7 @@ import { VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION } from "@/lib/types";
 import { createPantryItem, updatePantryItem, deletePantryItem } from "@/lib/nutrition-client";
 import { IconWarning } from "@/components/icons";
 import { TextInput, TextArea, Select, Field } from "@/components/shared/field";
-import { PrimaryButton } from "@/components/shared/action-button";
+import { PrimaryButton, SecondaryButton, DestructiveButton } from "@/components/shared/action-button";
 
 // Category / location → a human label for the select options (mirrors PantryView's
 // CATEGORY_LABEL / LOCATION_LABEL; kept local so the drawer stays self-contained).
@@ -303,22 +305,14 @@ export function PantryItemDrawer({
         {/* Footer — Save (create/patch) + Delete on an existing item. */}
         <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           {isEdit && (
-            <button
-              onClick={onDelete}
-              disabled={saving}
-              className="text-[12px] text-rose-600 hover:text-rose-700 px-2.5 py-1 rounded-md hover:bg-rose-50 border border-rose-200 disabled:opacity-50"
-            >
+            <DestructiveButton onClick={onDelete} disabled={saving} className="px-2.5">
               Delete
-            </button>
+            </DestructiveButton>
           )}
           <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={onClose}
-              disabled={saving}
-              className="text-[12px] text-ink-600 hover:text-ink-900 px-2.5 py-1 rounded-md border border-ink-200 hover:bg-white disabled:opacity-50"
-            >
+            <SecondaryButton onClick={onClose} disabled={saving} className="px-2.5">
               Cancel
-            </button>
+            </SecondaryButton>
             <PrimaryButton onClick={onSave} disabled={saving} className="px-3">
               {saving ? "Saving…" : isEdit ? "Save changes" : "Add item"}
             </PrimaryButton>

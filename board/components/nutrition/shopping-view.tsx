@@ -353,7 +353,7 @@ function ShoppingRow({ item, onMutated }: { item: ShoppingItem; onMutated: () =>
           disabled={busy}
           aria-label={`Dismiss ${item.name}`}
           title="Dismiss"
-          className="shrink-0 text-ink-300 hover:text-rose-600 transition opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50"
+          className="shrink-0 text-ink-300 hover:text-rose-600 transition opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 focus-visible:opacity-100 disabled:opacity-50"
         >
           <IconX className="w-3.5 h-3.5" />
         </button>
