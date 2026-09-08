@@ -17,7 +17,7 @@ import { setBodyObjective, setBodyProfile, getBodyProfile, upsertWeight } from "
 import { kgToDisplay, displayToKg } from "@/lib/nutrition-format";
 import { IconWarning } from "@/components/icons";
 import { TextInput, Select, Field } from "@/components/shared/field";
-import { PrimaryButton } from "@/components/shared/action-button";
+import { PrimaryButton, SecondaryButton } from "@/components/shared/action-button";
 
 const SEX_LABEL: Record<BiologicalSex, string> = { male: "Male", female: "Female" };
 const ACTIVITY_LABEL: Record<ActivityLevel, string> = {
@@ -272,7 +272,7 @@ export function GoalDrawer({
 
         <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           <div className="ml-auto flex items-center gap-2">
-            <button onClick={onClose} disabled={saving} className="text-[12px] text-ink-600 hover:text-ink-900 px-2.5 py-1 rounded-md border border-ink-200 hover:bg-white disabled:opacity-50">Cancel</button>
+            <SecondaryButton onClick={onClose} disabled={saving} className="px-2.5">Cancel</SecondaryButton>
             <PrimaryButton onClick={onSave} disabled={saving || hasProfile === null} className="px-3">
               {saving ? "Saving…" : isEdit ? "Save goal" : "Set goal"}
             </PrimaryButton>

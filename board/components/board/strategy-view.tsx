@@ -940,7 +940,7 @@ function ContainerHeader({
           inline create actions reveal on hover beside it. */}
       <div className="ml-auto shrink-0 flex items-center gap-1">
         {onToggleStar && <StarButton starred={!!starred} onToggle={onToggleStar} />}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 focus-within:opacity-100 transition">
           {actions}
         </div>
       </div>
@@ -1093,7 +1093,7 @@ function StarButton({ starred, onToggle }: { starred: boolean; onToggle: () => v
       className={`shrink-0 grid place-items-center w-6 h-6 rounded transition ${
         starred
           ? "text-amber-500 hover:bg-amber-50"
-          : "text-ink-300 hover:text-amber-500 hover:bg-ink-50 opacity-0 group-hover:opacity-100 group-hover/leaf:opacity-100 focus:opacity-100"
+          : "text-ink-300 hover:text-amber-500 hover:bg-ink-50 opacity-0 group-hover:opacity-100 group-hover/leaf:opacity-100 pointer-coarse:opacity-100 focus:opacity-100"
       }`}
     >
       <StarGlyph className="w-3.5 h-3.5" filled={starred} />

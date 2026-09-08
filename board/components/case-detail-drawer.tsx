@@ -63,7 +63,7 @@ import {
 } from "@/components/icons";
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
-import { PrimaryButton } from "@/components/shared/action-button";
+import { PrimaryButton, SecondaryButton, DestructiveButton } from "@/components/shared/action-button";
 import { messageDeepLink } from "@/lib/message-url";
 import { Markdown, ReadMore } from "@/components/shared/markdown";
 
@@ -404,19 +404,13 @@ export function CaseDetailDrawer({
         <div className="px-5 min-h-12 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           <div className="ml-auto flex items-center gap-2">
             {caseRec.archivedAt ? (
-              <button
-                onClick={onRestore}
-                className="text-[12px] text-ink-600 hover:text-ink-900 px-2 py-1 rounded hover:bg-white border border-ink-200"
-              >
+              <SecondaryButton onClick={onRestore} className="px-2">
                 Restore
-              </button>
+              </SecondaryButton>
             ) : (
-              <button
-                onClick={onDelete}
-                className="text-[12px] text-rose-600 hover:text-rose-700 px-2 py-1 rounded hover:bg-rose-50 border border-rose-200"
-              >
+              <DestructiveButton onClick={onDelete} className="px-2">
                 Delete
-              </button>
+              </DestructiveButton>
             )}
           </div>
         </div>
@@ -735,7 +729,7 @@ function EditableText({
           onClick={() => setEditing(true)}
           aria-label={`Edit ${label}`}
           title={`Edit ${label}`}
-          className="absolute -top-1 right-0 opacity-0 group-hover/edit:opacity-100 focus:opacity-100 transition text-[10.5px] text-ink-500 hover:text-ink-900 bg-white/90 ring-1 ring-ink-200 rounded px-1.5 py-0.5"
+          className="absolute -top-1 right-0 opacity-0 group-hover/edit:opacity-100 pointer-coarse:opacity-100 focus:opacity-100 transition text-[10.5px] text-ink-500 hover:text-ink-900 bg-white/90 ring-1 ring-ink-200 rounded px-1.5 py-0.5"
         >
           Edit
         </button>
@@ -1516,7 +1510,7 @@ function TaskRow({
               <button
                 onClick={() => deleteSub(s)}
                 aria-label="Delete subtask"
-                className="text-ink-300 hover:text-rose-600 text-[13px] leading-none px-1 opacity-0 group-hover:opacity-100"
+                className="text-ink-300 hover:text-rose-600 text-[13px] leading-none px-1 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100"
               >
                 ×
               </button>
