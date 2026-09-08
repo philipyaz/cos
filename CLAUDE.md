@@ -137,6 +137,11 @@ node scripts/mark-skill-uploaded.mjs <skill>|--all|--list   # per-machine receip
   case** — assert where the data exists and print a distinct non-`✓` line elsewhere (never fail for
   absence); anything touching the store takes its path from `COS_BOARD_DATA` and SKIPs when unset.
   **Never default a data path to `board/data/cases.json`** — that is the live, irreplaceable store.
+- **A tool or report states only what it verified.** Print a success line only for a step whose exit
+  status you checked — a discarded status prints nothing and the process exits non-zero. Disambiguate
+  an empty result before reporting it: *never ran* and *ran and produced nothing* are different
+  states, and the second beside a non-zero input count is an anomaly to report with both numbers,
+  never a reassurance. A check that cannot observe its subject reports UNKNOWN, never clear.
 - **A new `mcp/*-server` is a root workspace member** — `npm install` at the repo root and commit
   `package-lock.json`, or CI's `npm ci` fails fast.
 - **Never `next build` in `board/` while a `next dev` is running** — they share `.next` and the running
