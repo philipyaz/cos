@@ -6,8 +6,11 @@
 # data"). Executes:
 #   1. unit tests — headless node:test suite over the pure board/lib modules
 #      (selectors/store/format) via the zero-dep TS resolve hook in tests/unit/.
-#      HARD gate. Needs Node >= 22 (TS type-stripping for `node --test`); SKIPped
-#      (not failed) on older Node so the rest of the suite still runs.
+#      HARD gate. Prints the file count it ran and names any divergence (both
+#      directions) between the on-disk glob and the git index — report-only,
+#      never the verdict (cos-ops#87). Needs Node >= 22 (TS type-stripping for
+#      `node --test`); SKIPped (not failed) on older Node so the rest of the
+#      suite still runs.
 #   1b. board-starving-obligations — cos-ops#24's aging rank over the pure
 #      selector (Node >= 22).
 #   2. board-lint.mjs  — board invariants (HARD gate: any violation => FAIL).
@@ -474,16 +477,57 @@ fail_reasons=""   # space-joined list of failed step names, for an accurate verd
 # never read or write board/data — so running them against the repo (not the
 # sandbox copy) is safe. Needs Node >= 22 for TS type-stripping under
 # `node --test`; SKIPped (not failed) on older Node so the suite stays portable.
+# cos-ops#87: the block also states its own scope — the file count on the
+# verdict line, plus a `note:` line naming every divergence between the
+# on-disk glob and the git index, in both directions (an untracked file the
+# glob ran; a tracked file the glob didn't). Report-only, never the verdict —
+# and the comparison itself is skipped, loudly, where `git ls-files` can't run.
 echo
 echo "--- [1] unit tests (pure logic) -----------------------------"
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
 if [ "${NODE_MAJOR}" -ge 22 ]; then
+  # Scope report (cos-ops#87): [1]'s subject is a working-tree glob —
+  # deliberately, so a new unit test needs no run.sh edit — so the block SAYS
+  # what it ran: the file count on the verdict line below, plus a `note:` line
+  # naming every divergence between the on-disk set and git's index, in both
+  # directions. Report-only: nothing here touches fail/fail_reasons (a red
+  # would punish every mid-work tree — ADR 0014's discount-the-reds hazard),
+  # and it's `note:`, not `WARN:` — run.sh's two WARN: echoes are both coupled
+  # to warn=1 two lines later, and these deliberately are not.
+  UNIT_LIST="$(cd "${REPO_ROOT}" && ls tests/unit/*.test.ts 2>/dev/null)"
+  UNIT_COUNT="$(printf '%s\n' "${UNIT_LIST}" | grep -c .)"
+  if [ ! -e "${REPO_ROOT}/.git" ]; then
+    echo "note: unit scope = ${UNIT_COUNT} files; tracked-set comparison skipped — no .git at ${REPO_ROOT} (tarball/export checkout)."
+  elif UNIT_TRACKED="$(cd "${REPO_ROOT}" && git ls-files 'tests/unit/*.test.ts' 2>/dev/null)"; then
+    # git's pathspec '*' crosses '/' (measured: 'tests/*.test.ts' matches every
+    # file under unit/, not just its direct children) — keep direct children
+    # only, pinning this list to the same scope the shell glob above covers.
+    UNIT_TRACKED="$(printf '%s\n' "${UNIT_TRACKED}" | grep -v '^tests/unit/[^/]*/')"
+    if [ -z "${UNIT_TRACKED}" ] && [ "${UNIT_COUNT}" -gt 0 ]; then
+      # One anomaly, not N findings (ADR 0036 obligation 2): a successful but
+      # empty index read (sparse checkout, a stray `git init` over a copied
+      # tree) would otherwise print one "not in the index" note per file.
+      echo "note: the git index at ${REPO_ROOT} holds ZERO tests/unit/*.test.ts while ${UNIT_COUNT} are on disk — sparse checkout, or a stray 'git init' over a copied tree? Comparison skipped as not meaningful."
+    else
+      for f in ${UNIT_LIST}; do
+        printf '%s\n' "${UNIT_TRACKED}" | grep -qxF "${f}" \
+          || echo "note: [1] ran ${f} — not in the git index."
+      done
+      for f in ${UNIT_TRACKED}; do
+        printf '%s\n' "${UNIT_LIST}" | grep -qxF "${f}" \
+          || echo "note: [1] did NOT run ${f} — in the git index, absent from this working tree."
+      done
+    fi
+  else
+    echo "note: unit scope = ${UNIT_COUNT} files; tracked-set comparison skipped — git ls-files failed at ${REPO_ROOT}."
+  fi
+
   if ( cd "${REPO_ROOT}" && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
         --experimental-strip-types --import ./tests/unit/ts-resolve.mjs \
         --test tests/unit/*.test.ts ); then
-    echo "unit: PASS"
+    echo "unit: PASS — ${UNIT_COUNT} files"
   else
-    echo "unit: FAIL"
+    echo "unit: FAIL — ${UNIT_COUNT} files"
     fail=1
     fail_reasons="${fail_reasons} unit"
   fi
