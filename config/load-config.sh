@@ -19,9 +19,11 @@
 #   5. Exports everything so child processes (curl / node / perl) inherit it.
 #
 # SCOPE: SKILLS + SETUP only.
-#   - It does NOT source config/secrets.env. The Anthropic key stays in the vault bridge's
-#     launch wrapper (mcp/vault-server/launch.sh) — the one process that needs it. Sourcing it
-#     into every skill shell would broadcast the secret to every child process a skill spawns.
+#   - It does NOT source config/secrets.env. The Anthropic key is read by the vault bridge's
+#     launch wrappers (mcp/vault-server/launch.sh, mcp/vault-server/jobs-runner-launch.sh) and,
+#     via config/load-config.mjs's loadSecrets(), by the Cowork/services tooling — never here.
+#     Sourcing it into every skill shell would broadcast the secret to every child process a
+#     skill spawns.
 #   - It is NOT wired into any launchd plist — launchd does not inherit a shell env; the bridges
 #     get their paths from their own plists. This file is for the runbooks, not the daemons.
 

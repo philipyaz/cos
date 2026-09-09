@@ -32,10 +32,9 @@
 // Exit 0 = in sync (or Cowork not installed — nothing to check). Exit 1 = drift found.
 
 import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { getManifest, currentRole } from '../mcp/service-manifest.mjs'
-import { loadConfig, REPO_ROOT } from '../config/load-config.mjs'
+import { loadConfig, loadSecrets } from '../config/load-config.mjs'
 import { classifySecret } from '../config/secret-validation.mjs'
 
 const QUIET = process.argv.includes('--quiet')
@@ -46,19 +45,6 @@ function fingerprint(value) {
   if (typeof value !== 'string' || !value.trim()) return 'absent'
   const sha = createHash('sha256').update(value).digest('hex').slice(0, 12)
   return `len=${value.length} sha=${sha}`
-}
-
-/** Parse the KEY=value shell file the same way gen-cowork-config.mjs does. */
-function loadSecrets() {
-  const env = {}
-  const p = join(REPO_ROOT, 'config', 'secrets.env')
-  if (existsSync(p)) {
-    for (const line of readFileSync(p, 'utf8').split(/\r?\n/)) {
-      const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/)
-      if (m) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, '')
-    }
-  }
-  return env
 }
 
 const cfg = loadConfig()
