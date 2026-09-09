@@ -366,7 +366,7 @@ export function planUpgrade(i) {
 
   // 9. Client wiring: .mcp.json (Claude Code) and the Cowork config.
   const mcpJsonChanged = P.includes(".mcp.json") || P.includes("scripts/gen-mcp-json.mjs");
-  const coworkGenChanged = P.includes("scripts/gen-cowork-config.mjs") || P.includes("scripts/cowork-entries.mjs") || regenerate || i.newSecretKeys.length > 0;
+  const coworkGenChanged = P.includes("scripts/gen-cowork-config.mjs") || P.includes("scripts/cowork-entries.mjs") || P.includes("config/load-config.mjs") || regenerate || i.newSecretKeys.length > 0;
   if (coworkGenChanged) {
     push({
       id: "cowork-config",
@@ -374,8 +374,8 @@ export function planUpgrade(i) {
       appliesTo: "both",
       title: "Regenerate the Cowork MCP config (claude_desktop_config.json entries are an early-bound snapshot)",
       command: "node scripts/gen-cowork-config.mjs",
-      why: "the generator, a service descriptor, or a secret changed",
-      paths: P.filter((p) => p === "scripts/gen-cowork-config.mjs" || p === "scripts/cowork-entries.mjs" || p.endsWith(".service.json")),
+      why: "the generator, a service descriptor, the shared secrets loader, or a secret changed",
+      paths: P.filter((p) => p === "scripts/gen-cowork-config.mjs" || p === "scripts/cowork-entries.mjs" || p === "config/load-config.mjs" || p.endsWith(".service.json")),
     });
   }
   if (mcpJsonChanged) {

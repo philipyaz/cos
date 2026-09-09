@@ -22,7 +22,7 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn, execSync } from 'node:child_process'
-import { loadConfig } from '../config/load-config.mjs'
+import { loadConfig, loadSecrets } from '../config/load-config.mjs'
 import { getManifest, supergatewayArgv } from './service-manifest.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '..')
@@ -35,25 +35,13 @@ const ALLOW_NONWINDOWS = process.env.COS_SERVICES_ALLOW_NONWINDOWS === '1'
 
 fs.mkdirSync(LOGS, { recursive: true })
 
-function loadSecretsEnv() {
-  const env = {}
-  const p = path.join(REPO, 'config', 'secrets.env')
-  if (fs.existsSync(p)) {
-    for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
-      const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/)
-      if (m) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, '')
-    }
-  }
-  return env
-}
-
 // Translate a platform-agnostic manifest entry into the concrete Windows spawn {cmd, args, env, cwd}.
 // Returns null (→ skip quietly) if the service's external dependency is absent.
 function toSpawn(e, cfg) {
   const env = { ...e.env }
   if (e.idleExit) env.COS_MCP_IDLE_EXIT_MS = '300000'
   if (e.secrets && e.secrets.length) {
-    const secrets = loadSecretsEnv()
+    const secrets = loadSecrets()
     for (const k of e.secrets) if (secrets[k] !== undefined) env[k] = secrets[k]
   }
 

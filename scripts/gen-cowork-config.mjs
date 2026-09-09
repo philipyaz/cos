@@ -18,25 +18,13 @@
 import { readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { getManifest, currentRole } from '../mcp/service-manifest.mjs'
-import { loadConfig, REPO_ROOT } from '../config/load-config.mjs'
+import { loadConfig, loadSecrets, REPO_ROOT } from '../config/load-config.mjs'
 import { buildEntries, redactEntries, mergeServers } from './cowork-entries.mjs'
 
 // Cowork's config is PER-MACHINE (unlike the committed .mcp.json), so it is scoped to
 // this machine's device role: a spoke's Cowork gets only the board-facing wrappers
 // (they point at the hub via ${BOARD_URL}); hub-only servers never appear at all.
 const ROLE = currentRole()
-
-function loadSecrets() {
-  const env = {}
-  const p = join(REPO_ROOT, 'config', 'secrets.env')
-  if (existsSync(p)) {
-    for (const line of readFileSync(p, 'utf8').split(/\r?\n/)) {
-      const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/)
-      if (m) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, '')
-    }
-  }
-  return env
-}
 
 // Optional service-name args select WHICH cowork bridges to merge (a per-add-on skill names just its
 // own); no names = ALL cowork bridges (a full resync). --print and --all are flags, not names.

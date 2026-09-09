@@ -143,10 +143,44 @@ export function isPlaceholderSecret(value: string | undefined | null): boolean {
 }
 
 // ── API key probe (config/secrets.env, fail-safe) ──────────────────────────────
-// secrets.env is a KEY=value shell file (gitignored), so parseCosEnv reads it the same
-// way it reads cos.env. A placeholder value counts as ABSENT (isPlaceholderSecret above).
-// Any read trouble ⇒ false (never invent a present key). The vault MCP NEEDS this for
-// ingest/query.
+// secrets.env is a KEY=value shell file (gitignored). This is this file's OWN small
+// tolerant reader — NOT parseCosEnv (that function reads cos.env only, via a different
+// loop) — pinned against config/load-config.mjs's loadSecrets() by
+// tests/unit/secret-validation.test.ts's PARSER_FIXTURES table, so the /vault panel and
+// the Cowork generator/checker can no longer disagree about what a given secrets.env says.
+// A placeholder value counts as ABSENT (isPlaceholderSecret above). Any read trouble ⇒
+// false (never invent a present key). The vault MCP NEEDS this for ingest/query.
+
+// Exported and pure (raw content in, boolean out) so the fixture table can call it
+// directly with no filesystem involved. Accepts an `export `-prefixed assignment (ops#91
+// Correction 1) so this agrees with loadSecrets() on that form. A trailing `# comment` is
+// still folded into the matched value rather than stripped (loadSecrets() strips it via
+// the real shell) — that residual is a deliberate, recorded bound (see PARSER_FIXTURES'
+// board-residual row), not a bug, and it only ever errs toward UNDER-reporting (a real key
+// reads as absent).
+export function apiKeyPresentFromContent(raw: string): boolean {
+  let value = "";
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const m = t.match(/^(?:export\s+)?ANTHROPIC_API_KEY=(.*)$/);
+    if (m) {
+      let v = m[1] ?? "";
+      if (
+        v.length >= 2 &&
+        ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
+      ) {
+        v = v.slice(1, -1);
+      }
+      value = v.trim();
+      break;
+    }
+  }
+  if (!value) return false;
+  if (isPlaceholderSecret(value)) return false; // the template value ⇒ treat as unset
+  return true;
+}
+
 function readApiKeyPresent(): boolean {
   try {
     // config/secrets.env is a KEY=value shell file, same shape as cos.env — read it
@@ -157,26 +191,7 @@ function readApiKeyPresent(): boolean {
     } catch {
       return false; // no secrets.env / not readable ⇒ absent (never invent a present key)
     }
-    let value = "";
-    for (const line of raw.split(/\r?\n/)) {
-      const t = line.trim();
-      if (!t || t.startsWith("#")) continue;
-      const m = t.match(/^ANTHROPIC_API_KEY=(.*)$/);
-      if (m) {
-        let v = m[1] ?? "";
-        if (
-          v.length >= 2 &&
-          ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
-        ) {
-          v = v.slice(1, -1);
-        }
-        value = v.trim();
-        break;
-      }
-    }
-    if (!value) return false;
-    if (isPlaceholderSecret(value)) return false; // the template value ⇒ treat as unset
-    return true;
+    return apiKeyPresentFromContent(raw);
   } catch {
     return false;
   }
