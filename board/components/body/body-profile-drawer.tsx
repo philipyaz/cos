@@ -5,13 +5,14 @@
 // unit. These are the slow-moving identity traits that feed BMR/BMI and that Nutrition + Fitness read
 // cross-add-on. Save does PUT /api/body/profile (create-or-replace) via the typed body-client.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { BodyProfile, BiologicalSex, TrainingStatus } from "@/lib/types";
 import { VALID_BIOLOGICAL_SEX, VALID_TRAINING_STATUS } from "@/lib/types";
 import { setBodyProfile } from "@/lib/body-client";
 import { IconWarning } from "@/components/icons";
 import { TextInput, Select, Field } from "@/components/shared/field";
 import { PrimaryButton, SecondaryButton } from "@/components/shared/action-button";
+import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
 
 const SEX_LABEL: Record<BiologicalSex, string> = { male: "Male", female: "Female" };
 const TRAINING_LABEL: Record<TrainingStatus, string> = {
@@ -38,12 +39,6 @@ export function BodyProfileDrawer({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const isISODate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
 
   const onSave = async () => {
@@ -65,82 +60,83 @@ export function BodyProfileDrawer({
 
   const isEdit = profile !== null;
   return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} aria-hidden />
-      <aside role="dialog" aria-label={isEdit ? "Edit body profile" : "Set up body profile"} className="fixed top-0 right-0 h-dvh-fallback w-full sm:w-[440px] bg-white border-l border-ink-200 shadow-xl z-50 flex flex-col">
-        <div className="px-5 h-12 flex items-center border-b border-ink-100 gap-2">
-          <span className="text-[13px] font-semibold text-ink-900">{isEdit ? "Edit your details" : "About you"}</span>
-          <button onClick={onClose} aria-label="Close drawer" className="ml-auto text-[12px] text-ink-500 hover:text-ink-900 px-2 py-1 rounded hover:bg-ink-50">Close · Esc</button>
-        </div>
-
-        {error && (
-          <div role="alert" className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2">
-            <IconWarning className="w-3.5 h-3.5 shrink-0" />
-            <span className="flex-1">{error}</span>
-            <button onClick={() => setError(null)} className="text-rose-500 hover:text-rose-700 px-1" aria-label="Dismiss error">×</button>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <Field label="Sex">
-                <Select value={sex} onChange={(e) => setSex(e.target.value as "" | BiologicalSex)} aria-label="Biological sex"
-                  className="w-full">
-                  <option value="">Select…</option>
-                  {VALID_BIOLOGICAL_SEX.map((s) => <option key={s} value={s}>{SEX_LABEL[s]}</option>)}
-                </Select>
-              </Field>
-            </div>
-            <div className="flex-1">
-              <Field label="Date of birth">
-                <TextInput type="date" value={dob} onChange={(e) => setDob(e.target.value)} aria-label="Date of birth"
-                  className="w-full" />
-              </Field>
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <Field label="Height (cm)">
-                <TextInput type="number" inputMode="decimal" min="1" step="any" value={heightCm} onChange={(e) => setHeightCm(e.target.value)}
-                  placeholder="e.g. 178" aria-label="Height in centimetres"
-                  className="w-full tabular-nums" />
-              </Field>
-            </div>
-            <div className="flex-1">
-              <Field label="Weight unit">
-                <div className="inline-flex rounded-md border border-ink-200 overflow-hidden">
-                  {(["kg", "lb"] as const).map((u) => (
-                    <button key={u} type="button" onClick={() => setUnit(u)} aria-pressed={unit === u}
-                      className={`text-[12px] px-3 py-1.5 ${unit === u ? "bg-ink-900 text-white" : "bg-white text-ink-600 hover:bg-ink-50"}`}>{u}</button>
-                  ))}
-                </div>
-              </Field>
-            </div>
-          </div>
-
-          <Field label="Training status">
-            <Select value={trainingStatus} onChange={(e) => setTrainingStatus(e.target.value as TrainingStatus)} aria-label="Training status"
-              className="w-full">
-              {VALID_TRAINING_STATUS.map((t) => <option key={t} value={t}>{TRAINING_LABEL[t]}</option>)}
-            </Select>
-          </Field>
-
-          <label className="flex items-center gap-2 text-[12.5px] text-ink-700 cursor-pointer">
-            <input type="checkbox" checked={resistanceTrains} onChange={(e) => setResistanceTrains(e.target.checked)} className="accent-ink-900" />
-            I do resistance training (lifting)
-          </label>
-          <p className="text-[11px] text-ink-400">Age is derived from your date of birth (never stored stale). Height + sex feed your BMR/BMI; training status + lifting shape your nutrition + training plans.</p>
-        </div>
-
+    <DrawerShell
+      ariaLabel={isEdit ? "Edit body profile" : "Set up body profile"}
+      width={440}
+      onClose={onClose}
+      footer={
         <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           <div className="ml-auto flex items-center gap-2">
             <SecondaryButton onClick={onClose} disabled={saving} className="px-2.5">Cancel</SecondaryButton>
             <PrimaryButton onClick={onSave} disabled={saving} className="px-3">{saving ? "Saving…" : "Save"}</PrimaryButton>
           </div>
         </div>
-      </aside>
-    </>
+      }
+    >
+      <DrawerHeader closeLabel="Close drawer" onClose={onClose}>
+        <span className="text-[13px] font-semibold text-ink-900">{isEdit ? "Edit your details" : "About you"}</span>
+      </DrawerHeader>
+
+      {error && (
+        <div role="alert" className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2">
+          <IconWarning className="w-3.5 h-3.5 shrink-0" />
+          <span className="flex-1">{error}</span>
+          <button onClick={() => setError(null)} className="text-rose-500 hover:text-rose-700 px-1" aria-label="Dismiss error">×</button>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <Field label="Sex">
+              <Select value={sex} onChange={(e) => setSex(e.target.value as "" | BiologicalSex)} aria-label="Biological sex"
+                className="w-full">
+                <option value="">Select…</option>
+                {VALID_BIOLOGICAL_SEX.map((s) => <option key={s} value={s}>{SEX_LABEL[s]}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <div className="flex-1">
+            <Field label="Date of birth">
+              <TextInput type="date" value={dob} onChange={(e) => setDob(e.target.value)} aria-label="Date of birth"
+                className="w-full" />
+            </Field>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <Field label="Height (cm)">
+              <TextInput type="number" inputMode="decimal" min="1" step="any" value={heightCm} onChange={(e) => setHeightCm(e.target.value)}
+                placeholder="e.g. 178" aria-label="Height in centimetres"
+                className="w-full tabular-nums" />
+            </Field>
+          </div>
+          <div className="flex-1">
+            <Field label="Weight unit">
+              <div className="inline-flex rounded-md border border-ink-200 overflow-hidden">
+                {(["kg", "lb"] as const).map((u) => (
+                  <button key={u} type="button" onClick={() => setUnit(u)} aria-pressed={unit === u}
+                    className={`text-[12px] px-3 py-1.5 ${unit === u ? "bg-ink-900 text-white" : "bg-white text-ink-600 hover:bg-ink-50"}`}>{u}</button>
+                ))}
+              </div>
+            </Field>
+          </div>
+        </div>
+
+        <Field label="Training status">
+          <Select value={trainingStatus} onChange={(e) => setTrainingStatus(e.target.value as TrainingStatus)} aria-label="Training status"
+            className="w-full">
+            {VALID_TRAINING_STATUS.map((t) => <option key={t} value={t}>{TRAINING_LABEL[t]}</option>)}
+          </Select>
+        </Field>
+
+        <label className="flex items-center gap-2 text-[12.5px] text-ink-700 cursor-pointer">
+          <input type="checkbox" checked={resistanceTrains} onChange={(e) => setResistanceTrains(e.target.checked)} className="accent-ink-900" />
+          I do resistance training (lifting)
+        </label>
+        <p className="text-[11px] text-ink-400">Age is derived from your date of birth (never stored stale). Height + sex feed your BMR/BMI; training status + lifting shape your nutrition + training plans.</p>
+      </div>
+    </DrawerShell>
   );
 }

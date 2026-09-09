@@ -33,6 +33,7 @@ import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
 import { TextInput, TextArea, Select, Field } from "@/components/shared/field";
 import { PrimaryButton, SecondaryButton, DestructiveButton } from "@/components/shared/action-button";
+import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
 import { messageDeepLink } from "@/lib/message-url";
 import { IconWarning, IconDot, IconSearch, IconPlus, IconCircle, IconCheckCircle } from "@/components/icons";
 
@@ -112,15 +113,6 @@ export function ReminderDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reminder?.id]);
 
-  // Esc closes the drawer (matching the EventDrawer). Bound once per mount.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const linkedCase = caseId ? cases.find((c) => c.id === caseId) ?? null : null;
   const linkedLane = linkedCase ? LANES.find((l) => l.key === linkedCase.status) ?? null : null;
 
@@ -179,146 +171,11 @@ export function ReminderDrawer({
   };
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} aria-hidden />
-      <aside
-        role="dialog"
-        aria-label={isEdit ? `Edit reminder ${reminder?.id}` : "New reminder"}
-        className="fixed top-0 right-0 h-dvh-fallback w-full sm:w-[460px] bg-white border-l border-ink-200 shadow-xl z-50 flex flex-col"
-      >
-        <div className="px-5 h-12 flex items-center border-b border-ink-100 gap-2">
-          <span className="text-[13px] font-semibold text-ink-900">
-            {isEdit ? "Edit reminder" : "New reminder"}
-          </span>
-          {isEdit && reminder && (
-            <span className="text-[11px] tabular-nums text-ink-400">{reminder.id}</span>
-          )}
-          <button
-            onClick={onClose}
-            aria-label="Close drawer"
-            className="ml-auto text-[12px] text-ink-500 hover:text-ink-900 px-2 py-1 rounded hover:bg-ink-50"
-          >
-            Close · Esc
-          </button>
-        </div>
-
-        {error && (
-          <div
-            role="alert"
-            className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
-          >
-            <IconWarning className="w-3.5 h-3.5 shrink-0" />
-            <span className="flex-1">{error}</span>
-            <button
-              onClick={() => setError(null)}
-              className="text-rose-500 hover:text-rose-700 px-1"
-              aria-label="Dismiss error"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {/* Title — the nudge itself. */}
-          <Field label="Title">
-            <TextInput
-              type="text"
-              autoFocus
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="What to check or do?"
-              aria-label="Title"
-              className="w-full"
-            />
-          </Field>
-
-          {/* Linked node — the headline gesture. Prefer linking to the node it concerns. */}
-          <Field label="Linked node">
-            <NodePicker
-              cases={cases}
-              linkedCase={linkedCase}
-              linkedLane={linkedLane}
-              onLink={(id) => setCaseId(id)}
-              onUnlink={() => setCaseId(undefined)}
-            />
-          </Field>
-
-          {/* Due date + status */}
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <Field label="Due date">
-                <TextInput
-                  type="date"
-                  value={dueAt}
-                  onChange={(e) => setDueAt(e.target.value)}
-                  aria-label="Due date"
-                  className="w-full"
-                />
-              </Field>
-            </div>
-            <div className="flex-1">
-              <Field label="Status">
-                <Select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as ReminderStatus)}
-                  aria-label="Status"
-                  className="w-full"
-                >
-                  <option value="open">Open</option>
-                  <option value="done">Done</option>
-                  <option value="dismissed">Dismissed</option>
-                </Select>
-              </Field>
-            </div>
-          </div>
-
-          {/* Domain — optional/advisory work/life tag. */}
-          <Field label="Domain">
-            <Select
-              value={domain}
-              onChange={(e) => setDomain(e.target.value as "" | "work" | "life")}
-              aria-label="Domain"
-              className="w-full"
-            >
-              <option value="">No domain</option>
-              <option value="work">Work</option>
-              <option value="life">Life</option>
-            </Select>
-          </Field>
-
-          {/* Detail — optional elaboration / context. */}
-          <Field label="Detail">
-            <TextArea
-              value={detail}
-              onChange={(e) => setDetail(e.target.value)}
-              rows={3}
-              placeholder="Optional context…"
-              aria-label="Detail"
-              className="w-full resize-y"
-            />
-          </Field>
-
-          {/* Labels — catalog-backed ids (validated server-side), like a case's labels. */}
-          <Field label="Labels">
-            <LabelPicker catalog={catalog} selected={labels} onChange={setLabels} />
-          </Field>
-
-          {/* Tasks — a SHORT checklist; ids are minted by the store on save. */}
-          <Field label="Tasks">
-            <TasksEditor tasks={tasks} onChange={setTasks} />
-          </Field>
-
-          {/* Linked emails — read-only (edit only): many emails about ONE matter can
-              point at this reminder via message.reminderId. Unlinking clears that id. */}
-          {isEdit && (
-            <Field label="Linked emails">
-              <LinkedEmails messages={linkedMessages} onUnlink={loadLinked} />
-            </Field>
-          )}
-        </div>
-
-        {/* Footer — Save (create/patch) + Delete on an existing reminder. */}
+    <DrawerShell
+      ariaLabel={isEdit ? `Edit reminder ${reminder?.id}` : "New reminder"}
+      width={460}
+      onClose={onClose}
+      footer={
         <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           {isEdit && (
             <DestructiveButton onClick={onDelete} disabled={saving} className="px-2.5">
@@ -334,8 +191,133 @@ export function ReminderDrawer({
             </PrimaryButton>
           </div>
         </div>
-      </aside>
-    </>
+      }
+    >
+      <DrawerHeader closeLabel="Close drawer" onClose={onClose}>
+        <span className="text-[13px] font-semibold text-ink-900">
+          {isEdit ? "Edit reminder" : "New reminder"}
+        </span>
+        {isEdit && reminder && (
+          <span className="text-[11px] tabular-nums text-ink-400">{reminder.id}</span>
+        )}
+      </DrawerHeader>
+
+      {error && (
+        <div
+          role="alert"
+          className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
+        >
+          <IconWarning className="w-3.5 h-3.5 shrink-0" />
+          <span className="flex-1">{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="text-rose-500 hover:text-rose-700 px-1"
+            aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        {/* Title — the nudge itself. */}
+        <Field label="Title">
+          <TextInput
+            type="text"
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="What to check or do?"
+            aria-label="Title"
+            className="w-full"
+          />
+        </Field>
+
+        {/* Linked node — the headline gesture. Prefer linking to the node it concerns. */}
+        <Field label="Linked node">
+          <NodePicker
+            cases={cases}
+            linkedCase={linkedCase}
+            linkedLane={linkedLane}
+            onLink={(id) => setCaseId(id)}
+            onUnlink={() => setCaseId(undefined)}
+          />
+        </Field>
+
+        {/* Due date + status */}
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <Field label="Due date">
+              <TextInput
+                type="date"
+                value={dueAt}
+                onChange={(e) => setDueAt(e.target.value)}
+                aria-label="Due date"
+                className="w-full"
+              />
+            </Field>
+          </div>
+          <div className="flex-1">
+            <Field label="Status">
+              <Select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as ReminderStatus)}
+                aria-label="Status"
+                className="w-full"
+              >
+                <option value="open">Open</option>
+                <option value="done">Done</option>
+                <option value="dismissed">Dismissed</option>
+              </Select>
+            </Field>
+          </div>
+        </div>
+
+        {/* Domain — optional/advisory work/life tag. */}
+        <Field label="Domain">
+          <Select
+            value={domain}
+            onChange={(e) => setDomain(e.target.value as "" | "work" | "life")}
+            aria-label="Domain"
+            className="w-full"
+          >
+            <option value="">No domain</option>
+            <option value="work">Work</option>
+            <option value="life">Life</option>
+          </Select>
+        </Field>
+
+        {/* Detail — optional elaboration / context. */}
+        <Field label="Detail">
+          <TextArea
+            value={detail}
+            onChange={(e) => setDetail(e.target.value)}
+            rows={3}
+            placeholder="Optional context…"
+            aria-label="Detail"
+            className="w-full resize-y"
+          />
+        </Field>
+
+        {/* Labels — catalog-backed ids (validated server-side), like a case's labels. */}
+        <Field label="Labels">
+          <LabelPicker catalog={catalog} selected={labels} onChange={setLabels} />
+        </Field>
+
+        {/* Tasks — a SHORT checklist; ids are minted by the store on save. */}
+        <Field label="Tasks">
+          <TasksEditor tasks={tasks} onChange={setTasks} />
+        </Field>
+
+        {/* Linked emails — read-only (edit only): many emails about ONE matter can
+            point at this reminder via message.reminderId. Unlinking clears that id. */}
+        {isEdit && (
+          <Field label="Linked emails">
+            <LinkedEmails messages={linkedMessages} onUnlink={loadLinked} />
+          </Field>
+        )}
+      </div>
+    </DrawerShell>
   );
 }
 

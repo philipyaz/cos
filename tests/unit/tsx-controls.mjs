@@ -6,7 +6,7 @@
 // Why this exists instead of a bare regex (the A5 census's own first attempt): a plain
 // `/<select/` or `/text-\[\d+px\]/` scan over raw source is wrong in BOTH directions on this
 // tree — it flags five `<select>`s that are only prose inside comments (label-filter.tsx:10,
-// :114; case-detail-drawer.tsx:765, :1068; artifact-feed.tsx:41), and it misses seven real
+// :114; case-detail-drawer.tsx — two comment mentions; artifact-feed.tsx:41), and it misses seven real
 // controls whose size is set through same-file indirection a bare scan never resolves
 // (fitness/overview-view.tsx's INPUT_CLASS constant, case-detail-drawer.tsx's `common` spread
 // object). This module strips comments (quote-aware) and resolves same-file className
