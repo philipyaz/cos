@@ -5,7 +5,7 @@
 //
 // The C1 lesson (pm-applicative-review on cos-ops#82): a bare tag-and-regex scan is wrong in
 // BOTH directions on this tree. It flags five `<select>`s that are only prose inside comments
-// (label-filter.tsx:10, :114; case-detail-drawer.tsx:765, :1068; artifact-feed.tsx:41), and it
+// (label-filter.tsx:10, :114; case-detail-drawer.tsx — two comment mentions; artifact-feed.tsx:41), and it
 // misses seven real controls sized through same-file indirection a naive scan can't see
 // (fitness/overview-view.tsx's five INPUT_CLASS-driven controls; case-detail-drawer.tsx's two
 // `common`-spread inline editors). `tsx-controls.mjs` strips comments and resolves same-file

@@ -7,6 +7,7 @@ import { messageContent } from "@/lib/inbox";
 import { relativeTime } from "@/lib/format";
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
+import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
 import { messageDeepLink } from "@/lib/message-url";
 
 // The "Unanswered" panel — a slide-over listing every message the user still owes a
@@ -43,22 +44,18 @@ export function UnansweredMessages({
   }, []);
 
   // Fetch on open, and re-fetch on each SSE version bump while open, so a skill/agent
-  // flagging or answering a message lands here without a reload. Plus the Escape close.
+  // flagging or answering a message lands here without a reload. Escape-to-close now
+  // lives in DrawerShell.
   useEffect(() => {
     if (!open) return;
     void load();
     const unsub = subscribeToBoard(() => {
       void load();
     });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
     return () => {
       unsub();
-      window.removeEventListener("keydown", onKey);
     };
-  }, [open, load, onClose]);
+  }, [open, load]);
 
   if (!open) return null;
 
@@ -77,48 +74,34 @@ export function UnansweredMessages({
   };
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-[60]" onClick={onClose} aria-hidden />
-      <aside
-        role="dialog"
-        aria-label="Unanswered messages"
-        className="fixed top-0 right-0 h-dvh-fallback w-full sm:w-[520px] bg-white border-l border-ink-200 shadow-xl z-[61] flex flex-col"
-      >
-        <div className="px-5 h-12 flex items-center border-b border-ink-100 gap-2">
-          <span className="text-[13px] font-semibold text-ink-900">Unanswered</span>
-          <span className="text-[11.5px] text-ink-400 tabular-nums">
-            {messages.length} waiting
-          </span>
-          <button
-            onClick={onClose}
-            aria-label="Close unanswered messages"
-            className="ml-auto text-[12px] text-ink-500 hover:text-ink-900 px-2 py-1 rounded hover:bg-ink-50"
-          >
-            Close · Esc
-          </button>
-        </div>
+    <DrawerShell ariaLabel="Unanswered messages" width={520} layer="stacked" onClose={onClose}>
+      <DrawerHeader closeLabel="Close unanswered messages" onClose={onClose}>
+        <span className="text-[13px] font-semibold text-ink-900">Unanswered</span>
+        <span className="text-[11.5px] text-ink-400 tabular-nums">
+          {messages.length} waiting
+        </span>
+      </DrawerHeader>
 
-        {error && (
-          <div role="alert" className="mx-5 mt-3 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md">
-            {error}
+      {error && (
+        <div role="alert" className="mx-5 mt-3 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md">
+          {error}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-5 py-4 pb-safe">
+        {messages.length === 0 ? (
+          <div className="text-[12.5px] text-ink-400 py-10 text-center">
+            Nothing waiting — you&apos;re all caught up
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {messages.map((m) => (
+              <UnansweredRow key={m.id} message={m} cases={cases} onAnswer={onAnswer} />
+            ))}
           </div>
         )}
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 pb-safe">
-          {messages.length === 0 ? (
-            <div className="text-[12.5px] text-ink-400 py-10 text-center">
-              Nothing waiting — you&apos;re all caught up
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {messages.map((m) => (
-                <UnansweredRow key={m.id} message={m} cases={cases} onAnswer={onAnswer} />
-              ))}
-            </div>
-          )}
-        </div>
-      </aside>
-    </>
+      </div>
+    </DrawerShell>
   );
 }
 

@@ -20,13 +20,14 @@
 // applyPantryUpdate treats a present `null`/"" as "clear this field", so an emptied
 // input round-trips to an absent value on either path.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { PantryItem, PantryCategory, PantryLocation } from "@/lib/types";
 import { VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION } from "@/lib/types";
 import { createPantryItem, updatePantryItem, deletePantryItem } from "@/lib/nutrition-client";
 import { IconWarning } from "@/components/icons";
 import { TextInput, TextArea, Select, Field } from "@/components/shared/field";
 import { PrimaryButton, SecondaryButton, DestructiveButton } from "@/components/shared/action-button";
+import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
 
 // Category / location → a human label for the select options (mirrors PantryView's
 // CATEGORY_LABEL / LOCATION_LABEL; kept local so the drawer stays self-contained).
@@ -74,15 +75,6 @@ export function PantryItemDrawer({
 
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  // Esc closes the drawer (matching the ReminderDrawer). Bound once per mount.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   // ── Save / delete ───────────────────────────────────────────────────────────
   // Build the wire payload from the form. Send explicit nulls so clearing a field
@@ -144,165 +136,11 @@ export function PantryItemDrawer({
   };
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} aria-hidden />
-      <aside
-        role="dialog"
-        aria-label={isEdit ? `Edit pantry item ${item?.id}` : "New pantry item"}
-        className="fixed top-0 right-0 h-dvh-fallback w-full sm:w-[460px] bg-white border-l border-ink-200 shadow-xl z-50 flex flex-col"
-      >
-        <div className="px-5 h-12 flex items-center border-b border-ink-100 gap-2">
-          <span className="text-[13px] font-semibold text-ink-900">
-            {isEdit ? "Edit pantry item" : "New pantry item"}
-          </span>
-          {isEdit && item && (
-            <span className="text-[11px] tabular-nums text-ink-400">{item.id}</span>
-          )}
-          <button
-            onClick={onClose}
-            aria-label="Close drawer"
-            className="ml-auto text-[12px] text-ink-500 hover:text-ink-900 px-2 py-1 rounded hover:bg-ink-50"
-          >
-            Close · Esc
-          </button>
-        </div>
-
-        {error && (
-          <div
-            role="alert"
-            className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
-          >
-            <IconWarning className="w-3.5 h-3.5 shrink-0" />
-            <span className="flex-1">{error}</span>
-            <button
-              onClick={() => setError(null)}
-              className="text-rose-500 hover:text-rose-700 px-1"
-              aria-label="Dismiss error"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {/* Name — the item itself. */}
-          <Field label="Name">
-            <TextInput
-              type="text"
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="What's on hand?"
-              aria-label="Name"
-              className="w-full"
-            />
-          </Field>
-
-          {/* Quantity + unit — both optional, side by side. */}
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <Field label="Quantity">
-                <TextInput
-                  type="number"
-                  inputMode="decimal"
-                  step="any"
-                  min="0"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  placeholder="e.g. 2"
-                  aria-label="Quantity"
-                  className="w-full tabular-nums"
-                />
-              </Field>
-            </div>
-            <div className="flex-1">
-              <Field label="Unit">
-                <TextInput
-                  type="text"
-                  value={unit}
-                  onChange={(e) => setUnit(e.target.value)}
-                  placeholder="g, cans, bunch…"
-                  aria-label="Unit"
-                  className="w-full"
-                />
-              </Field>
-            </div>
-          </div>
-
-          {/* Category + location — both optional, side by side. */}
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <Field label="Category">
-                <Select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value as "" | PantryCategory)}
-                  aria-label="Category"
-                  className="w-full"
-                >
-                  <option value="">No category</option>
-                  {VALID_PANTRY_CATEGORY.map((c) => (
-                    <option key={c} value={c}>
-                      {CATEGORY_LABEL[c]}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-            <div className="flex-1">
-              <Field label="Location">
-                <Select
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value as "" | PantryLocation)}
-                  aria-label="Location"
-                  className="w-full"
-                >
-                  <option value="">No location</option>
-                  {VALID_PANTRY_LOCATION.map((l) => (
-                    <option key={l} value={l}>
-                      {LOCATION_LABEL[l]}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-          </div>
-
-          {/* Expiry — optional calendar day. */}
-          <Field label="Expires">
-            <TextInput
-              type="date"
-              value={expiresAt}
-              onChange={(e) => setExpiresAt(e.target.value)}
-              aria-label="Expiry date"
-              className="w-full"
-            />
-          </Field>
-
-          {/* Low stock — the manual running-low flag. */}
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={lowStock}
-              onChange={(e) => setLowStock(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-ink-300 text-ink-900 focus:ring-sky-100"
-            />
-            <span className="text-[12.5px] text-ink-700">Running low</span>
-          </label>
-
-          {/* Note — optional freeform note. */}
-          <Field label="Note">
-            <TextArea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={2}
-              placeholder="Optional note…"
-              aria-label="Note"
-              className="w-full resize-y"
-            />
-          </Field>
-        </div>
-
-        {/* Footer — Save (create/patch) + Delete on an existing item. */}
+    <DrawerShell
+      ariaLabel={isEdit ? `Edit pantry item ${item?.id}` : "New pantry item"}
+      width={460}
+      onClose={onClose}
+      footer={
         <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           {isEdit && (
             <DestructiveButton onClick={onDelete} disabled={saving} className="px-2.5">
@@ -318,7 +156,151 @@ export function PantryItemDrawer({
             </PrimaryButton>
           </div>
         </div>
-      </aside>
-    </>
+      }
+    >
+      <DrawerHeader closeLabel="Close drawer" onClose={onClose}>
+        <span className="text-[13px] font-semibold text-ink-900">
+          {isEdit ? "Edit pantry item" : "New pantry item"}
+        </span>
+        {isEdit && item && (
+          <span className="text-[11px] tabular-nums text-ink-400">{item.id}</span>
+        )}
+      </DrawerHeader>
+
+      {error && (
+        <div
+          role="alert"
+          className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
+        >
+          <IconWarning className="w-3.5 h-3.5 shrink-0" />
+          <span className="flex-1">{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="text-rose-500 hover:text-rose-700 px-1"
+            aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        {/* Name — the item itself. */}
+        <Field label="Name">
+          <TextInput
+            type="text"
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="What's on hand?"
+            aria-label="Name"
+            className="w-full"
+          />
+        </Field>
+
+        {/* Quantity + unit — both optional, side by side. */}
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <Field label="Quantity">
+              <TextInput
+                type="number"
+                inputMode="decimal"
+                step="any"
+                min="0"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder="e.g. 2"
+                aria-label="Quantity"
+                className="w-full tabular-nums"
+              />
+            </Field>
+          </div>
+          <div className="flex-1">
+            <Field label="Unit">
+              <TextInput
+                type="text"
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+                placeholder="g, cans, bunch…"
+                aria-label="Unit"
+                className="w-full"
+              />
+            </Field>
+          </div>
+        </div>
+
+        {/* Category + location — both optional, side by side. */}
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <Field label="Category">
+              <Select
+                value={category}
+                onChange={(e) => setCategory(e.target.value as "" | PantryCategory)}
+                aria-label="Category"
+                className="w-full"
+              >
+                <option value="">No category</option>
+                {VALID_PANTRY_CATEGORY.map((c) => (
+                  <option key={c} value={c}>
+                    {CATEGORY_LABEL[c]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <div className="flex-1">
+            <Field label="Location">
+              <Select
+                value={location}
+                onChange={(e) => setLocation(e.target.value as "" | PantryLocation)}
+                aria-label="Location"
+                className="w-full"
+              >
+                <option value="">No location</option>
+                {VALID_PANTRY_LOCATION.map((l) => (
+                  <option key={l} value={l}>
+                    {LOCATION_LABEL[l]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        </div>
+
+        {/* Expiry — optional calendar day. */}
+        <Field label="Expires">
+          <TextInput
+            type="date"
+            value={expiresAt}
+            onChange={(e) => setExpiresAt(e.target.value)}
+            aria-label="Expiry date"
+            className="w-full"
+          />
+        </Field>
+
+        {/* Low stock — the manual running-low flag. */}
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={lowStock}
+            onChange={(e) => setLowStock(e.target.checked)}
+            className="w-3.5 h-3.5 rounded border-ink-300 text-ink-900 focus:ring-sky-100"
+          />
+          <span className="text-[12.5px] text-ink-700">Running low</span>
+        </label>
+
+        {/* Note — optional freeform note. */}
+        <Field label="Note">
+          <TextArea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={2}
+            placeholder="Optional note…"
+            aria-label="Note"
+            className="w-full resize-y"
+          />
+        </Field>
+      </div>
+    </DrawerShell>
   );
 }
