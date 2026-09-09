@@ -18,6 +18,7 @@ import { kgToDisplay, displayToKg } from "@/lib/nutrition-format";
 import { IconWarning } from "@/components/icons";
 import { TextInput, Select, Field } from "@/components/shared/field";
 import { PrimaryButton, SecondaryButton } from "@/components/shared/action-button";
+import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
 
 const SEX_LABEL: Record<BiologicalSex, string> = { male: "Male", female: "Female" };
 const ACTIVITY_LABEL: Record<ActivityLevel, string> = {
@@ -89,12 +90,6 @@ export function GoalDrawer({
     };
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const toKg = (raw: string): number | null => {
     const v = raw.trim();
     if (v === "") return null;
@@ -148,128 +143,11 @@ export function GoalDrawer({
 
   const isEdit = objective !== null;
   return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} aria-hidden />
-      <aside
-        role="dialog"
-        aria-label={isEdit ? "Edit goal" : "Set up goal"}
-        className="fixed top-0 right-0 h-dvh-fallback w-full sm:w-[460px] bg-white border-l border-ink-200 shadow-xl z-50 flex flex-col"
-      >
-        <div className="px-5 h-12 flex items-center border-b border-ink-100 gap-2">
-          <span className="text-[13px] font-semibold text-ink-900">{isEdit ? "Edit goal" : "Set up goal"}</span>
-          <button onClick={onClose} aria-label="Close drawer" className="ml-auto text-[12px] text-ink-500 hover:text-ink-900 px-2 py-1 rounded hover:bg-ink-50">
-            Close · Esc
-          </button>
-        </div>
-
-        {error && (
-          <div role="alert" className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2">
-            <IconWarning className="w-3.5 h-3.5 shrink-0" />
-            <span className="flex-1">{error}</span>
-            <button onClick={() => setError(null)} className="text-rose-500 hover:text-rose-700 px-1" aria-label="Dismiss error">×</button>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {/* The free-text goal — the headline. */}
-          <Field label="Your goal (in your own words)">
-            <textarea
-              value={goalText}
-              onChange={(e) => setGoalText(e.target.value)}
-              rows={4}
-              maxLength={2000}
-              placeholder="e.g. Lose some fat but keep my strength — I lift 3×/week and want to lean out for summer without losing muscle."
-              aria-label="Describe your goal"
-              className="w-full bg-white border border-ink-200 rounded-md px-2.5 py-2 text-[16px] text-ink-900 leading-snug outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400 resize-none"
-            />
-            <p className="text-[11px] text-ink-400 mt-1">Your chief of staff reads this to set your daily calorie + macro targets.</p>
-          </Field>
-
-          {/* Target weight (optional anchor) + target date. */}
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <Field label={`Target weight (${unit}) — optional`}>
-                <TextInput
-                  type="number" inputMode="decimal" min="0" step="any"
-                  value={targetWeight} onChange={(e) => setTargetWeight(e.target.value)}
-                  placeholder={unit === "lb" ? "e.g. 165" : "e.g. 75"} aria-label={`Target weight in ${unit}`}
-                  className="w-full tabular-nums"
-                />
-              </Field>
-            </div>
-            <div className="flex-1">
-              <Field label="Target date — optional">
-                <TextInput
-                  type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} aria-label="Target date"
-                  className="w-full"
-                />
-              </Field>
-            </div>
-          </div>
-
-          {/* Activity — the TDEE multiplier. */}
-          <Field label="Activity level">
-            <Select
-              value={activity} onChange={(e) => setActivity(e.target.value as ActivityLevel)} aria-label="Activity level"
-              className="w-full"
-            >
-              {VALID_ACTIVITY_LEVEL.map((a) => (
-                <option key={a} value={a}>{ACTIVITY_LABEL[a]}</option>
-              ))}
-            </Select>
-          </Field>
-
-          {/* Identity — the BMR inputs (required on first run, prefilled on edit). */}
-          <div className="pt-2 border-t border-ink-50">
-            <p className="text-[11px] uppercase tracking-wide text-ink-400 mb-2">About you {hasProfile === false ? "(required)" : ""}</p>
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <Field label="Sex">
-                  <Select value={sex} onChange={(e) => setSex(e.target.value as "" | BiologicalSex)} aria-label="Biological sex"
-                    className="w-full">
-                    <option value="">Select…</option>
-                    {VALID_BIOLOGICAL_SEX.map((s) => <option key={s} value={s}>{SEX_LABEL[s]}</option>)}
-                  </Select>
-                </Field>
-              </div>
-              <div className="flex-1">
-                <Field label="Date of birth">
-                  <TextInput type="date" value={dob} onChange={(e) => setDob(e.target.value)} aria-label="Date of birth"
-                    className="w-full" />
-                </Field>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-3">
-              <div className="flex-1">
-                <Field label="Height (cm)">
-                  <TextInput type="number" inputMode="decimal" min="1" step="any" value={heightCm} onChange={(e) => setHeightCm(e.target.value)}
-                    placeholder="e.g. 178" aria-label="Height in centimetres"
-                    className="w-full tabular-nums" />
-                </Field>
-              </div>
-              <div className="flex-1">
-                <Field label="Training status">
-                  <Select value={trainingStatus} onChange={(e) => setTrainingStatus(e.target.value as TrainingStatus)} aria-label="Training status"
-                    className="w-full">
-                    {VALID_TRAINING_STATUS.map((t) => <option key={t} value={t}>{TRAINING_LABEL[t]}</option>)}
-                  </Select>
-                </Field>
-              </div>
-            </div>
-            <label className="flex items-center gap-2 mt-3 text-[12.5px] text-ink-700 cursor-pointer">
-              <input type="checkbox" checked={resistanceTrains} onChange={(e) => setResistanceTrains(e.target.checked)} className="accent-ink-900" />
-              I do resistance training (lifting)
-            </label>
-          </div>
-
-          {/* Today's weight — optional opening weigh-in. */}
-          <Field label={`Today's weight (${unit}) — optional`}>
-            <TextInput type="number" inputMode="decimal" min="0" step="any" value={todayWeight} onChange={(e) => setTodayWeight(e.target.value)}
-              placeholder="Record your current weight" aria-label={`Today's weight in ${unit}`}
-              className="w-full tabular-nums" />
-          </Field>
-        </div>
-
+    <DrawerShell
+      ariaLabel={isEdit ? "Edit goal" : "Set up goal"}
+      width={460}
+      onClose={onClose}
+      footer={
         <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           <div className="ml-auto flex items-center gap-2">
             <SecondaryButton onClick={onClose} disabled={saving} className="px-2.5">Cancel</SecondaryButton>
@@ -278,7 +156,119 @@ export function GoalDrawer({
             </PrimaryButton>
           </div>
         </div>
-      </aside>
-    </>
+      }
+    >
+      <DrawerHeader closeLabel="Close drawer" onClose={onClose}>
+        <span className="text-[13px] font-semibold text-ink-900">{isEdit ? "Edit goal" : "Set up goal"}</span>
+      </DrawerHeader>
+
+      {error && (
+        <div role="alert" className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2">
+          <IconWarning className="w-3.5 h-3.5 shrink-0" />
+          <span className="flex-1">{error}</span>
+          <button onClick={() => setError(null)} className="text-rose-500 hover:text-rose-700 px-1" aria-label="Dismiss error">×</button>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        {/* The free-text goal — the headline. */}
+        <Field label="Your goal (in your own words)">
+          <textarea
+            value={goalText}
+            onChange={(e) => setGoalText(e.target.value)}
+            rows={4}
+            maxLength={2000}
+            placeholder="e.g. Lose some fat but keep my strength — I lift 3×/week and want to lean out for summer without losing muscle."
+            aria-label="Describe your goal"
+            className="w-full bg-white border border-ink-200 rounded-md px-2.5 py-2 text-[16px] text-ink-900 leading-snug outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 placeholder:text-ink-400 resize-none"
+          />
+          <p className="text-[11px] text-ink-400 mt-1">Your chief of staff reads this to set your daily calorie + macro targets.</p>
+        </Field>
+
+        {/* Target weight (optional anchor) + target date. */}
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <Field label={`Target weight (${unit}) — optional`}>
+              <TextInput
+                type="number" inputMode="decimal" min="0" step="any"
+                value={targetWeight} onChange={(e) => setTargetWeight(e.target.value)}
+                placeholder={unit === "lb" ? "e.g. 165" : "e.g. 75"} aria-label={`Target weight in ${unit}`}
+                className="w-full tabular-nums"
+              />
+            </Field>
+          </div>
+          <div className="flex-1">
+            <Field label="Target date — optional">
+              <TextInput
+                type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} aria-label="Target date"
+                className="w-full"
+              />
+            </Field>
+          </div>
+        </div>
+
+        {/* Activity — the TDEE multiplier. */}
+        <Field label="Activity level">
+          <Select
+            value={activity} onChange={(e) => setActivity(e.target.value as ActivityLevel)} aria-label="Activity level"
+            className="w-full"
+          >
+            {VALID_ACTIVITY_LEVEL.map((a) => (
+              <option key={a} value={a}>{ACTIVITY_LABEL[a]}</option>
+            ))}
+          </Select>
+        </Field>
+
+        {/* Identity — the BMR inputs (required on first run, prefilled on edit). */}
+        <div className="pt-2 border-t border-ink-50">
+          <p className="text-[11px] uppercase tracking-wide text-ink-400 mb-2">About you {hasProfile === false ? "(required)" : ""}</p>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <Field label="Sex">
+                <Select value={sex} onChange={(e) => setSex(e.target.value as "" | BiologicalSex)} aria-label="Biological sex"
+                  className="w-full">
+                  <option value="">Select…</option>
+                  {VALID_BIOLOGICAL_SEX.map((s) => <option key={s} value={s}>{SEX_LABEL[s]}</option>)}
+                </Select>
+              </Field>
+            </div>
+            <div className="flex-1">
+              <Field label="Date of birth">
+                <TextInput type="date" value={dob} onChange={(e) => setDob(e.target.value)} aria-label="Date of birth"
+                  className="w-full" />
+              </Field>
+            </div>
+          </div>
+          <div className="flex gap-3 mt-3">
+            <div className="flex-1">
+              <Field label="Height (cm)">
+                <TextInput type="number" inputMode="decimal" min="1" step="any" value={heightCm} onChange={(e) => setHeightCm(e.target.value)}
+                  placeholder="e.g. 178" aria-label="Height in centimetres"
+                  className="w-full tabular-nums" />
+              </Field>
+            </div>
+            <div className="flex-1">
+              <Field label="Training status">
+                <Select value={trainingStatus} onChange={(e) => setTrainingStatus(e.target.value as TrainingStatus)} aria-label="Training status"
+                  className="w-full">
+                  {VALID_TRAINING_STATUS.map((t) => <option key={t} value={t}>{TRAINING_LABEL[t]}</option>)}
+                </Select>
+              </Field>
+            </div>
+          </div>
+          <label className="flex items-center gap-2 mt-3 text-[12.5px] text-ink-700 cursor-pointer">
+            <input type="checkbox" checked={resistanceTrains} onChange={(e) => setResistanceTrains(e.target.checked)} className="accent-ink-900" />
+            I do resistance training (lifting)
+          </label>
+        </div>
+
+        {/* Today's weight — optional opening weigh-in. */}
+        <Field label={`Today's weight (${unit}) — optional`}>
+          <TextInput type="number" inputMode="decimal" min="0" step="any" value={todayWeight} onChange={(e) => setTodayWeight(e.target.value)}
+            placeholder="Record your current weight" aria-label={`Today's weight in ${unit}`}
+            className="w-full tabular-nums" />
+        </Field>
+      </div>
+    </DrawerShell>
   );
 }

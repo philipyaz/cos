@@ -64,6 +64,7 @@ import {
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
 import { PrimaryButton, SecondaryButton, DestructiveButton } from "@/components/shared/action-button";
+import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
 import { messageDeepLink } from "@/lib/message-url";
 import { Markdown, ReadMore } from "@/components/shared/markdown";
 
@@ -95,14 +96,7 @@ export function CaseDetailDrawer({
   useEffect(() => {
     if (!caseRec) return;
     setError(null);
-    const onKey = (e: KeyboardEvent) => {
-      // Esc closes the drawer — but only when no inline edit is mid-flight (those
-      // stop propagation so Esc cancels the edit first).
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [caseRec, onClose]);
+  }, [caseRec]);
 
   if (!caseRec) return null;
 
@@ -141,66 +135,72 @@ export function CaseDetailDrawer({
   };
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} aria-hidden />
-      <aside
-        role="dialog"
-        aria-label={`Case ${caseRec.id} detail`}
-        className="fixed top-0 right-0 h-dvh-fallback w-full sm:w-[560px] bg-white border-l border-ink-200 shadow-xl z-50 flex flex-col"
-      >
-        <div className="px-5 h-12 flex items-center border-b border-ink-100 gap-2">
-          <span className="text-[12px] tabular-nums text-ink-500 font-medium">{caseRec.id}</span>
-          <LaneInline
-            status={caseRec.status}
-            onSave={(status) => patchCase({ status })}
-          />
-          {/* Star toggle — the favorite/pin. Filled amber when starred, outline
-              otherwise; flips via starCase through the same `run` (refetch +
-              error-banner) path the rest of the drawer uses. */}
+    <DrawerShell
+      ariaLabel={`Case ${caseRec.id} detail`}
+      width={560}
+      onClose={onClose}
+      footer={
+        <div className="px-5 min-h-12 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
+          <div className="ml-auto flex items-center gap-2">
+            {caseRec.archivedAt ? (
+              <SecondaryButton onClick={onRestore} className="px-2">
+                Restore
+              </SecondaryButton>
+            ) : (
+              <DestructiveButton onClick={onDelete} className="px-2">
+                Delete
+              </DestructiveButton>
+            )}
+          </div>
+        </div>
+      }
+    >
+      <DrawerHeader closeLabel="Close drawer" onClose={onClose}>
+        <span className="text-[12px] tabular-nums text-ink-500 font-medium">{caseRec.id}</span>
+        <LaneInline
+          status={caseRec.status}
+          onSave={(status) => patchCase({ status })}
+        />
+        {/* Star toggle — the favorite/pin. Filled amber when starred, outline
+            otherwise; flips via starCase through the same `run` (refetch +
+            error-banner) path the rest of the drawer uses. */}
+        <button
+          type="button"
+          onClick={() => run(() => apiStarCase(caseRec.id, !caseRec.starred))}
+          aria-pressed={!!caseRec.starred}
+          aria-label={caseRec.starred ? "Unstar this case" : "Star this case"}
+          title={caseRec.starred ? "Starred — click to unstar" : "Star — pin to Priorities"}
+          className={`grid place-items-center w-6 h-6 rounded transition ${
+            caseRec.starred
+              ? "text-amber-500 hover:bg-amber-50"
+              : "text-ink-300 hover:text-amber-500 hover:bg-ink-50"
+          }`}
+        >
+          <IconStar className="w-3.5 h-3.5" fill={caseRec.starred ? "currentColor" : "none"} />
+        </button>
+        {caseRec.archivedAt && (
+          <span className="text-[11px] px-2 py-0.5 rounded-full bg-ink-100 text-ink-500">Deleted</span>
+        )}
+      </DrawerHeader>
+
+      {error && (
+        <div
+          role="alert"
+          className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
+        >
+          <IconWarning className="w-3.5 h-3.5 shrink-0" />
+          <span className="flex-1">{error}</span>
           <button
-            type="button"
-            onClick={() => run(() => apiStarCase(caseRec.id, !caseRec.starred))}
-            aria-pressed={!!caseRec.starred}
-            aria-label={caseRec.starred ? "Unstar this case" : "Star this case"}
-            title={caseRec.starred ? "Starred — click to unstar" : "Star — pin to Priorities"}
-            className={`grid place-items-center w-6 h-6 rounded transition ${
-              caseRec.starred
-                ? "text-amber-500 hover:bg-amber-50"
-                : "text-ink-300 hover:text-amber-500 hover:bg-ink-50"
-            }`}
+            onClick={() => setError(null)}
+            className="text-rose-500 hover:text-rose-700 px-1"
+            aria-label="Dismiss error"
           >
-            <IconStar className="w-3.5 h-3.5" fill={caseRec.starred ? "currentColor" : "none"} />
-          </button>
-          {caseRec.archivedAt && (
-            <span className="text-[11px] px-2 py-0.5 rounded-full bg-ink-100 text-ink-500">Deleted</span>
-          )}
-          <button
-            onClick={onClose}
-            aria-label="Close drawer"
-            className="ml-auto text-[12px] text-ink-500 hover:text-ink-900 px-2 py-1 rounded hover:bg-ink-50"
-          >
-            Close · Esc
+            ×
           </button>
         </div>
+      )}
 
-        {error && (
-          <div
-            role="alert"
-            className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
-          >
-            <IconWarning className="w-3.5 h-3.5 shrink-0" />
-            <span className="flex-1">{error}</span>
-            <button
-              onClick={() => setError(null)}
-              className="text-rose-500 hover:text-rose-700 px-1"
-              aria-label="Dismiss error"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
           {/* Title + summary + due/SLA chips */}
           <div className="px-5 py-4 border-b border-ink-100">
             <div className="flex items-start gap-2 flex-wrap mb-1.5">
@@ -398,24 +398,8 @@ export function CaseDetailDrawer({
 
           {/* Activity log — the trust ledger */}
           <ActivitySection activity={caseRec.activity ?? []} />
-        </div>
-
-        {/* Actions row */}
-        <div className="px-5 min-h-12 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
-          <div className="ml-auto flex items-center gap-2">
-            {caseRec.archivedAt ? (
-              <SecondaryButton onClick={onRestore} className="px-2">
-                Restore
-              </SecondaryButton>
-            ) : (
-              <DestructiveButton onClick={onDelete} className="px-2">
-                Delete
-              </DestructiveButton>
-            )}
-          </div>
-        </div>
-      </aside>
-    </>
+      </div>
+    </DrawerShell>
   );
 }
 

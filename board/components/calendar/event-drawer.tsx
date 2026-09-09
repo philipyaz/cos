@@ -15,7 +15,7 @@
 // id/title, cap ~8, show a lane dot). Linking the appointment to a case is
 // PREFERRED; leaving it unlinked is fine.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CalendarEvent, CaseRecord } from "@/lib/types";
 import { LANES } from "@/lib/types";
 import { domainLabel, domainClasses } from "@/lib/format";
@@ -23,6 +23,7 @@ import { createEvent, updateEvent, deleteEvent } from "@/lib/board-client";
 import { IconWarning, IconDot, IconSearch } from "@/components/icons";
 import { TextInput, TextArea, Field } from "@/components/shared/field";
 import { PrimaryButton, SecondaryButton, DestructiveButton } from "@/components/shared/action-button";
+import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
 
 export function EventDrawer({
   event,
@@ -53,15 +54,6 @@ export function EventDrawer({
 
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  // Esc closes the drawer (matching CaseDetailDrawer). Bound once per mount.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const linkedCase = caseId ? cases.find((c) => c.id === caseId) ?? null : null;
   const linkedLane = linkedCase ? LANES.find((l) => l.key === linkedCase.status) ?? null : null;
@@ -120,149 +112,11 @@ export function EventDrawer({
   };
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} aria-hidden />
-      <aside
-        role="dialog"
-        aria-label={isEdit ? `Edit event ${event?.id}` : "New appointment"}
-        className="fixed top-0 right-0 h-dvh-fallback w-full sm:w-[460px] bg-white border-l border-ink-200 shadow-xl z-50 flex flex-col"
-      >
-        <div className="px-5 h-12 flex items-center border-b border-ink-100 gap-2">
-          <span className="text-[13px] font-semibold text-ink-900">
-            {isEdit ? "Edit appointment" : "New appointment"}
-          </span>
-          {isEdit && event && (
-            <span className="text-[11px] tabular-nums text-ink-400">{event.id}</span>
-          )}
-          <button
-            onClick={onClose}
-            aria-label="Close drawer"
-            className="ml-auto text-[12px] text-ink-500 hover:text-ink-900 px-2 py-1 rounded hover:bg-ink-50"
-          >
-            Close · Esc
-          </button>
-        </div>
-
-        {error && (
-          <div
-            role="alert"
-            className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
-          >
-            <IconWarning className="w-3.5 h-3.5 shrink-0" />
-            <span className="flex-1">{error}</span>
-            <button
-              onClick={() => setError(null)}
-              className="text-rose-500 hover:text-rose-700 px-1"
-              aria-label="Dismiss error"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {/* Title */}
-          <Field label="Title">
-            <TextInput
-              type="text"
-              autoFocus
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="What's the appointment?"
-              aria-label="Title"
-              className="w-full"
-            />
-          </Field>
-
-          {/* Date + all-day */}
-          <div className="flex items-end gap-3">
-            <div className="flex-1">
-              <Field label="Date">
-                <TextInput
-                  type="date"
-                  value={day}
-                  onChange={(e) => setDay(e.target.value)}
-                  aria-label="Date"
-                  className="w-full"
-                />
-              </Field>
-            </div>
-            <label className="flex items-center gap-1.5 text-[12.5px] text-ink-700 pb-1.5 select-none cursor-pointer">
-              <input
-                type="checkbox"
-                checked={allDay}
-                onChange={(e) => setAllDay(e.target.checked)}
-                className="accent-ink-900"
-              />
-              All-day
-            </label>
-          </div>
-
-          {/* Start / end time — only when timed */}
-          {!allDay && (
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <Field label="Start time">
-                  <TextInput
-                    type="time"
-                    value={startTime}
-                    onChange={(e) => setStartTime(e.target.value)}
-                    aria-label="Start time"
-                    className="w-full"
-                  />
-                </Field>
-              </div>
-              <div className="flex-1">
-                <Field label="End time">
-                  <TextInput
-                    type="time"
-                    value={endTime}
-                    onChange={(e) => setEndTime(e.target.value)}
-                    aria-label="End time"
-                    className="w-full"
-                  />
-                </Field>
-              </div>
-            </div>
-          )}
-
-          {/* Linked case — the headline gesture. Prefer linking to live work. */}
-          <Field label="Linked case">
-            <CasePicker
-              cases={cases}
-              linkedCase={linkedCase}
-              linkedLane={linkedLane}
-              onLink={(id) => setCaseId(id)}
-              onUnlink={() => setCaseId(undefined)}
-            />
-          </Field>
-
-          {/* Location */}
-          <Field label="Location">
-            <TextInput
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="Optional — where is it?"
-              aria-label="Location"
-              className="w-full"
-            />
-          </Field>
-
-          {/* Description */}
-          <Field label="Description">
-            <TextArea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              placeholder="Optional notes…"
-              aria-label="Description"
-              className="w-full resize-y"
-            />
-          </Field>
-        </div>
-
-        {/* Footer — Save (create/patch) + Delete on an existing event */}
+    <DrawerShell
+      ariaLabel={isEdit ? `Edit event ${event?.id}` : "New appointment"}
+      width={460}
+      onClose={onClose}
+      footer={
         <div className="px-5 min-h-14 pb-safe flex items-center gap-2 border-t border-ink-100 bg-ink-50/40">
           {isEdit && (
             <DestructiveButton onClick={onDelete} disabled={saving} className="px-2.5">
@@ -278,8 +132,136 @@ export function EventDrawer({
             </PrimaryButton>
           </div>
         </div>
-      </aside>
-    </>
+      }
+    >
+      <DrawerHeader closeLabel="Close drawer" onClose={onClose}>
+        <span className="text-[13px] font-semibold text-ink-900">
+          {isEdit ? "Edit appointment" : "New appointment"}
+        </span>
+        {isEdit && event && (
+          <span className="text-[11px] tabular-nums text-ink-400">{event.id}</span>
+        )}
+      </DrawerHeader>
+
+      {error && (
+        <div
+          role="alert"
+          className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
+        >
+          <IconWarning className="w-3.5 h-3.5 shrink-0" />
+          <span className="flex-1">{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="text-rose-500 hover:text-rose-700 px-1"
+            aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        {/* Title */}
+        <Field label="Title">
+          <TextInput
+            type="text"
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="What's the appointment?"
+            aria-label="Title"
+            className="w-full"
+          />
+        </Field>
+
+        {/* Date + all-day */}
+        <div className="flex items-end gap-3">
+          <div className="flex-1">
+            <Field label="Date">
+              <TextInput
+                type="date"
+                value={day}
+                onChange={(e) => setDay(e.target.value)}
+                aria-label="Date"
+                className="w-full"
+              />
+            </Field>
+          </div>
+          <label className="flex items-center gap-1.5 text-[12.5px] text-ink-700 pb-1.5 select-none cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allDay}
+              onChange={(e) => setAllDay(e.target.checked)}
+              className="accent-ink-900"
+            />
+            All-day
+          </label>
+        </div>
+
+        {/* Start / end time — only when timed */}
+        {!allDay && (
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <Field label="Start time">
+                <TextInput
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  aria-label="Start time"
+                  className="w-full"
+                />
+              </Field>
+            </div>
+            <div className="flex-1">
+              <Field label="End time">
+                <TextInput
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  aria-label="End time"
+                  className="w-full"
+                />
+              </Field>
+            </div>
+          </div>
+        )}
+
+        {/* Linked case — the headline gesture. Prefer linking to live work. */}
+        <Field label="Linked case">
+          <CasePicker
+            cases={cases}
+            linkedCase={linkedCase}
+            linkedLane={linkedLane}
+            onLink={(id) => setCaseId(id)}
+            onUnlink={() => setCaseId(undefined)}
+          />
+        </Field>
+
+        {/* Location */}
+        <Field label="Location">
+          <TextInput
+            type="text"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="Optional — where is it?"
+            aria-label="Location"
+            className="w-full"
+          />
+        </Field>
+
+        {/* Description */}
+        <Field label="Description">
+          <TextArea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+            placeholder="Optional notes…"
+            aria-label="Description"
+            className="w-full resize-y"
+          />
+        </Field>
+      </div>
+    </DrawerShell>
   );
 }
 

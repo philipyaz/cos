@@ -15,6 +15,7 @@ import {
 } from "@/lib/board-client";
 import { IconPlus } from "@/components/icons";
 import { PrimaryButton, DestructiveButton } from "@/components/shared/action-button";
+import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
 
 // The Labels manager — a slide-over for configuring the board's taxonomy entirely
 // from the UI: install role/life bundles in one click, add custom labels, and edit
@@ -56,12 +57,7 @@ export function LabelManager({
     if (!open) return;
     setError(null);
     if (bundles === null) void loadBundles();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, bundles, loadBundles, onClose]);
+  }, [open, bundles, loadBundles]);
 
   if (!open) return null;
 
@@ -152,112 +148,98 @@ export function LabelManager({
   const universalBundles = bundles?.filter((b) => b.category === "universal") ?? [];
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-[60]" onClick={onClose} aria-hidden />
-      <aside
-        role="dialog"
-        aria-label="Manage labels"
-        className="fixed top-0 right-0 h-dvh-fallback w-full sm:w-[520px] bg-white border-l border-ink-200 shadow-xl z-[61] flex flex-col"
-      >
-        <div className="px-5 h-12 flex items-center border-b border-ink-100 gap-2">
-          <span className="text-[13px] font-semibold text-ink-900">Labels</span>
-          <span className="text-[11.5px] text-ink-400 tabular-nums">{labels.length} active</span>
+    <DrawerShell ariaLabel="Manage labels" width={520} layer="stacked" onClose={onClose}>
+      <DrawerHeader closeLabel="Close labels manager" onClose={onClose}>
+        <span className="text-[13px] font-semibold text-ink-900">Labels</span>
+        <span className="text-[11.5px] text-ink-400 tabular-nums">{labels.length} active</span>
+      </DrawerHeader>
+
+      {/* Tabs */}
+      <div className="px-5 pt-3 flex items-center gap-1">
+        {(["yours", "bundles"] as const).map((t) => (
           <button
-            onClick={onClose}
-            aria-label="Close labels manager"
-            className="ml-auto text-[12px] text-ink-500 hover:text-ink-900 px-2 py-1 rounded hover:bg-ink-50"
+            key={t}
+            onClick={() => setTab(t)}
+            className={`text-[12.5px] px-2.5 py-1 rounded-md transition ${
+              tab === t ? "text-ink-900 bg-ink-100 font-medium" : "text-ink-500 hover:text-ink-900 hover:bg-ink-50"
+            }`}
           >
-            Close · Esc
+            {t === "yours" ? "Your labels" : "Bundles"}
+          </button>
+        ))}
+      </div>
+
+      {error && (
+        <div role="alert" className="mx-5 mt-3 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md">
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div className="mx-5 mt-3 px-3 py-2 text-[12px] text-amber-800 bg-amber-50 border border-amber-100 rounded-md flex items-start gap-2">
+          <span className="flex-1">{notice}</span>
+          <button onClick={() => setNotice(null)} aria-label="Dismiss" className="text-amber-500 hover:text-amber-700">
+            ×
           </button>
         </div>
+      )}
 
-        {/* Tabs */}
-        <div className="px-5 pt-3 flex items-center gap-1">
-          {(["yours", "bundles"] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`text-[12.5px] px-2.5 py-1 rounded-md transition ${
-                tab === t ? "text-ink-900 bg-ink-100 font-medium" : "text-ink-500 hover:text-ink-900 hover:bg-ink-50"
-              }`}
-            >
-              {t === "yours" ? "Your labels" : "Bundles"}
-            </button>
-          ))}
-        </div>
-
-        {error && (
-          <div role="alert" className="mx-5 mt-3 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md">
-            {error}
-          </div>
-        )}
-        {notice && (
-          <div className="mx-5 mt-3 px-3 py-2 text-[12px] text-amber-800 bg-amber-50 border border-amber-100 rounded-md flex items-start gap-2">
-            <span className="flex-1">{notice}</span>
-            <button onClick={() => setNotice(null)} aria-label="Dismiss" className="text-amber-500 hover:text-amber-700">
-              ×
-            </button>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 pb-safe">
-          {tab === "yours" ? (
-            <>
-              {/* Add custom label */}
-              <div className="rounded-lg border border-ink-200 p-3 mb-4">
-                <div className="text-[11px] uppercase tracking-wide text-ink-400 mb-2">Add a custom label</div>
-                <input
-                  value={nTitle}
-                  onChange={(e) => setNTitle(e.target.value)}
-                  placeholder="Title (e.g. Access request)"
-                  aria-label="New label title"
-                  className="w-full text-[16px] px-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 mb-2"
-                />
-                <input
-                  value={nDesc}
-                  onChange={(e) => setNDesc(e.target.value)}
-                  placeholder="Description — when does this label apply?"
-                  aria-label="New label description"
-                  className="w-full text-[16px] px-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 mb-2"
-                />
-                <div className="flex items-center gap-2">
-                  <ColorPicker value={nColor} onChange={setNColor} />
-                  <PrimaryButton onClick={addLabel} disabled={!nTitle.trim() || busy} className="ml-auto px-2.5">
-                    <IconPlus className="w-3.5 h-3.5" />
-                    Add
-                  </PrimaryButton>
-                </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 pb-safe">
+        {tab === "yours" ? (
+          <>
+            {/* Add custom label */}
+            <div className="rounded-lg border border-ink-200 p-3 mb-4">
+              <div className="text-[11px] uppercase tracking-wide text-ink-400 mb-2">Add a custom label</div>
+              <input
+                value={nTitle}
+                onChange={(e) => setNTitle(e.target.value)}
+                placeholder="Title (e.g. Access request)"
+                aria-label="New label title"
+                className="w-full text-[16px] px-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 mb-2"
+              />
+              <input
+                value={nDesc}
+                onChange={(e) => setNDesc(e.target.value)}
+                placeholder="Description — when does this label apply?"
+                aria-label="New label description"
+                className="w-full text-[16px] px-2 py-1.5 rounded-md border border-ink-200 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100 mb-2"
+              />
+              <div className="flex items-center gap-2">
+                <ColorPicker value={nColor} onChange={setNColor} />
+                <PrimaryButton onClick={addLabel} disabled={!nTitle.trim() || busy} className="ml-auto px-2.5">
+                  <IconPlus className="w-3.5 h-3.5" />
+                  Add
+                </PrimaryButton>
               </div>
+            </div>
 
-              {/* Active labels */}
-              {labels.length === 0 ? (
-                <div className="text-[12.5px] text-ink-400 py-6 text-center">
-                  No labels yet. Add one above or install a bundle.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {labels.map((l) => (
-                    <LabelRow key={l.id} label={l} busy={busy} run={run} />
-                  ))}
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              {bundles === null ? (
-                <div className="text-[12.5px] text-ink-400 py-6 text-center">Loading bundles…</div>
-              ) : (
-                <div className="space-y-5">
-                  <BundleGroup title="By role" bundles={roleBundles} installed={installed} busy={busy} onInstall={installBundleWithNotice} onUninstall={uninstallBundleWithConfirm} />
-                  <BundleGroup title="For life" bundles={lifeBundles} installed={installed} busy={busy} onInstall={installBundleWithNotice} onUninstall={uninstallBundleWithConfirm} />
-                  <BundleGroup title="Universal" bundles={universalBundles} installed={installed} busy={busy} onInstall={installBundleWithNotice} onUninstall={uninstallBundleWithConfirm} />
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </aside>
-    </>
+            {/* Active labels */}
+            {labels.length === 0 ? (
+              <div className="text-[12.5px] text-ink-400 py-6 text-center">
+                No labels yet. Add one above or install a bundle.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {labels.map((l) => (
+                  <LabelRow key={l.id} label={l} busy={busy} run={run} />
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {bundles === null ? (
+              <div className="text-[12.5px] text-ink-400 py-6 text-center">Loading bundles…</div>
+            ) : (
+              <div className="space-y-5">
+                <BundleGroup title="By role" bundles={roleBundles} installed={installed} busy={busy} onInstall={installBundleWithNotice} onUninstall={uninstallBundleWithConfirm} />
+                <BundleGroup title="For life" bundles={lifeBundles} installed={installed} busy={busy} onInstall={installBundleWithNotice} onUninstall={uninstallBundleWithConfirm} />
+                <BundleGroup title="Universal" bundles={universalBundles} installed={installed} busy={busy} onInstall={installBundleWithNotice} onUninstall={uninstallBundleWithConfirm} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </DrawerShell>
   );
 
   function BundleGroup({
