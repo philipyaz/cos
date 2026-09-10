@@ -38,6 +38,7 @@ import {
   IconCopy,
 } from "@/components/icons";
 import { PrimaryButton } from "@/components/shared/action-button";
+import { Alert } from "@/components/shared/alert";
 
 // The copy/paste command for the not-ready helper — the text the user pastes into Claude
 // Code, which triggers the backup-recovery skill. Mirrors the guard's setupCommand().
@@ -155,12 +156,9 @@ export function BackupsView({ now, initial }: { now: string; initial: BackupStat
           <>
             {/* Trigger failure (a 403 not-live-board refusal / a network error) — dismissible. */}
             {error && (
-              <div role="alert" className="flex items-start gap-2 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md">
-                <span className="flex-1">{error}</span>
-                <button onClick={() => setError(null)} aria-label="Dismiss error" className="text-rose-500 hover:text-rose-700">
-                  ×
-                </button>
-              </div>
+              <Alert edge="inset" className="px-3" onDismiss={() => setError(null)}>
+                {error}
+              </Alert>
             )}
 
             {/* The calm outcome toast (skipped-fresh / skipped-busy / refused / ran / failed). */}

@@ -16,6 +16,7 @@ import { formatDay } from "@/lib/fitness-format";
 import { isSessionDay } from "@/lib/fitness-plan-status";
 import { IconRunner, IconHeart, IconCheck } from "@/components/icons";
 import { Markdown } from "@/components/shared/markdown";
+import { Alert } from "@/components/shared/alert";
 import { ArtifactFeed } from "@/components/fitness/artifact-feed";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -183,11 +184,12 @@ function PlanBody({ plan, artifactId, artifactUpdatedAt }: { plan: TrainingPlan;
         </div>
       )}
 
-      {/* Error — danger tone is rose, role="alert" so it's announced. */}
+      {/* Error — danger tone is rose, role="alert" so it's announced. Dismissible: both the
+          calendar push and the per-day outcome write leave the plan content intact. */}
       {error && (
-        <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3">
-          <p className="text-[13px] text-rose-700">{error}</p>
-        </div>
+        <Alert edge="inset" className="px-4" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
       )}
 
       {/* Summary cards */}

@@ -20,7 +20,8 @@ import { getProfile, setProfile } from "@/lib/fitness-client";
 import { formatDay } from "@/lib/fitness-format";
 import { TextInput, TextArea, Select } from "@/components/shared/field";
 import { PrimaryButton } from "@/components/shared/action-button";
-import { IconRunner, IconWarning } from "@/components/icons";
+import { Alert } from "@/components/shared/alert";
+import { IconRunner } from "@/components/icons";
 import {
   VALID_ATHLETE_GOAL,
   VALID_ATHLETE_SPORT,
@@ -259,20 +260,9 @@ export function FitnessOverviewView() {
       {/* A failed save (the POST threw) — surfaced inline so it isn't a silent flip back to
           "Save". Dismissible; success states (the "Saved" chip) are handled in the footer. */}
       {error && (
-        <div
-          role="alert"
-          className="flex items-start gap-2 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md"
-        >
-          <IconWarning className="w-4 h-4 mt-px shrink-0 text-rose-500" />
-          <span className="flex-1">{error}</span>
-          <button
-            onClick={() => setError(null)}
-            aria-label="Dismiss error"
-            className="text-rose-500 hover:text-rose-700"
-          >
-            ×
-          </button>
-        </div>
+        <Alert edge="inset" className="px-3" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
       )}
 
       <FormScoreWidget />

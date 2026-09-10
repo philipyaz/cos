@@ -25,6 +25,7 @@ import { trustClasses, trustLabel, relativeTime, formatDateTime } from "@/lib/fo
 import { IconPlus, IconShield, IconTrash } from "@/components/icons";
 import { TextInput, Select } from "@/components/shared/field";
 import { PrimaryButton } from "@/components/shared/action-button";
+import { Alert } from "@/components/shared/alert";
 
 // Same loose-but-real email shape the POST route validates with — we check it
 // CLIENT-side first so the inline add form can show a fast, precise error before a
@@ -141,12 +142,9 @@ export function WhitelistView({ initial, now }: { initial: TrustListResponse; no
     <div className="space-y-3">
       {/* Mutation error (add/flip/delete) — dismissible. Refetch failures stay silent. */}
       {error && (
-        <div role="alert" className="flex items-start gap-2 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md">
-          <span className="flex-1">{error}</span>
-          <button onClick={() => setError(null)} aria-label="Dismiss error" className="text-rose-500 hover:text-rose-700">
-            ×
-          </button>
-        </div>
+        <Alert edge="inset" className="px-3" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
       )}
 
       {/* Add a sender — an inline composer pinned at the top (mirrors the label

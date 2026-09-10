@@ -65,6 +65,7 @@ import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
 import { PrimaryButton, SecondaryButton, DestructiveButton } from "@/components/shared/action-button";
 import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
+import { Alert } from "@/components/shared/alert";
 import { messageDeepLink } from "@/lib/message-url";
 import { Markdown, ReadMore } from "@/components/shared/markdown";
 
@@ -184,20 +185,9 @@ export function CaseDetailDrawer({
       </DrawerHeader>
 
       {error && (
-        <div
-          role="alert"
-          className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
-        >
-          <IconWarning className="w-3.5 h-3.5 shrink-0" />
-          <span className="flex-1">{error}</span>
-          <button
-            onClick={() => setError(null)}
-            className="text-rose-500 hover:text-rose-700 px-1"
-            aria-label="Dismiss error"
-          >
-            ×
-          </button>
-        </div>
+        <Alert edge="flush" className="px-5" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
       )}
 
       <div className="flex-1 overflow-y-auto">
@@ -1844,13 +1834,9 @@ function RemindersSection({
       }
     >
       {error && (
-        <div
-          role="alert"
-          className="mb-2 text-[11.5px] text-rose-700 bg-rose-50 border border-rose-100 rounded px-2 py-1 flex items-center gap-1.5"
-        >
-          <IconWarning className="w-3 h-3 shrink-0" />
-          <span className="flex-1">{error}</span>
-        </div>
+        <Alert edge="inset" className="mb-2 px-2" onDismiss={null}>
+          {error}
+        </Alert>
       )}
 
       <div className="space-y-1">

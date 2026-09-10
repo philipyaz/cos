@@ -17,8 +17,9 @@ import { useLiveBoard } from "@/lib/use-live-board";
 import { getFitnessData } from "@/lib/fitness-client";
 import { formatDay, formatTimestampDay, formatTime } from "@/lib/fitness-format";
 import { addDays } from "@/lib/nutrition-format";
-import { IconHeart, IconWarning } from "@/components/icons";
+import { IconHeart } from "@/components/icons";
 import { FormScoreWidget } from "@/components/form-score-widget";
+import { Alert } from "@/components/shared/alert";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 // Workout rows carry a FULL ISO ts (it has its own offset) → formatTimestampDay/formatTime
@@ -162,10 +163,9 @@ export function HealthView({
       {/* Initial-load failure — the rose role="alert" banner (mirrors addons-view). In the
           normal SSR-seeded flow this never renders; live refetch failures stay silent. */}
       {error ? (
-        <div role="alert" className="flex items-start gap-2 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md">
-          <IconWarning className="w-4 h-4 mt-px shrink-0 text-rose-500" />
-          <span className="flex-1">{error}</span>
-        </div>
+        <Alert edge="inset" className="px-3" onDismiss={null}>
+          {error}
+        </Alert>
       ) : !hasAny ? (
         <EmptyState />
       ) : (

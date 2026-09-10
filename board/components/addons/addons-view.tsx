@@ -43,6 +43,7 @@ import {
   IconCheck,
   IconCopy,
 } from "@/components/icons";
+import { Alert } from "@/components/shared/alert";
 import type { ComponentType, SVGProps } from "react";
 
 // Add-on icons are stored as STRING keys in the manifest (AddonView.icon — see
@@ -170,12 +171,9 @@ export function AddonsView({ initial }: { initial: AddonView[] }) {
 
         {/* Toggle failure (a PATCH threw) — dismissible. Refetch failures stay silent. */}
         {error && (
-          <div role="alert" className="flex items-start gap-2 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md">
-            <span className="flex-1">{error}</span>
-            <button onClick={() => setError(null)} aria-label="Dismiss error" className="text-rose-500 hover:text-rose-700">
-              ×
-            </button>
-          </div>
+          <Alert edge="inset" className="px-3" onDismiss={() => setError(null)}>
+            {error}
+          </Alert>
         )}
 
         {addons.length === 0 ? (

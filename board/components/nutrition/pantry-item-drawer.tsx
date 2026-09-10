@@ -24,10 +24,10 @@ import { useState } from "react";
 import type { PantryItem, PantryCategory, PantryLocation } from "@/lib/types";
 import { VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION } from "@/lib/types";
 import { createPantryItem, updatePantryItem, deletePantryItem } from "@/lib/nutrition-client";
-import { IconWarning } from "@/components/icons";
 import { TextInput, TextArea, Select, Field } from "@/components/shared/field";
 import { PrimaryButton, SecondaryButton, DestructiveButton } from "@/components/shared/action-button";
 import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
+import { Alert } from "@/components/shared/alert";
 
 // Category / location → a human label for the select options (mirrors PantryView's
 // CATEGORY_LABEL / LOCATION_LABEL; kept local so the drawer stays self-contained).
@@ -168,20 +168,9 @@ export function PantryItemDrawer({
       </DrawerHeader>
 
       {error && (
-        <div
-          role="alert"
-          className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
-        >
-          <IconWarning className="w-3.5 h-3.5 shrink-0" />
-          <span className="flex-1">{error}</span>
-          <button
-            onClick={() => setError(null)}
-            className="text-rose-500 hover:text-rose-700 px-1"
-            aria-label="Dismiss error"
-          >
-            ×
-          </button>
-        </div>
+        <Alert edge="flush" className="px-5" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
       )}
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
