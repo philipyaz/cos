@@ -469,6 +469,19 @@ COPY_VAULT="${TMP}/vault"
 fail=0
 warn=0
 fail_reasons=""   # space-joined list of failed step names, for an accurate verdict
+skipped=0
+skip_reasons=""   # space-joined list of skipped step CLASSES, for the verdict's NOT RUN line
+# note_skip <class> — one increment per skip CLASS per run (a class = every step
+# silenced by the same machine condition), however many of its steps skipped and
+# however many gates fired (three classes have two decision points — cos-ops#95).
+# Classes: api-tier (test board not up) · unit-tests (Node < 22) ·
+# python-sidecars (uv absent) · store-file-e2e (external board, no store-file path).
+note_skip() {
+  case " ${skip_reasons} " in
+    *" $1 "*) ;;
+    *) skipped=$((skipped+1)); skip_reasons="${skip_reasons} $1" ;;
+  esac
+}
 
 # --- 1. unit tests (pure logic — hard gate) ----------------------------------
 # Headless node:test suite over the pure board/lib modules (selectors, store,
@@ -533,6 +546,7 @@ if [ "${NODE_MAJOR}" -ge 22 ]; then
   fi
 else
   echo "SKIP: Node ${NODE_MAJOR}.x lacks TS type-stripping for \`node --test\` (need >= 22)."
+  note_skip unit-tests
 fi
 
 # --- 1b. starving-obligations ranking (pure logic — hard gate) ---------------
@@ -553,6 +567,7 @@ if [ "${NODE_MAJOR}" -ge 22 ]; then
   fi
 else
   echo "SKIP: Node ${NODE_MAJOR}.x lacks TS type-stripping for \`node --test\` (need >= 22)."
+  note_skip unit-tests
 fi
 
 # --- 2. board lint (hard gate) ----------------------------------------------
@@ -940,6 +955,10 @@ if [ "${BOARD_UP}" -ne 1 ] && [ -n "${CI:-}" ] && [ -x "${BOARD_SRC}/node_module
   echo "CI: next is installed but the test board failed to boot — failing the suite (api coverage would silently vanish)."
   fail=1
   fail_reasons="${fail_reasons} test-board-boot"
+fi
+
+if [ "${BOARD_UP}" -ne 1 ]; then
+  note_skip api-tier
 fi
 
 # --- 3. concurrency safety (only when a board is healthy) --------------------
@@ -1418,6 +1437,7 @@ if [ "${BOARD_UP}" -eq 1 ] && [ -n "${TEST_BOARD_DATA_DIR}" ]; then
   fi
 elif [ "${BOARD_UP}" -eq 1 ]; then
   echo "SKIP: external test board (COS_TEST_BOARD_URL) — no file access to its store; shelf-life e2e needs the auto-started sandbox."
+  note_skip store-file-e2e
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
@@ -1765,6 +1785,7 @@ if [ "${BOARD_UP}" -eq 1 ] && [ -n "${TEST_BOARD_DATA_DIR}" ]; then
   fi
 elif [ "${BOARD_UP}" -eq 1 ]; then
   echo "SKIP: external test board (COS_TEST_BOARD_URL) — no file access to its store; schema-guard e2e needs the auto-started sandbox."
+  note_skip store-file-e2e
 else
   echo "SKIP: throwaway test board unavailable (see startup note above). The live board is never used for tests."
 fi
@@ -1923,6 +1944,7 @@ if command -v uv >/dev/null 2>&1; then
   fi
 else
   echo "SKIP: uv not found — install https://docs.astral.sh/uv/ to run the python search test."
+  note_skip python-sidecars
 fi
 
 # --- 15. guard sidecar (python, headless, hermetic) --------------------------
@@ -1945,11 +1967,21 @@ if command -v uv >/dev/null 2>&1; then
   fi
 else
   echo "SKIP: uv not found — install https://docs.astral.sh/uv/ to run the python guard test."
+  note_skip python-sidecars
 fi
 
 # --- verdict -----------------------------------------------------------------
 echo
 echo "============================================================"
+# Names only the classes of steps run.sh's OWN gates kept from running this run
+# (board boot, Node major, uv, store-file access). OUT OF SCOPE by design: any
+# skip a CHILD process decides for itself — an .mjs that prints its own "SKIP"
+# and exits 0 (deps probes, sidecar-offline arms; see the "self-skip" comments
+# for examples) or that drops a sub-check ([10k]'s file-surgery arm). That output
+# never reaches this counter — hence the run.sh-gated qualifier (cos-ops#95).
+if [ "${skipped}" -gt 0 ]; then
+  echo " NOT RUN (run.sh-gated):${skip_reasons}"
+fi
 if [ "${fail}" -ne 0 ]; then
   echo " RESULT: FAIL  (failed:${fail_reasons} )"
   [ "${warn}" -ne 0 ] && echo "         (+ vault property warnings above)"
