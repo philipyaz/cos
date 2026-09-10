@@ -26,6 +26,7 @@ import {
 } from "@/lib/board-client";
 import { useLiveBoard } from "@/lib/use-live-board";
 import { IconTrash, IconRefresh, IconDot, IconBell } from "@/components/icons";
+import { Alert } from "@/components/shared/alert";
 import { CaseDetailDrawer } from "@/components/case-detail-drawer";
 
 const DAY_MS = 86_400_000;
@@ -137,19 +138,9 @@ export function TrashView({
       </div>
 
       {error && (
-        <div
-          role="alert"
-          className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
-        >
-          <span className="flex-1">{error}</span>
-          <button
-            onClick={() => setError(null)}
-            className="text-rose-500 hover:text-rose-700 px-1"
-            aria-label="Dismiss error"
-          >
-            ×
-          </button>
-        </div>
+        <Alert edge="flush" className="px-5" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
       )}
 
       {/* Body */}

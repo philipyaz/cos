@@ -24,6 +24,7 @@ import { formatArtifactLabel, formatTimestampDay } from "@/lib/fitness-format";
 import { useLiveBoard } from "@/lib/use-live-board";
 import { IconRunner, IconChevronRight } from "@/components/icons";
 import { PrimaryButton } from "@/components/shared/action-button";
+import { Alert } from "@/components/shared/alert";
 import type { CoachingArtifact, CoachingArtifactKind } from "@/lib/types";
 
 export interface ArtifactFeedProps {
@@ -158,11 +159,12 @@ export function ArtifactFeed({
         </div>
       </div>
 
-      {/* Generate error — danger tone is rose, role="alert" so it's announced. */}
+      {/* Generate error — danger tone is rose, role="alert" so it's announced. Dismissible: a
+          failed generate leaves the history feed intact, so clearing it loses nothing. */}
       {generateError && (
-        <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3">
-          <p className="text-[13px] text-rose-700">{generateError}</p>
-        </div>
+        <Alert edge="inset" className="px-4" onDismiss={() => setGenerateError(null)}>
+          {generateError}
+        </Alert>
       )}
 
       {/* Loading skeleton on the very first fetch (before any history is known). */}

@@ -9,10 +9,10 @@
 import { useState } from "react";
 import type { DietProfile } from "@/lib/types";
 import { setDietProfile } from "@/lib/nutrition-client";
-import { IconWarning } from "@/components/icons";
 import { Field } from "@/components/shared/field";
 import { PrimaryButton, SecondaryButton } from "@/components/shared/action-button";
 import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
+import { Alert } from "@/components/shared/alert";
 
 const parseList = (raw: string): string[] => raw.split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -69,11 +69,9 @@ export function DietProfileDrawer({
       </DrawerHeader>
 
       {error && (
-        <div role="alert" className="px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2">
-          <IconWarning className="w-3.5 h-3.5 shrink-0" />
-          <span className="flex-1">{error}</span>
-          <button onClick={() => setError(null)} className="text-rose-500 hover:text-rose-700 px-1" aria-label="Dismiss error">×</button>
-        </div>
+        <Alert edge="flush" className="px-5" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
       )}
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">

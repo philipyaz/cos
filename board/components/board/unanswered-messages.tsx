@@ -8,6 +8,7 @@ import { relativeTime } from "@/lib/format";
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
 import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
+import { Alert } from "@/components/shared/alert";
 import { messageDeepLink } from "@/lib/message-url";
 
 // The "Unanswered" panel — a slide-over listing every message the user still owes a
@@ -83,9 +84,9 @@ export function UnansweredMessages({
       </DrawerHeader>
 
       {error && (
-        <div role="alert" className="mx-5 mt-3 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md">
+        <Alert edge="inset" className="mx-5 mt-3 px-3" onDismiss={null}>
           {error}
-        </div>
+        </Alert>
       )}
 
       <div className="flex-1 overflow-y-auto px-5 py-4 pb-safe">

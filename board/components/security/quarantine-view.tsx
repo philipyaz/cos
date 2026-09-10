@@ -35,6 +35,7 @@ import {
 } from "@/lib/board-client";
 import { relativeTime, formatDateTime } from "@/lib/format";
 import { IconShield, IconWarning, IconChevronRight, IconMore } from "@/components/icons";
+import { Alert } from "@/components/shared/alert";
 
 // The status filter options, in display order. Default is "quarantined" (the open
 // review queue) — NOT a flat "All" that mixes open + handled. "all" shows every zone.
@@ -227,12 +228,9 @@ export function QuarantineView({ initial, now }: { initial: QuarantineListRespon
     <div className="space-y-3">
       {/* Mutation error (release/dismiss/restore/delete) — dismissible. Refetch failures stay silent. */}
       {error && (
-        <div role="alert" className="flex items-start gap-2 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md">
-          <span className="flex-1">{error}</span>
-          <button onClick={() => setError(null)} aria-label="Dismiss error" className="text-rose-500 hover:text-rose-700">
-            ×
-          </button>
-        </div>
+        <Alert edge="inset" className="px-3" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
       )}
 
       {/* Stat strip + status filter + search — all on one flex row. */}

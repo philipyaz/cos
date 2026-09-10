@@ -17,6 +17,7 @@ import {
   starCase,
 } from "@/lib/board-client";
 import { PrimaryButton } from "@/components/shared/action-button";
+import { Alert } from "@/components/shared/alert";
 
 // ── Strategy view ──────────────────────────────────────────────────────────────
 // The OUTLINE ROADMAP, the strategy twin of the operational kanban. It renders the
@@ -455,20 +456,9 @@ export function StrategyView({
       </div>
 
       {error && (
-        <div
-          role="alert"
-          className="mb-3 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md flex items-center gap-2"
-        >
-          <WarnGlyph className="w-3.5 h-3.5 shrink-0" />
-          <span className="flex-1">{error}</span>
-          <button
-            onClick={() => setError(null)}
-            className="text-rose-500 hover:text-rose-700 px-1"
-            aria-label="Dismiss error"
-          >
-            ×
-          </button>
-        </div>
+        <Alert edge="inset" className="mb-3 px-3" onDismiss={() => setError(null)}>
+          {error}
+        </Alert>
       )}
 
       {/* Top-level "New Initiative" composer */}
@@ -1216,22 +1206,6 @@ function PlusGlyph({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 16 16" fill="none" className={className} aria-hidden>
       <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function WarnGlyph({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" className={className} aria-hidden>
-      <path
-        d="M8 1.8L15 14H1L8 1.8z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-        fill="none"
-      />
-      <path d="M8 6.2v3.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <circle cx="8" cy="11.6" r="0.8" fill="currentColor" />
     </svg>
   );
 }

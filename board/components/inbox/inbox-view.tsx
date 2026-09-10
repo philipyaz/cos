@@ -41,11 +41,11 @@ import {
   IconMore,
   IconPlus,
   IconSearch,
-  IconWarning,
 } from "@/components/icons";
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
 import { PrimaryButton } from "@/components/shared/action-button";
+import { Alert } from "@/components/shared/alert";
 import { messageDeepLink } from "@/lib/message-url";
 import {
   createCase,
@@ -540,20 +540,9 @@ export function InboxView({
 
       <div className="flex-1 min-w-0 flex flex-col">
         {error && (
-          <div
-            role="alert"
-            className="px-6 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2"
-          >
-            <IconWarning className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{error}</span>
-            <button
-              onClick={() => setError(null)}
-              className="ml-auto text-rose-500 hover:text-rose-700"
-              aria-label="Dismiss error"
-            >
-              Dismiss
-            </button>
-          </div>
+          <Alert edge="flush" className="px-6" onDismiss={() => setError(null)}>
+            {error}
+          </Alert>
         )}
         {selected ? (
           <MessageDetail

@@ -27,6 +27,7 @@ import { createShoppingItem, updateShoppingItem } from "@/lib/nutrition-client";
 import { groupShoppingByCategory } from "@/lib/nutrition-format";
 import { relativeTime } from "@/lib/format";
 import { IconCart, IconPlus, IconX, IconWarning, IconChevronDown, IconChevronRight } from "@/components/icons";
+import { Alert } from "@/components/shared/alert";
 
 // Category display order + label — mirrors pantry-view.tsx's CATEGORY_LABEL idiom exactly, but
 // keyed to ShoppingCategory. The grouping itself (order + uncategorized-last) lives in
@@ -173,9 +174,9 @@ export function ShoppingView({
               />
             </form>
             {addError && (
-              <p role="alert" className="mt-1.5 text-[11.5px] text-rose-700">
+              <Alert edge="inset" className="mt-1.5 px-3" onDismiss={null}>
                 {addError}
-              </p>
+              </Alert>
             )}
           </div>
 

@@ -16,6 +16,7 @@ import {
 import { IconPlus } from "@/components/icons";
 import { PrimaryButton, DestructiveButton } from "@/components/shared/action-button";
 import { DrawerHeader, DrawerShell } from "@/components/shared/drawer";
+import { Alert } from "@/components/shared/alert";
 
 // The Labels manager — a slide-over for configuring the board's taxonomy entirely
 // from the UI: install role/life bundles in one click, add custom labels, and edit
@@ -170,9 +171,9 @@ export function LabelManager({
       </div>
 
       {error && (
-        <div role="alert" className="mx-5 mt-3 px-3 py-2 text-[12px] text-rose-700 bg-rose-50 border border-rose-100 rounded-md">
+        <Alert edge="inset" className="mx-5 mt-3 px-3" onDismiss={null}>
           {error}
-        </div>
+        </Alert>
       )}
       {notice && (
         <div className="mx-5 mt-3 px-3 py-2 text-[12px] text-amber-800 bg-amber-50 border border-amber-100 rounded-md flex items-start gap-2">
