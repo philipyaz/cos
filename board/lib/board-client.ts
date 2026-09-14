@@ -1145,7 +1145,24 @@ function openSharedStream(): void {
   };
 }
 
-function closeSharedStream(): void {
+// Closing is DEFERRED by a tick, because "the last subscriber left" is routinely
+// followed immediately by "a subscriber arrived": React re-runs a subscribe
+// effect whenever its deps change (strategy-view and board-view both key theirs
+// on a useCallback that moves when the domain / hide-done toggles), and dev-mode
+// StrictMode double-invokes every effect as mount → unmount → mount. Tearing the
+// socket down synchronously would drop and immediately reopen it each time,
+// flapping the "live" dot for no reason. A pending close is cancelled if anyone
+// resubscribes first, so only a genuine teardown reaches the EventSource.
+let pendingClose: ReturnType<typeof setTimeout> | null = null;
+
+function cancelPendingClose(): void {
+  if (pendingClose !== null) {
+    clearTimeout(pendingClose);
+    pendingClose = null;
+  }
+}
+
+function closeSharedStreamNow(): void {
   const es = sharedStream;
   if (!es) return;
   sharedStream = null;
@@ -1171,6 +1188,8 @@ export function subscribeToBoard(onChange: (version: number) => void): () => voi
 
   const sub: BoardSubscriber = { onChange };
   boardSubscribers.add(sub);
+  // Someone arrived before the deferred teardown fired — keep the stream.
+  cancelPendingClose();
 
   if (!sharedStream) {
     openSharedStream();
@@ -1194,8 +1213,14 @@ export function subscribeToBoard(onChange: (version: number) => void): () => voi
     // An intentional teardown of the LAST subscriber resets the shared status to
     // the neutral seed (not "offline") — only a real es.onerror reports "offline".
     if (boardSubscribers.size === 0) {
-      closeSharedStream();
-      setLiveStatus("connecting");
+      cancelPendingClose();
+      pendingClose = setTimeout(() => {
+        pendingClose = null;
+        // Re-check: a subscriber may have arrived while this was queued.
+        if (boardSubscribers.size > 0) return;
+        closeSharedStreamNow();
+        setLiveStatus("connecting");
+      }, 0);
     }
   };
 }
