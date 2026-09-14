@@ -40,16 +40,41 @@ interface VersionedResponse {
   version: number;
 }
 
+// How long a board request may hang before we call it failed. Without this a
+// request that never resolves — a browser connection pool starved by long-lived
+// SSE streams was the real case — leaves the caller pending forever: no data, no
+// catch, no error state, just a surface that silently keeps rendering its empty
+// seed. A visible failure is always better than a permanent maybe.
+const REQUEST_TIMEOUT_MS = 15_000;
+
 // Parse a JSON body, throwing the API's { error } text (or a status fallback) on
 // a non-ok response so the caller gets a meaningful message.
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      ...(init?.body ? { "content-type": "application/json" } : {}),
-      ...init?.headers,
-    },
-  });
+  // Respect a caller-supplied signal; otherwise apply the default timeout. The
+  // typeof guard keeps this import-safe on runtimes without AbortSignal.timeout.
+  const signal =
+    init?.signal ??
+    (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      : undefined);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      signal,
+      headers: {
+        ...(init?.body ? { "content-type": "application/json" } : {}),
+        ...init?.headers,
+      },
+    });
+  } catch (e) {
+    // AbortSignal.timeout aborts with a TimeoutError DOMException; translate it
+    // into the plain Error every call site already knows how to surface.
+    if (e instanceof Error && e.name === "TimeoutError") {
+      throw new Error("The board did not respond in time. Check that it is running, then retry.");
+    }
+    throw e;
+  }
   let body: unknown = null;
   const text = await res.text();
   if (text) {
@@ -984,11 +1009,11 @@ export type LiveStatus = "connecting" | "live" | "offline";
 
 let liveStatus: LiveStatus = "connecting";
 const liveStatusListeners = new Set<(s: LiveStatus) => void>();
-// Ref-count of active subscribeToBoard streams, so an INTENTIONAL unsubscribe
-// (page navigation / unmount) does NOT flip us to "offline" — only es.onerror
-// does. When the last stream is intentionally closed we drop back to the neutral
-// "connecting" seed so a remount starts clean rather than claiming stale "live".
-let liveSubscriberCount = 0;
+// The subscriber tally that used to live here is now just `boardSubscribers.size`
+// (see the Live updates section): with ONE shared stream the Set is the count,
+// and a second copy could only drift from it. Its reason for existing is
+// unchanged — an INTENTIONAL unsubscribe (page navigation / unmount) must NOT
+// flip us to "offline"; only es.onerror does that.
 
 function setLiveStatus(next: LiveStatus): void {
   if (next === liveStatus) return;
@@ -1050,6 +1075,90 @@ export function subscribeToSchemaStatus(cb: (s: SchemaStatus) => void): () => vo
 }
 
 // ── Live updates ─────────────────────────────────────────────────────────────
+// ONE EventSource for the whole app, fanned out to every subscriber.
+//
+// This used to open a fresh `new EventSource("/api/stream")` per subscribe()
+// call, and that is a connection-pool bomb. An SSE stream is held open for the
+// life of the page, the board is served over HTTP/1.1, and a browser allows only
+// SIX concurrent connections per origin. With ~19 subscribe sites (16 views via
+// useLiveBoard, plus board-view, strategy-view and the unanswered panel), a
+// single route already pinned three sockets; clicking through to another module
+// mounts the incoming view's streams BEFORE the outgoing view unmounts, crosses
+// six, and every subsequent request — the RSC navigation payload included —
+// queues forever. The deadlock is self-sustaining: the navigation cannot finish
+// without a socket, and the old streams cannot be released until it does.
+//
+// So the stream is now a module singleton: opened lazily on the first
+// subscriber, shared by all, closed when the last one leaves. One socket, no
+// ceiling, and the per-subscriber contract below is unchanged.
+type BoardSubscriber = { onChange: (version: number) => void };
+
+// Wrapper objects, not bare callbacks: two components that happen to pass the
+// same function reference must still count as two subscribers (a Set of the raw
+// callbacks would collapse them, and the first unsubscribe would silently cut
+// the other one off).
+const boardSubscribers = new Set<BoardSubscriber>();
+let sharedStream: EventSource | null = null;
+// The newest version any frame has carried, replayed to a subscriber that joins
+// an already-open stream so it still gets an initial version to compare against
+// (a per-call stream used to deliver that as its own `hello`).
+let lastSeenVersion: number | null = null;
+
+function handleFrame(ev: MessageEvent): void {
+  try {
+    const data = JSON.parse(ev.data) as {
+      version?: number;
+      degradedRead?: boolean;
+      diskSchemaVersion?: number;
+    };
+    // Feed the schema singleton from any frame that carries the flag, so the
+    // banner tracks the guard live off the stream.
+    if (typeof data.degradedRead === "boolean") {
+      setSchemaStatus({
+        degradedRead: data.degradedRead,
+        diskSchemaVersion: typeof data.diskSchemaVersion === "number" ? data.diskSchemaVersion : null,
+      });
+    }
+    if (typeof data.version === "number") {
+      lastSeenVersion = data.version;
+      // Snapshot before dispatching: a callback may subscribe or unsubscribe
+      // (a view unmounting in response to a refetch) while we iterate.
+      for (const sub of [...boardSubscribers]) sub.onChange(data.version);
+    }
+  } catch {
+    // ignore malformed frames — heartbeats are comments and never reach here
+  }
+}
+
+function openSharedStream(): void {
+  const es = new EventSource("/api/stream");
+  sharedStream = es;
+  // The server emits a `hello` on open and `change` on each write; listen to both.
+  es.addEventListener("hello", handleFrame as EventListener);
+  es.addEventListener("change", handleFrame as EventListener);
+  // Connection lifecycle → status store. onopen ⇒ "live". onerror flips the dot
+  // honest: CLOSED ⇒ "offline" (the browser has given up auto-reconnecting);
+  // otherwise the browser is mid-reconnect (CONNECTING) so we say "connecting".
+  es.onopen = (): void => setLiveStatus("live");
+  es.onerror = (): void => {
+    setLiveStatus(es.readyState === EventSource.CLOSED ? "offline" : "connecting");
+  };
+}
+
+function closeSharedStream(): void {
+  const es = sharedStream;
+  if (!es) return;
+  sharedStream = null;
+  lastSeenVersion = null;
+  es.removeEventListener("hello", handleFrame as EventListener);
+  es.removeEventListener("change", handleFrame as EventListener);
+  // Drop the lifecycle handlers BEFORE close() so the close doesn't fire a
+  // spurious onerror that would falsely flip the shared status to "offline".
+  es.onopen = null;
+  es.onerror = null;
+  es.close();
+}
+
 // Subscribe to the board's SSE stream. `onChange(version)` fires on every
 // `change` event (and the initial `hello`); the caller compares the version to
 // what it last saw and refetches when it's newer (e.g. the agent wrote via MCP).
@@ -1060,55 +1169,32 @@ export function subscribeToBoard(onChange: (version: number) => void): () => voi
     return () => {};
   }
 
-  const es = new EventSource("/api/stream");
-  liveSubscriberCount += 1;
+  const sub: BoardSubscriber = { onChange };
+  boardSubscribers.add(sub);
 
-  const handle = (ev: MessageEvent): void => {
-    try {
-      const data = JSON.parse(ev.data) as {
-        version?: number;
-        degradedRead?: boolean;
-        diskSchemaVersion?: number;
-      };
-      // Feed the schema singleton from any frame that carries the flag, so the
-      // banner tracks the guard live off whichever stream is open.
-      if (typeof data.degradedRead === "boolean") {
-        setSchemaStatus({
-          degradedRead: data.degradedRead,
-          diskSchemaVersion: typeof data.diskSchemaVersion === "number" ? data.diskSchemaVersion : null,
-        });
-      }
-      if (typeof data.version === "number") onChange(data.version);
-    } catch {
-      // ignore malformed frames — heartbeats are comments and never reach here
-    }
-  };
+  if (!sharedStream) {
+    openSharedStream();
+  } else if (lastSeenVersion !== null) {
+    // Joined a stream that is already open, so no `hello` is coming. Replay the
+    // newest version we've seen — off the call stack, so a subscriber's refetch
+    // never runs synchronously inside its own subscribe().
+    const version = lastSeenVersion;
+    queueMicrotask(() => {
+      if (boardSubscribers.has(sub)) sub.onChange(version);
+    });
+  }
 
-  // The server emits a `hello` on open and `change` on each write; listen to both.
-  es.addEventListener("hello", handle as EventListener);
-  es.addEventListener("change", handle as EventListener);
-
-  // Connection lifecycle → status store. onopen ⇒ "live". onerror flips the dot
-  // honest: CLOSED ⇒ "offline" (the browser has given up auto-reconnecting);
-  // otherwise the browser is mid-reconnect (CONNECTING) so we say "connecting".
-  es.onopen = (): void => setLiveStatus("live");
-  es.onerror = (): void => {
-    setLiveStatus(es.readyState === EventSource.CLOSED ? "offline" : "connecting");
-  };
-
+  let unsubscribed = false;
   return () => {
-    es.removeEventListener("hello", handle as EventListener);
-    es.removeEventListener("change", handle as EventListener);
-    // Drop our lifecycle handlers BEFORE close() so the close doesn't fire a
-    // spurious onerror that would falsely flip the shared status to "offline".
-    es.onopen = null;
-    es.onerror = null;
-    es.close();
-    liveSubscriberCount -= 1;
-    // An intentional teardown of the LAST stream resets the shared status to the
-    // neutral seed (not "offline") — only a real es.onerror reports "offline".
-    if (liveSubscriberCount <= 0) {
-      liveSubscriberCount = 0;
+    // Idempotent: React can invoke a cleanup more than once, and a double
+    // decrement would tear down a stream other subscribers are still using.
+    if (unsubscribed) return;
+    unsubscribed = true;
+    boardSubscribers.delete(sub);
+    // An intentional teardown of the LAST subscriber resets the shared status to
+    // the neutral seed (not "offline") — only a real es.onerror reports "offline".
+    if (boardSubscribers.size === 0) {
+      closeSharedStream();
       setLiveStatus("connecting");
     }
   };
