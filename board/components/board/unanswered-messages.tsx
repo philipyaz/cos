@@ -32,12 +32,22 @@ export function UnansweredMessages({
 }) {
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Has a load ever SUCCEEDED? "Nothing waiting — you're all caught up" is a
+  // claim about the user's obligations, and we may only make it on data we
+  // actually received. Before this flag existed, a load that failed (or one that
+  // never resolved at all — a fetch starved by an exhausted connection pool) left
+  // `messages` at its initial [], and the panel cheerfully reported an empty
+  // inbox with eight people waiting on a reply. Never infer "clear" from "no
+  // data": that is the difference between "nothing is waiting" and "I could not
+  // find out", and only one of them is safe to tell someone.
+  const [loaded, setLoaded] = useState(false);
 
   // Pull the unanswered set (newest-first). Best-effort: surfaces the API error text.
   const load = useCallback(async () => {
     try {
       const res = await fetchUnanswered();
       setMessages(res.messages);
+      setLoaded(true);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load unanswered messages.");
@@ -79,7 +89,7 @@ export function UnansweredMessages({
       <DrawerHeader closeLabel="Close unanswered messages" onClose={onClose}>
         <span className="text-[13px] font-semibold text-ink-900">Unanswered</span>
         <span className="text-[11.5px] text-ink-400 tabular-nums">
-          {messages.length} waiting
+          {loaded ? `${messages.length} waiting` : "—"}
         </span>
       </DrawerHeader>
 
@@ -89,16 +99,31 @@ export function UnansweredMessages({
         </Alert>
       )}
 
+      {/* Order matters: rows first, then the three ways there can be none of them.
+          A failed refresh keeps showing the rows we already have (with the Alert
+          above saying the refresh failed) rather than blanking the list. */}
       <div className="flex-1 overflow-y-auto px-5 py-4 pb-safe">
-        {messages.length === 0 ? (
-          <div className="text-[12.5px] text-ink-400 py-10 text-center">
-            Nothing waiting — you&apos;re all caught up
-          </div>
-        ) : (
+        {messages.length > 0 ? (
           <div className="space-y-2">
             {messages.map((m) => (
               <UnansweredRow key={m.id} message={m} cases={cases} onAnswer={onAnswer} />
             ))}
+          </div>
+        ) : error ? (
+          <div className="text-[12.5px] text-ink-400 py-10 text-center">
+            <div>Couldn&apos;t load your unanswered messages.</div>
+            <button
+              onClick={() => void load()}
+              className="mt-2 text-[12px] px-2.5 py-1 rounded-md border border-ink-200 text-ink-900 hover:bg-ink-50 transition pointer-coarse:min-h-11"
+            >
+              Retry
+            </button>
+          </div>
+        ) : !loaded ? (
+          <div className="text-[12.5px] text-ink-400 py-10 text-center">Loading…</div>
+        ) : (
+          <div className="text-[12.5px] text-ink-400 py-10 text-center">
+            Nothing waiting — you&apos;re all caught up
           </div>
         )}
       </div>
