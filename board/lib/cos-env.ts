@@ -1,4 +1,5 @@
-// SERVER-ONLY reader for config/cos.env — the repo's machine-config file.
+// SERVER-ONLY reader for config/cos.env — the repo's machine-config file — and the
+// board's service-port/URL resolver (servicePort/serviceUrl below).
 //
 // config/cos.env is a SHELL env file of QUOTED KEY="value" lines, written by
 // cos-setup / setup-vault. The setup-skills loader (config/load-config.sh) is NOT
@@ -76,6 +77,34 @@ export function machineValue(name: string, fallback: string): string {
   if (env && env.trim()) return env;
   const fromFile = machineEnv()[name];
   return fromFile && fromFile.trim() ? fromFile : fallback;
+}
+
+// Resolve a service's TCP port: process.env[portVar] > cos.env[portVar] > default
+// (the machineValue chain). The add-on catalog serves this on the wire as a NUMBER
+// (board-client.ts AddonView bridge.port) and JSON.stringify turns NaN into null,
+// so a non-numeric or out-of-range configured value degrades to the default —
+// the same guard vault-status.ts's own BRIDGE_PORT IIFE applies.
+export function servicePort(portVar: string, defaultPort: number): number {
+  const n = Number(machineValue(portVar, String(defaultPort)).trim());
+  return Number.isFinite(n) && n > 0 && n < 65536 ? n : defaultPort;
+}
+
+// Resolve a sidecar's BASE URL. A full-URL override (overrideVar, e.g. COS_GUARD_URL)
+// wins outright — tests/run.sh:408-411 points the sandbox board at dead ports through
+// exactly this layer, and ADR 0029 is why that precedence is load-bearing: replace it
+// and the test board reaches the REAL guard sidecar. A blank/whitespace override is
+// treated as unset (machineValue's idiom), where the old `??` chain let "" win; a
+// trailing slash is stripped, matching this shape's two .mjs-side twins —
+// backup/config.mjs's BOARD_URL chain (:143-146) and mcp-kit's baseUrl
+// (packages/mcp-kit/index.mjs:23) — which both are outside the Next root and cannot
+// be imported (the machineValue mirror story, one caller up).
+// `host` is per-service and must match config/load-config.sh's derivation
+// (http://127.0.0.1 for the two sidecars) — passed by the call site, never stored
+// here, so this module holds no URL literal for the port-literal gate to except.
+export function serviceUrl(overrideVar: string, portVar: string, defaultPort: number, host: string): string {
+  const override = process.env[overrideVar];
+  if (override && override.trim()) return override.replace(/\/$/, "");
+  return `${host}:${servicePort(portVar, defaultPort)}`;
 }
 
 // The canonical device-id slug shape (filename-safe; keys manifests, the lease, the

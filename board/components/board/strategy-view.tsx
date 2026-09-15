@@ -293,6 +293,15 @@ export function StrategyView({
   const [fullTree, setFullTree] = useState<TreeNode[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Has a load ever SUCCEEDED? "No initiatives yet" is a claim about the user's roadmap, and
+  // we may only make it off a tree we actually received. refetch's catch never touches `tree`
+  // (it stays at its initial []) and the finally clears `loading`, so without this flag a
+  // failed fetch renders the roadmap as EMPTY rather than unreadable — and because the banner
+  // below is dismissible, dismissing it leaves that false claim alone on screen. `error`
+  // cannot stand in for this: run() and toggleStar both setError(null) on entry, so starting a
+  // create or a star toggle would resurrect the lie. Sticky once true, so a failed REFETCH
+  // keeps the last-known tree (with the banner) rather than blanking it.
+  const [loaded, setLoaded] = useState(false);
   // Per-row composer + create-busy state, keyed so only one form is open at a time.
   const [composer, setComposer] = useState<Composer | null>(null);
   const [busy, setBusy] = useState(false);
@@ -312,6 +321,7 @@ export function StrategyView({
       ]);
       setTree(res.tree);
       setFullTree(full ? full.tree : null);
+      setLoaded(true);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load the roadmap.");
@@ -429,7 +439,11 @@ export function StrategyView({
       <div className="flex items-center gap-3 mb-4">
         <h2 className="text-[15px] font-semibold text-ink-900">Strategy roadmap</h2>
         <span className="text-[12px] text-ink-400">
-          {initiatives.length} initiative{initiatives.length === 1 ? "" : "s"}
+          {/* The count is the same claim as the empty state below — a number of initiatives is
+              only sayable off a tree we actually received, and it survives dismissing the
+              banner exactly as the empty state would. Also stops the header flashing
+              "0 initiatives" for the whole initial load. */}
+          {loaded ? `${initiatives.length} initiative${initiatives.length === 1 ? "" : "s"}` : "—"}
         </span>
 
         {/* Presentation toggle: drop finished leaves to declutter (default ON). The
@@ -475,6 +489,24 @@ export function StrategyView({
 
       {loading ? (
         <div className="text-[13px] text-ink-400 py-10 text-center">Loading the roadmap…</div>
+      ) : !loaded ? (
+        /* The load FAILED — the banner above carries the reason (and stays dismissible, since
+           that same channel carries mutation errors the user must be able to clear). We must
+           NOT fall through to the empty state: "No initiatives yet" is a claim about the
+           roadmap, and we never received one. */
+        <div className="text-[13px] text-ink-400 border border-dashed border-ink-200 rounded-lg py-12 text-center">
+          <div>Couldn&apos;t load the roadmap.</div>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              refetch();
+            }}
+            className="mt-2 text-[12px] px-2.5 py-1 rounded-md border border-ink-200 text-ink-900 hover:bg-ink-50 transition pointer-coarse:min-h-11"
+          >
+            Retry
+          </button>
+        </div>
       ) : initiatives.length === 0 && ungrouped.length === 0 ? (
         <div className="text-[13px] text-ink-400 border border-dashed border-ink-200 rounded-lg py-12 text-center">
           No initiatives yet — create one to group related cases.

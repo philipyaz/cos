@@ -142,6 +142,8 @@ node scripts/mark-skill-uploaded.mjs <skill>|--all|--list   # per-machine receip
   an empty result before reporting it: *never ran* and *ran and produced nothing* are different
   states, and the second beside a non-zero input count is an anomaly to report with both numbers,
   never a reassurance. A check that cannot observe its subject reports UNKNOWN, never clear.
+  **Census a source tree with `git grep` or a `node` walk, never `grep -r`** — one committed
+  NUL byte makes `grep` drop that whole file from `-r`/`-l` output silently, at exit 0.
 - **A new `mcp/*-server` is a root workspace member** — `npm install` at the repo root and commit
   `package-lock.json`, or CI's `npm ci` fails fast.
 - **Never `next build` in `board/` while a `next dev` is running** — they share `.next` and the running
