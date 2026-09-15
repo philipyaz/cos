@@ -31,8 +31,10 @@ const PRIMARY_CLASS =
 
 // SECONDARY_CLASS: the ×6 drawer-footer Cancel spelling this unit (cos-ops#86) replaces
 // (border-ink-200 text-ink-600 hover:bg-white), minus its px-2.5; gap-1.5 and transition are
-// normalizations the canonical spelling lacked. `hover:bg-white` stays deliberately — all seven
-// routed sites are drawer footers on a bg-ink-50/40 bar, where white brightens, and no routed
+// normalizations the canonical spelling lacked. `hover:bg-white` stays deliberately — seven of
+// the eight routed sites are drawer footers on a bg-ink-50/40 bar, where white brightens; the
+// eighth (inbox's phone Back bar, cos-ops#98) sits on white (app/layout.tsx's bg-white chain),
+// where the hover tint is inert and the text/press states carry the feedback. No routed
 // call site overrides it (ADR 0035's exact criterion). The wider 45-site bordered-secondary
 // family is NOT routed through this: its non-footer members hover bg-ink-50 (the white-surface
 // idiom elsewhere), and with no class-merge helper a call-site hover:bg-ink-50 against this
