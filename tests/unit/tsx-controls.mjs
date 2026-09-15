@@ -1,7 +1,10 @@
-// Shared TSX source scanner for the A5 "phone-first controls" gates (cos-ops#82, #83).
+// Shared TSX source scanner, token-matcher and definition-site exclusion idiom for the A5
+// "phone-first controls" gate family (cos-ops#82, #83, #86, #90, #94; folded in by cos-ops#103
+// after four gate files had each hand-copied their own resolver/matcher/exclusion).
 //
-// Built once in step 1 (text-entry-size.test.ts) and reused as-is in step 2
-// (primary-action.test.ts) — same roots, same reporting shape, different tag list.
+// Five consumers as of the fold — text-entry-size.test.ts, primary-action.test.ts,
+// secondary-action.test.ts, drawer-shell.test.ts, alert-consolidation.test.ts — same roots,
+// same reporting shape, each with its own tag list, predicate and failure policy.
 //
 // Why this exists instead of a bare regex (the A5 census's own first attempt): a plain
 // `/<select/` or `/text-\[\d+px\]/` scan over raw source is wrong in BOTH directions on this
@@ -23,8 +26,9 @@
 //   - `resolveExpr`'s ternary handling is a pragmatic "pull every quoted string literal out of
 //     the expression" pass, not a real parser — it matches this tree's actual shapes (a
 //     `cond ? "a" : "b"` inside a template interpolation) and nothing fancier. A ternary whose
-//     arms aren't plain string literals falls through to "unresolved", which the callers'
-//     fail-closed handling turns into a reported violation rather than a silent skip.
+//     arms aren't plain string literals falls through to "unresolved" (`resolved: false`).
+//     Callers do NOT share one policy on that — it is a per-assertion choice, not a module-wide
+//     contract; see `classNameStrings`' own doc below for the exact split (cos-ops#103).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -35,6 +39,13 @@ export function walkTsx(rootDirs) {
   for (const root of rootDirs) walk(root, out);
   out.sort();
   return out;
+}
+
+/** walkTsx minus an explicit list of definition files — the gates' one exclusion idiom
+ * (cos-ops#103): a gate exempts exactly the files that define what it pins, and walks
+ * everything else, including the rest of board/components/shared/. */
+export function walkTsxExcept(rootDirs, definitionFiles) {
+  return walkTsx(rootDirs).filter((f) => !definitionFiles.includes(f));
 }
 
 function walk(dir, out) {
@@ -352,19 +363,23 @@ function extractClassNameFromObjectLiteral(objSrc) {
   return m ? m[2] : null;
 }
 
-/** Resolve a `className={…}` expression's text (bare ident or template literal) to fragments. */
+/** Resolve a `className={…}` expression's text (bare ident or template literal) to fragments,
+ * tagged with the `form` it matched — see `classNameStrings`' doc for the full vocabulary. */
 function resolveExpr(expr, src) {
   if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(expr)) {
     const val = resolveSameFileConst(src, expr);
-    return val !== null ? { fragments: [val], resolved: true } : { fragments: [], resolved: false };
+    return val !== null
+      ? { fragments: [val], resolved: true, form: "const" }
+      : { fragments: [], resolved: false, form: "const" };
   }
   if (expr.startsWith("`") && expr.endsWith("`")) {
     return resolveTemplate(expr.slice(1, -1), src);
   }
-  return { fragments: [], resolved: false };
+  return { fragments: [], resolved: false, form: "expr" };
 }
 
-/** Split a template literal's inner text into static fragments + resolved `${…}` fragments. */
+/** Split a template literal's inner text into static fragments + resolved `${…}` fragments;
+ * always tagged `form: "template"`. */
 function resolveTemplate(inner, src) {
   const fragments = [];
   let resolvedAll = true;
@@ -401,26 +416,41 @@ function resolveTemplate(inner, src) {
     i++;
   }
   fragments.push(inner.slice(staticStart));
-  return { fragments, resolved: resolvedAll };
+  return { fragments, resolved: resolvedAll, form: "template" };
 }
 
 /**
- * Every string fragment reachable from `attrText`'s className: a direct literal; a same-file
- * const identifier; a template literal's static text plus its resolved `${IDENT}` /
- * `${ternary}` interpolations; or, when the tag carries NO className attribute at all, a
- * `{...ident}` spread resolved against a same-file `const ident = { … className: "…" }`.
- * `resolved: false` means something class-bearing was found but couldn't be pinned down —
- * callers fail closed on that, they don't skip it.
+ * Every string fragment reachable from `attrText`'s className, plus `form` — the SHAPE that
+ * produced it: `"literal"` (`className="…"`), `"const"` (`className={IDENT}` resolved against a
+ * same-file `const`), `"template"` (`` className={`…`} ``, static text plus resolved `${IDENT}`
+ * / `${ternary}` interpolations), `"expr"` (any other `{…}` expression, including a
+ * malformed/unmatched-brace one — always unresolved), `"spread"` (a `{...ident}` spread,
+ * resolved against a same-file `const ident = { … className: "…" }`, used only when the tag
+ * carries no className attribute at all), or `"none"` (no className and no spread). `resolved:
+ * false` means something class-bearing was found but couldn't be pinned down.
+ *
+ * Callers do NOT share one failure policy on `resolved: false` — it is a per-assertion choice,
+ * declared in each gate's own header (cos-ops#103, Correction 1): a consolidation walk (drawer-
+ * shell, alert-consolidation) skips an unresolvable tag and states that skip as a floor in its
+ * header; alert-consolidation's `<Alert>` passthrough contract instead fails closed (reports it
+ * as a violation); the two button-pair gates (primary-action, secondary-action) additionally act
+ * only on the STATIC forms (`form === "literal" || form === "const"`) — a template/ternary
+ * className there is deliberate segmented/state-arm styling, not a button spelling to police.
+ *
+ * `form` states the whole shape space so a caller CAN discriminate by it, but only two values
+ * are actually read by any caller today: `"literal"` and `"const"` (the button gates' static-
+ * only check above). `"template"`, `"expr"`, `"spread"` and `"none"` are already fully covered
+ * by `resolved` alone — no caller branches on those four individually.
  */
 export function classNameStrings(attrText, src) {
   const lit = attrLiteral(attrText, "className");
-  if (lit !== null) return { fragments: [lit], resolved: true };
+  if (lit !== null) return { fragments: [lit], resolved: true, form: "literal" };
 
   const idx = attrText.search(/\bclassName\s*=\s*\{/);
   if (idx !== -1) {
     const braceIdx = attrText.indexOf("{", idx);
     const closeIdx = findMatchingBrace(attrText, braceIdx);
-    if (closeIdx === -1) return { fragments: [], resolved: false };
+    if (closeIdx === -1) return { fragments: [], resolved: false, form: "expr" };
     const expr = attrText.slice(braceIdx + 1, closeIdx).trim();
     return resolveExpr(expr, src);
   }
@@ -430,12 +460,24 @@ export function classNameStrings(attrText, src) {
     const objSrc = findSameFileConstObject(src, spread[1]);
     if (objSrc) {
       const cn = extractClassNameFromObjectLiteral(objSrc);
-      if (cn !== null) return { fragments: [cn], resolved: true };
+      if (cn !== null) return { fragments: [cn], resolved: true, form: "spread" };
     }
-    return { fragments: [], resolved: false };
+    return { fragments: [], resolved: false, form: "spread" };
   }
 
-  return { fragments: [], resolved: false };
+  return { fragments: [], resolved: false, form: "none" };
+}
+
+/** Every whitespace-delimited class token in `classString` — whole-token compare, never a
+ * substring, so e.g. `bg-ink-900/90` never matches `bg-ink-900`. */
+export function classTokens(classString) {
+  return classString.split(/\s+/).filter(Boolean);
+}
+
+/** Does `classString` carry every token in `required` (whole-token, via `classTokens`)? */
+export function hasAllTokens(classString, required) {
+  const tokens = classTokens(classString);
+  return required.every((t) => tokens.includes(t));
 }
 
 const NAMED_SIZES = {
