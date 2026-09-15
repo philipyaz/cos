@@ -318,7 +318,7 @@ function ReminderRow({
         disabled={busy}
         aria-label={isOpen ? "Mark done" : "Re-open"}
         title={isOpen ? "Mark done" : "Re-open"}
-        className="shrink-0 text-ink-300 hover:text-lane-done transition disabled:opacity-50"
+        className="shrink-0 inline-flex items-center justify-center pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-ink-300 hover:text-lane-done transition disabled:opacity-50"
       >
         {isOpen ? (
           <IconCircle className="w-4 h-4" />
@@ -357,7 +357,7 @@ function ReminderRow({
       {/* Node chip — id + tier badge (containers) + lane dot + truncated title. */}
       {linked && (
         <span
-          className="shrink-0 inline-flex items-center gap-1.5 max-w-[220px] px-1.5 py-0.5 rounded-md border border-ink-100 bg-ink-50/60 text-[11px]"
+          className="shrink-0 hidden sm:inline-flex items-center gap-1.5 max-w-[220px] px-1.5 py-0.5 rounded-md border border-ink-100 bg-ink-50/60 text-[11px]"
           title={`${linked.id} · ${linked.title}`}
         >
           <span className="tabular-nums text-ink-500 font-medium shrink-0">{linked.id}</span>
@@ -379,7 +379,7 @@ function ReminderRow({
 
       {/* Label chips — resolved against the catalog (muted when an id is unknown). */}
       {labelIds.length > 0 && (
-        <span className="shrink-0 inline-flex items-center gap-1">
+        <span className="shrink-0 hidden sm:inline-flex items-center gap-1">
           {labelIds.map((id) => {
             const def = labelById.get(id);
             return (
@@ -400,7 +400,7 @@ function ReminderRow({
       {/* Task-progress chip — done/total, shown only when the reminder has tasks. */}
       {tasks.length > 0 && (
         <span
-          className="shrink-0 text-[10px] tabular-nums px-1.5 py-0.5 rounded-full font-medium bg-ink-100 text-ink-600"
+          className="shrink-0 hidden sm:inline text-[10px] tabular-nums px-1.5 py-0.5 rounded-full font-medium bg-ink-100 text-ink-600"
           title="Checklist progress"
         >
           {tasksDone}/{tasks.length}
@@ -421,7 +421,7 @@ function ReminderRow({
       {/* Domain chip — optional/advisory. */}
       {reminder.domain && (
         <span
-          className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${domainClasses(
+          className={`shrink-0 hidden sm:inline text-[10px] px-1.5 py-0.5 rounded-full font-medium ${domainClasses(
             reminder.domain,
           )}`}
         >
