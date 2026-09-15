@@ -28,7 +28,6 @@ export interface AddonManifest {
     bridgePortVar: string; // the env var naming the bridge port (config/cos.env)
     defaultPort: number; // the bridge port default (probed for reachability)
     setupSkill: string; // the slash-skill that wires the bridge on a new machine
-    tools: string[]; // the MCP tool names this server exposes
   };
   // OPTIONAL inter-add-on dependencies. A SOFT edge (`required: false`) means this add-on
   // READS another add-on's core-store data and works BETTER with it, but degrades
@@ -67,16 +66,6 @@ const BODY_ADDON: AddonManifest = {
     bridgePortVar: "BODY_BRIDGE_PORT",
     defaultPort: 8012,
     setupSkill: "body-mcp-setup",
-    tools: [
-      "get_body_profile",
-      "set_body_profile",
-      "get_body_objective",
-      "set_body_objective",
-      "log_weight",
-      "list_weights",
-      "delete_weight",
-      "get_body_status",
-    ],
   },
 };
 
@@ -111,41 +100,6 @@ const NUTRITION_ADDON: AddonManifest = {
     bridgePortVar: "NUTRITION_BRIDGE_PORT",
     defaultPort: 8007,
     setupSkill: "nutrition-mcp-setup",
-    tools: [
-      "log_food",
-      "list_food_log",
-      "get_food_log",
-      "update_food_log",
-      "delete_food_log",
-      "read_pantry",
-      "add_pantry_item",
-      "update_pantry_item",
-      "remove_pantry_item",
-      "plan_meal",
-      "list_meal_plan",
-      "get_meal_plan",
-      "update_meal_plan",
-      "remove_meal_plan",
-      // v15 calendar placement (idempotent, overlap-safe; the meal-plan twin of fitness's
-      // push_plan_to_calendar).
-      "push_meal_plan_to_calendar",
-      // v14 dietary profile (the ONE dietary endpoint: allergies/dietType/notes/philosophy).
-      "get_diet_profile",
-      "set_diet_profile",
-      // v14 AGENT-authored daily nutrition targets (gated writes; ungated reads) — replaces the
-      // old engine-computed get_nutrition_targets, which is re-pointed at the latest artifact.
-      "save_nutrition_targets",
-      "list_nutrition_targets",
-      "get_nutrition_targets",
-      // (v14 hard-cut: log_weight/list_weights moved to the body add-on; get/set_nutrition_goal
-      //  removed — the free-text body objective replaces the goal singleton.)
-      // v16 shopping list (cos-ops#37)
-      "list_shopping",
-      "add_shopping_item",
-      "update_shopping_item",
-      "remove_shopping_item",
-      "get_shopping_candidates",
-    ],
   },
 };
 
@@ -188,36 +142,6 @@ const FITNESS_ADDON: AddonManifest = {
     bridgePortVar: "FITNESS_BRIDGE_PORT",
     defaultPort: 8011,
     setupSkill: "fitness-mcp-setup",
-    // Tool names stay health-descriptive (they act on health data), exactly as nutrition's
-    // tools are log_food/read_pantry — a tool name describes its action, not the add-on id.
-    tools: [
-      "push_health_data",
-      "list_health_data",
-      "get_health_summary",
-      "get_daily_summary",
-      "delete_health_data",
-      "get_health_trends",
-      "ingest_health_to_vault",
-      // Athlete profile singleton (add-on-gated set; ungated get) + the two board-computed
-      // signals the coach interprets (form score, sleep/performance correlations; ungated).
-      "get_athlete_profile",
-      "set_athlete_profile",
-      "get_form_score",
-      "get_correlations",
-      // v13 stateful coaching artifacts (add-on-gated writes; ungated reads).
-      "save_training_plan",
-      "save_weekly_review",
-      "save_pre_workout_brief",
-      "save_correlation_report",
-      "list_coaching_artifacts",
-      "get_coaching_artifact",
-      "delete_coaching_artifact",
-      // v15 calendar placement (idempotent, overlap-safe; the training-plan twin of
-      // nutrition's push_meal_plan_to_calendar).
-      "push_plan_to_calendar",
-      // cos-ops#19: the per-day close-out write (targeted; no whole-artifact re-save).
-      "set_plan_day_outcome",
-    ],
   },
 };
 
