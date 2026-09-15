@@ -61,7 +61,13 @@ const TEMPLATE_VAULT_NAME = "example-vault";
 
 // The vault MCP bridge port — config/cos.env VAULT_BRIDGE_PORT, else the architectural
 // default 8005 (board=8001 · openwhispr=8002 · calendar=8003 · guard=8004 · vault=8005).
-const BRIDGE_PORT = ((): number => {
+// DELIBERATELY cos.env > default only — no process.env layer. This predates and is
+// spared by cos-ops#99's servicePort/serviceUrl resolver (board/lib/cos-env.ts): routing
+// this site through servicePort would add a process.env[VAULT_BRIDGE_PORT] layer this
+// existing, correct chain never had — a live behaviour change no AC there asked for.
+// Exported so the vault status route (app/api/vault/status/route.ts) can report this
+// SAME value instead of re-deriving or hardcoding its own copy.
+export const BRIDGE_PORT = ((): number => {
   const raw = COS_ENV.VAULT_BRIDGE_PORT;
   if (nonEmpty(raw)) {
     const n = Number(raw.trim());
@@ -69,7 +75,7 @@ const BRIDGE_PORT = ((): number => {
   }
   return 8005;
 })();
-const BRIDGE_URL = `http://127.0.0.1:${BRIDGE_PORT}/mcp`;
+export const BRIDGE_URL = `http://127.0.0.1:${BRIDGE_PORT}/mcp`;
 
 // The embedded Agent SDK model the vault MCP runs (COS_VAULT_MODEL default, mirroring
 // mcp/vault-server). The board only DISPLAYS it; it does not launch the MCP.

@@ -2,13 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { readDB } from "@/lib/store";
 import type { CaseRecord, MessageRecord, Task, Reminder, DBShape, CaseDomain, CaseStatus } from "@/lib/types";
 import { VALID_CASE_STATUS, VALID_DOMAIN } from "@/lib/types";
+import { serviceUrl } from "@/lib/cos-env";
 
 export const dynamic = "force-dynamic";
 
 // The semantic search sidecar (search/sidecar.py, :8008). Reachable over HTTP;
 // the board is the ONLY caller. It is OPTIONAL — every POST below is fail-safe and
 // falls back to the local keyword matcher on ANY sidecar trouble (see POST).
-const SIDECAR_URL = process.env.COS_SEARCH_URL ?? "http://127.0.0.1:8008";
+const SIDECAR_URL = serviceUrl("COS_SEARCH_URL", "SEARCH_SIDECAR_PORT", 8008, "http://127.0.0.1");
 const SIDECAR_TIMEOUT_MS = 800; // hard cap — a slow/wedged sidecar must never stall the board
 const MAX_QUERIES = 32; // batch ceiling (adversary M2 — an unbounded batch is a DoS lever)
 

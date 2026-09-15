@@ -25,10 +25,11 @@ import type {
   TrustRecord,
   TrustTier,
 } from "./types";
+import { serviceUrl } from "./cos-env";
 
 // The guard trust sidecar. Reachable over HTTP; the board is the ONLY caller.
 // 127.0.0.1 (loopback) by design — the whitelist is local-machine state.
-export const GUARD_URL = process.env.COS_GUARD_URL ?? "http://127.0.0.1:8009";
+export const GUARD_URL = serviceUrl("COS_GUARD_URL", "GUARD_SIDECAR_PORT", 8009, "http://127.0.0.1");
 
 // Hard cap — a slow/wedged sidecar must never stall a board route or an SSR page
 // render. Mirrors the search route's SIDECAR_TIMEOUT_MS (800ms); the trust store

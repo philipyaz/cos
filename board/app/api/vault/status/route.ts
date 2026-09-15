@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchVaultStatus } from "@/lib/vault-status";
+import { fetchVaultStatus, BRIDGE_PORT, BRIDGE_URL } from "@/lib/vault-status";
 import type { VaultStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -39,8 +39,8 @@ export async function GET(): Promise<NextResponse> {
       stats: null,
       mcp: {
         server: "vault",
-        port: 8005,
-        url: "http://127.0.0.1:8005/mcp",
+        port: BRIDGE_PORT,
+        url: BRIDGE_URL,
         model: "claude-sonnet-4-6",
         knowledgeOnly: true,
         tools: [
@@ -57,7 +57,7 @@ export async function GET(): Promise<NextResponse> {
           },
         ],
       },
-      bridge: { reachable: null, port: 8005, url: "http://127.0.0.1:8005/mcp" },
+      bridge: { reachable: null, port: BRIDGE_PORT, url: BRIDGE_URL },
       setupCommand:
         "Set up my private knowledge vault — copy the example-vault template to vault/<name>, " +
         "point the vault MCP bridge (:8005) at it, and register it with Obsidian. Use the setup-vault skill.",

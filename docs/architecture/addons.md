@@ -67,7 +67,7 @@ export interface AddonManifest {
   mcp: {
     server: string;       // the MCP registry name (.mcp.json key)
     bridgePortVar: string;// the env var naming the bridge port (config/cos.env)
-    defaultPort: number;  // the bridge port default (probed for reachability)
+    defaultPort: number;  // the bridge port fallback (bridgePortVar's resolved value is what gets probed)
     setupSkill: string;   // the slash-skill that wires the bridge on a new machine
     tools: string[];      // the MCP tool names this server exposes
   };
