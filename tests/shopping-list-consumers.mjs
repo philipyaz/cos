@@ -23,11 +23,10 @@
 //     mode, so the always-run copy here is the real enforcement; the api test's copy exists
 //     only to satisfy the issue's own naming of that file.
 //
-// The tool floor is read from mcp/nutrition-server/server.mjs's own `TOOLS` array — ground
-// truth in code — and cross-checked (not trusted) against board/lib/addons.ts's nutrition
-// manifest, which the plan documents as already 2-tool drifted (reconcile_pantry /
-// get_nutrition_status are served but unlisted there); deriving THIS gate's floor from that
-// manifest would be the #18 defect one level up.
+// The tool floor is read from mcp/nutrition-server/server.mjs's own `TOOLS` array — ground truth
+// in code. (The old cross-check against board/lib/addons.ts's mcp.tools is gone WITH the field:
+// cos-ops#104 deleted the hand-maintained copy — it had drifted 2 tools behind the server for 47
+// days — so the server is now the only tool list there is.)
 //
 // Fixed-phrase checks are matched case-INSENSITIVELY, with backtick/asterisk markdown stripped
 // first (a guardrail phrase is prose — a sentence-initial capital or a code-span is a style
@@ -43,7 +42,6 @@ import { REPO_ROOT } from "../config/load-config.mjs";
 const ENGINE_FILE = join(REPO_ROOT, "board", "lib", "shopping-candidates.ts");
 const SKILL_FILE = join(REPO_ROOT, "board", ".claude", "skills", "nutrition-chef", "SKILL.md");
 const SERVER_FILE = join(REPO_ROOT, "mcp", "nutrition-server", "server.mjs");
-const ADDONS_FILE = join(REPO_ROOT, "board", "lib", "addons.ts");
 const ROUTE_FILES = [
   join(REPO_ROOT, "board", "app", "api", "nutrition", "shopping", "route.ts"),
   join(REPO_ROOT, "board", "app", "api", "nutrition", "shopping", "[id]", "route.ts"),
@@ -108,9 +106,8 @@ for (const key of keys) {
   );
 }
 
-// --- job 2: parse mcp/nutrition-server/server.mjs's TOOLS array — ground truth in code, NOT
-// addons.ts's manifest (which the plan documents as already 2-tool drifted: reconcile_pantry /
-// get_nutrition_status are served but unlisted there). -------------------------------------------
+// --- job 2: parse mcp/nutrition-server/server.mjs's TOOLS array — ground truth in code (the
+// server registers its tools; since cos-ops#104 nothing else declares them). ---------------------
 const serverSrc = readFileSync(SERVER_FILE, "utf8");
 const toolsArrayMatch = serverSrc.match(/const TOOLS = \[([\s\S]*?)\n\];/);
 if (!toolsArrayMatch) {
@@ -130,21 +127,9 @@ check(
     `tool's own 'name' field, not a hand-maintained manifest`,
 );
 
-// --- every shopping tool must be named inside JOB 6, AND present in addons.ts's nutrition
-// manifest (a mini sync-check that enforces the AC's registration requirement without trusting
-// the manifest as the floor's SOURCE). -----------------------------------------------------------
-const addonsSrc = readFileSync(ADDONS_FILE, "utf8");
-const nutritionAddonMatch = addonsSrc.match(/const NUTRITION_ADDON: AddonManifest = \{[\s\S]*?\n\};/);
-if (!nutritionAddonMatch) {
-  console.error(`[shopping-list-consumers] could not find 'const NUTRITION_ADDON: AddonManifest = { … };' in ${ADDONS_FILE}`);
-  process.exit(1);
-}
-const nutritionToolsMatch = nutritionAddonMatch[0].match(/tools:\s*\[([\s\S]*?)\]/);
-const manifestTools = nutritionToolsMatch ? [...nutritionToolsMatch[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]) : [];
-
+// --- every shopping tool must be named inside JOB 6 ---------------------------------------------
 for (const name of shoppingToolNames) {
   check(job6.includes(name), `JOB 6 names the tool '${name}' — not found as a literal substring of the JOB 6 section`);
-  check(manifestTools.includes(name), `board/lib/addons.ts's NUTRITION_ADDON.mcp.tools lists '${name}'`);
 }
 
 // --- job 3: fixed, load-bearing, SECTION-SCOPED phrases (few, individually named) ---------------
