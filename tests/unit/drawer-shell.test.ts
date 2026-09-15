@@ -4,20 +4,25 @@
 // the PR body's per-drawer statement and DoD 6, not by a gate here (same split
 // primary-action.test.ts's own header describes for the button family).
 //
-// Shares tsx-controls.mjs's scanner with primary-action.test.ts / secondary-action.test.ts, and
-// copies their NARROW resolver (`staticClassNameLiteral`: a literal `className="…"`, or
-// `className={IDENT}` resolving to a same-file string const) byte-for-byte — a third copy,
-// recorded as deliberate parity (folding it into tsx-controls.mjs would edit two shipped gate
-// files; no AC here licenses that, so it is residue, not a defect).
+// Shares tsx-controls.mjs's scanner, resolver, token-matcher and exclusion helper with every
+// other A5 gate — cos-ops#103 folded what were four hand-copied `staticClassNameLiteral`/
+// `classTokens`/`hasAllTokens` copies and two incompatible definition-site exclusion idioms into
+// that one shared module; this file no longer carries any of its own.
 //
 // ── Scope ─────────────────────────────────────────────────────────────────────────────────────
 // ROOTS are `board/components` + `board/app`, inherited from both shipped gates — so
 // `board/lib` (which legitimately holds class MAPS, e.g. format.ts's LABEL_CHIP family) is never
 // walked, and AC 1's "anywhere under board/" is enforced at the same breadth every A5 gate uses,
-// not literally every file under `board/`. The exclusion is the whole `board/components/shared/`
-// DIRECTORY, not one named file — unlike the two shipped gates (which exclude a single
-// PRIMITIVE_DEFINITION_FILE), because three primitive files (field.tsx, action-button.tsx,
-// drawer.tsx) live there now, all definition-side.
+// not literally every file under `board/`. The exclusion is `walkTsxExcept(ROOTS, [DRAWER_FILE])`
+// — exactly the one file that defines what this gate pins, not the whole
+// `board/components/shared/` DIRECTORY (the pre-fold rule, and false even then: `shared/` holds
+// seven files, not three, and six of them — action-button.tsx, field.tsx, alert.tsx,
+// markdown.tsx, message-link.tsx, source-icon.tsx — are reachable by this walk now, including
+// markdown.tsx's own hand-rolled interactive `<button>`, cos-ops#103's own motivating example).
+//
+// Declared skip floor (cos-ops#103, Correction 1): an unresolvable or className-less opening tag
+// is invisible to this walk — `classNameStrings` reports `resolved: false` and the scan skips it
+// rather than reporting it (measured count in the PR body).
 //
 // Scope is ANY opening tag (derived per file, exactly as secondary-action.test.ts's visibility
 // assertion does), not `<button>/<a>/<Link>` — the drawer header string sits on a `<div>`.
@@ -62,13 +67,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { walkTsx, stripComments, openingTags, attrLiteral } from "./tsx-controls.mjs";
+import { stripComments, openingTags, classNameStrings, hasAllTokens, walkTsxExcept } from "./tsx-controls.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const ROOTS = [path.join(REPO_ROOT, "board/components"), path.join(REPO_ROOT, "board/app")];
 const DRAWER_FILE = path.join(REPO_ROOT, "board/components/shared/drawer.tsx");
-const SHARED_DIR = path.join(REPO_ROOT, "board/components/shared") + path.sep;
 
 const CLOSE_TOKENS = [
   "ml-auto",
@@ -101,34 +105,13 @@ function relPath(file: string): string {
   return path.relative(REPO_ROOT, file);
 }
 
-/** Every whitespace-delimited class token in `classString` (whole-token compare — never a
- * substring — so e.g. `bg-ink-900/90` never matches `bg-ink-900`). */
-function classTokens(classString: string): string[] {
-  return classString.split(/\s+/).filter(Boolean);
-}
-
-function hasAllTokens(classString: string, required: string[]): boolean {
-  const tokens = classTokens(classString);
-  return required.every((t) => tokens.includes(t));
-}
-
-/** `className="…"`, or `className={IDENT}` resolved against a same-file `const IDENT = "…"` —
- * deliberately nothing wider (see header). Returns the literal string, or null. Byte-for-byte
- * copy of primary-action.test.ts's / secondary-action.test.ts's own helper (see header — a third
- * copy, recorded as residue rather than folded into tsx-controls.mjs). */
-function staticClassNameLiteral(attrText: string, src: string): string | null {
-  const lit = attrLiteral(attrText, "className");
-  if (lit !== null) return lit;
-
-  const m = attrText.match(/\bclassName\s*=\s*\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/);
-  if (!m) return null;
-  const identRe = new RegExp(`\\bconst\\s+${m[1]}\\s*(?::[^=]+)?=\\s*(["'])((?:(?!\\1).)*)\\1`);
-  const cm = src.match(identRe);
-  return cm ? cm[2] : null;
-}
-
-function scanDrawerClasses(): { closeViolations: string[]; headerViolations: string[]; filesWalked: number } {
-  const files = walkTsx(ROOTS).filter((f) => !f.startsWith(SHARED_DIR));
+function scanDrawerClasses(): {
+  closeViolations: string[];
+  headerViolations: string[];
+  filesWalked: number;
+  files: string[];
+} {
+  const files = walkTsxExcept(ROOTS, [DRAWER_FILE]);
   const closeViolations: string[] = [];
   const headerViolations: string[] = [];
 
@@ -139,8 +122,9 @@ function scanDrawerClasses(): { closeViolations: string[]; headerViolations: str
     const tagNames = [...new Set([...src.matchAll(/<([A-Za-z][A-Za-z0-9]*)/g)].map((m) => m[1]))];
 
     for (const { tag, attrText, line } of openingTags(src, tagNames)) {
-      const lit = staticClassNameLiteral(attrText, src);
-      if (lit === null) continue;
+      const { fragments, resolved } = classNameStrings(attrText, src);
+      if (!resolved) continue; // unresolvable or absent className — invisible to this walk (floor: header)
+      const lit = fragments.join(" ");
       if (hasAllTokens(lit, CLOSE_TOKENS)) {
         closeViolations.push(`${relPath(file)}:${line} — <${tag}> className="${lit}"`);
       }
@@ -149,7 +133,7 @@ function scanDrawerClasses(): { closeViolations: string[]; headerViolations: str
       }
     }
   }
-  return { closeViolations, headerViolations, filesWalked: files.length };
+  return { closeViolations, headerViolations, filesWalked: files.length, files };
 }
 
 test("consolidation: no opening tag outside board/components/shared/ carries the drawer Close token set", () => {
@@ -198,4 +182,12 @@ test("routing floor: every one of the nine drawers imports shared/drawer", () =>
 test("vacuous-pass floor: the walk actually reaches a meaningful number of files", () => {
   const { filesWalked } = scanDrawerClasses();
   assert.ok(filesWalked >= 40, `expected to walk >=40 .tsx/.ts files, got ${filesWalked}`);
+});
+
+test("coverage floor: the narrowed exclusion walks the non-definition shared/ files (cos-ops#103)", () => {
+  const { files } = scanDrawerClasses();
+  assert.ok(
+    files.includes(path.join(REPO_ROOT, "board/components/shared/markdown.tsx")),
+    "expected the walk to include board/components/shared/markdown.tsx (excluded only drawer.tsx, not the whole shared/ directory)",
+  );
 });
