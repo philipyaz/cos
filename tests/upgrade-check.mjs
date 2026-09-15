@@ -4,7 +4,9 @@
 // silently drop a step (the whole point of the script is that every one of these is a
 // SILENT no-op when forgotten — a stale board build, a bridge on old code, a bundle Cowork
 // never re-received, a scheduled trigger nobody created). Hermetic: no board, no launchd,
-// no config; the CLI smoke test builds a throwaway git repo in $TMPDIR.
+// no config; the CLI smoke test builds a throwaway git repo in $TMPDIR. Also pins
+// parseToolNames over the REAL mcp/*-server sources (cos-ops#104): a server's
+// `new Server({name, version})` self-registration is never a tool.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -45,6 +47,10 @@ check(entrySourceDir(manifest[0], R) === "mcp/board-server", "entrySourceDir: a 
 check(entrySourceDir(manifest[2], R) === "guard", "entrySourceDir: a uvicorn sidecar → its dir");
 check(entrySourceDir(manifest[5], R) === null, "entrySourceDir: an external exec (outside the repo) → null");
 check(parseToolNames('const T = [\n  {\n    name: "list_x",\n  },\n  { name: "add_x" },\n];\n// name: "not_a_tool"\n  name: "zz_last"').join(",") === "add_x,list_x,zz_last", "parseToolNames: line-leading name: declarations, sorted, comments ignored");
+check(
+  parseToolNames('const server = new Server(\n  { name: "boardish", version: "3.8.0" },\n  { capabilities: { tools: {} } }\n);\nconst s2 = new Server(\n  {\n    name: "vaultish",\n    version: "2.0.0",\n  },\n  { capabilities: { tools: {} } }\n);\nconst s3 = new Server({ name: "bodyish", version: "1.0.0" }, {});\nconst T = [\n  { name: "add_x" },\n];').join(",") === "add_x",
+  "parseToolNames: a server's own new Server({ name, version }) self-registration is never a tool — two-line house form and fully-exploded form (the one-line form never matched: grammar row, not a discriminator)",
+);
 
 console.log("upgrade-check · automation diff");
 const au = diffAutomation(
@@ -205,5 +211,38 @@ check(
   `docs/reference/migration.md has a "v${codeSchema - 1} → v${codeSchema} — …" ledger entry for the current SCHEMA_VERSION (a bump without its ledger line is red here)`,
 );
 
-console.log(failed ? `\nFAIL — ${failed} upgrade-check check(s) failed.` : "\nPASS — upgrade-check: planner + CLI + ledger contract.");
+// ── repo contract: parseToolNames over the real servers (cos-ops#104) ─────────────────────
+// A server names ITSELF in its `new Server({ name, version })` call, and six of the eight
+// servers write that call multi-line — the old parser reported each of those self-names as a
+// tool, so toolDelta gained a phantom "nutrition"/"fitness" entry whenever a server's dir first
+// changed in a range, and a formatting-only REFLOW of the call flipped the parse (collapse
+// nutrition's → removed:["nutrition"]; expand body's → added:["body"]). Property, not counts:
+// a count pin would re-install the hand-maintained-copy drift this unit deletes from addons.ts;
+// the self-name exclusion is stable under real tool additions. House convention, carried here
+// from its only prior written home (the addons.ts fitness narration this unit deletes): a tool
+// name describes its ACTION, never the add-on/server id — that is why a server id appearing in
+// the parse can only be the self-registration, and why the exclusion is never red on a correct
+// build. Each server must also REGISTER itself under its directory's id (asserted below), or a
+// renamed registration would leave the exclusion quietly vacuous while the parser stayed broken.
+// The read-set (server.mjs + tools.mjs, missing → "") mirrors the consumer's own loop in
+// scripts/upgrade-check.mjs (toolDelta); the corpus is the eight mcp/*-server dirs BY DESIGN —
+// deliberately narrower than the consumer's descriptor-derived manifest (guard/, search/,
+// backup/, mcp/whatsapp, vaultjobs carry no server.mjs and would only trip the non-empty floor).
+// Floors per ADR 0041/0038: the walk states its corpus (>= 8 dirs) and every server must parse
+// NON-empty, so a parser regressed to match-nothing cannot go vacuously green on the exclusion.
+console.log("upgrade-check · parseToolNames over the real servers");
+const serverDirs = fs.readdirSync(path.join(REPO, "mcp")).filter((d) => d.endsWith("-server")).sort();
+check(serverDirs.length >= 8, `mcp/ holds >= 8 *-server dirs (got ${serverDirs.length})`);
+for (const d of serverDirs) {
+  const id = d.slice(0, -"-server".length);
+  const src = ["server.mjs", "tools.mjs"]
+    .map((f) => { try { return fs.readFileSync(path.join(REPO, "mcp", d, f), "utf8"); } catch { return ""; } })
+    .join("\n");
+  const names = parseToolNames(src);
+  check(names.length > 0, `${d}: parseToolNames finds at least one tool (got ${names.length})`);
+  check(new RegExp(`name:\\s*"${id}"\\s*,\\s*version`).test(src), `${d}: registers itself under its directory's id — keeps the exclusion below non-vacuous`);
+  check(!names.includes(id), `${d}: the server's own "${id}" self-registration is not reported as a tool`);
+}
+
+console.log(failed ? `\nFAIL — ${failed} upgrade-check check(s) failed.` : "\nPASS — upgrade-check: planner + CLI + ledger contract + parseToolNames over the real servers.");
 process.exit(failed ? 1 : 0);

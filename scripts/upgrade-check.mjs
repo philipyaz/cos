@@ -118,10 +118,13 @@ export function entrySourceDir(entry, repoRoot) {
   return null;
 }
 
-/** MCP tool names declared in a server source (`name: "tool_name"` at the start of a line). */
+/** MCP tool names declared in a server source (`name: "tool_name"` at the start of a line).
+ *  A name immediately followed by a `version:` property is the server's own
+ *  `new Server({ name, version })` self-registration, not a tool — excluded so a reflow of
+ *  that call cannot move toolDelta (cos-ops#104). */
 export function parseToolNames(source) {
   const out = new Set();
-  for (const m of (source || "").matchAll(/^\s*\{?\s*name:\s*"([a-z][a-z0-9_]*)"/gm)) out.add(m[1]);
+  for (const m of (source || "").matchAll(/^\s*\{?\s*name:\s*"([a-z][a-z0-9_]*)"(?!\s*,\s*version\s*:)/gm)) out.add(m[1]);
   return [...out].sort();
 }
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readDB } from "@/lib/store";
 import { listAddons, isAddonEnabled } from "@/lib/addons";
+import { servicePort } from "@/lib/cos-env";
 
 export const dynamic = "force-dynamic";
 
@@ -37,18 +38,18 @@ export async function GET() {
   const db = await readDB();
 
   const addons = await Promise.all(
-    listAddons().map(async (a) => ({
-      id: a.id,
-      title: a.title,
-      description: a.description,
-      icon: a.icon,
-      navItems: a.navItems,
-      enabled: isAddonEnabled(db, a.id),
-      bridge: {
-        port: a.mcp.defaultPort,
-        reachable: await probeBridge(a.mcp.defaultPort),
-      },
-    }))
+    listAddons().map(async (a) => {
+      const port = servicePort(a.mcp.bridgePortVar, a.mcp.defaultPort);
+      return {
+        id: a.id,
+        title: a.title,
+        description: a.description,
+        icon: a.icon,
+        navItems: a.navItems,
+        enabled: isAddonEnabled(db, a.id),
+        bridge: { port, reachable: await probeBridge(port) },
+      };
+    })
   );
 
   return NextResponse.json({ addons, version: db.version });

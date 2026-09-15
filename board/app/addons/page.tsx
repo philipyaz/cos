@@ -1,5 +1,6 @@
 import { readDB } from "@/lib/store";
 import { ADDON_REGISTRY, isAddonEnabled } from "@/lib/addons";
+import { servicePort } from "@/lib/cos-env";
 import { TopBar } from "@/components/topbar";
 import { AddonsView } from "@/components/addons/addons-view";
 import type { AddonView } from "@/lib/board-client";
@@ -31,7 +32,7 @@ export default async function AddonsPage() {
     icon: a.icon,
     navItems: a.navItems,
     enabled: isAddonEnabled(db, a.id),
-    bridge: { port: a.mcp.defaultPort, reachable: false },
+    bridge: { port: servicePort(a.mcp.bridgePortVar, a.mcp.defaultPort), reachable: false },
   }));
 
   return (

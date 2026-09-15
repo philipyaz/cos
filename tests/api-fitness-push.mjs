@@ -60,8 +60,15 @@ const GET = (p) => api("GET", p);
 const POST = (p, b, h) => api("POST", p, b, h);
 const PATCH = (p, b, h) => api("PATCH", p, b, h);
 
-// The target day for the whole round-trip.
-const DAY = "2026-06-15";
+// The target day for the whole round-trip — RELATIVE to today on purpose. pushEntries
+// (board/lib/fitness.ts:75-79) purges anything older than RETENTION_DAYS (90) inside the
+// SAME mutate() that accepts it, and returns the PRE-purge `accepted`, so a hardcoded day
+// is a time bomb: it 201s, writes nothing, and every aggregate read below comes back empty
+// — which reads as "the HRV/sleep canonicalization bug is alive" and is not. The previous
+// literal "2026-06-15" survived its 90th day and died on its 91st (2026-09-14), taking
+// main red with it. Two days back keeps the workout's 17:00Z start in the past and stays
+// far from both retention edges.
+const DAY = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
 
 // A realistic Health-Auto-Export METRICS export: a sleep night + an HRV series. HAE
 // timestamps are "YYYY-MM-DD HH:MM:SS +ZZZZ"; the converter keys entries by calendar day.
@@ -122,6 +129,20 @@ async function main() {
     // Enable the add-on so the push writes land.
     const enable = await PATCH("/api/addons/fitness", { enabled: true });
     check(enable.status === 200, `PATCH enable fitness → 200 (got ${enable.status})`);
+
+    // A DAY that has aged out of the retention window would 201 and then be purged inside
+    // the same mutate() (board/lib/fitness.ts:75-79), turning the ten aggregate reads below
+    // into a misleading canonicalization-bug cascade. Fail here instead, with one accurate
+    // message. This re-derives the cutoff approximately (the server uses local setDate(-90)
+    // rendered through toISOString), so it is an early-warning tripwire rather than a tight
+    // assert — DAY sits 88 days clear of it. Deliberately NOT `body.purged === 0`: `purged`
+    // counts every entry in the store that crossed the cutoff during that mutate, so against
+    // a live store carrying aging watch history it would go red for an unrelated reason.
+    const retentionCutoff = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
+    check(
+      DAY >= retentionCutoff,
+      `DAY (${DAY}) is inside pushEntries' 90-day retention window (cutoff ${retentionCutoff})`,
+    );
 
     // ── 1. PUSH the HAE metrics (sleep + HRV) and the workout ───────────────
     const pushMetrics = await POST("/api/fitness/push", haeMetrics());
