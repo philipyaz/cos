@@ -44,7 +44,7 @@ import {
 } from "@/components/icons";
 import { SourceIcon } from "@/components/shared/source-icon";
 import { MessageLink } from "@/components/shared/message-link";
-import { PrimaryButton } from "@/components/shared/action-button";
+import { PrimaryButton, SecondaryButton } from "@/components/shared/action-button";
 import { Alert } from "@/components/shared/alert";
 import { messageDeepLink } from "@/lib/message-url";
 import {
@@ -91,6 +91,13 @@ export function InboxView({
   const [engine, setEngine] = useState<"semantic" | "keyword" | null>(null);
   const [searching, setSearching] = useState(false);
   const seq = useRef(0); // guards against out-of-order /api/search responses
+
+  // Which pane the phone (below md) is showing. `selectedId` cannot carry this:
+  // it is non-null from mount (seeded below) and the reconciliation effect keeps
+  // it non-null while the list is non-empty — "a message is selected" is the
+  // steady state, not evidence the user opened it. At `md`+ both panes render
+  // regardless and this state is inert.
+  const [pane, setPane] = useState<"list" | "detail">("list");
 
   // Seed the selection from the DEFAULT view (newest-first), not raw store order,
   // so the opened/highlighted message matches the top of the rendered list on load.
@@ -240,9 +247,11 @@ export function InboxView({
     }
   }
 
-  // Selecting a message marks it read (mirrors "opening" it).
+  // Selecting a message marks it read (mirrors "opening" it) and, on the phone,
+  // switches to the detail pane.
   function selectMessage(id: string): void {
     setSelectedId(id);
+    setPane("detail");
     const m = messages.find((x) => x.id === id);
     if (m && !m.read) void setRead(id, true);
   }
@@ -306,7 +315,24 @@ export function InboxView({
 
   return (
     <div className="flex-1 flex min-h-0">
-      <div className="w-[380px] shrink-0 border-r border-ink-100 flex flex-col">
+      <div
+        className={`${
+          pane === "detail" ? "hidden md:flex" : "flex"
+        } w-full md:w-[380px] md:shrink-0 border-r border-ink-100 flex-col`}
+      >
+        {/* Below md the detail column (which owns the error banner at md+) can be
+            display:none while the list is up — a failed mark-read/bulk write would
+            surface into a hidden pane. This twin keeps the SAME error visible from
+            the list pane; exactly one of the two is ever visible at any width. The
+            md:hidden rides a wrapper div because Alert's className is contracted to
+            spacing-only tokens (shared/alert.tsx header; gate-enforced). */}
+        {error && (
+          <div className="md:hidden">
+            <Alert edge="flush" className="px-4" onDismiss={() => setError(null)}>
+              {error}
+            </Alert>
+          </div>
+        )}
         <div className="h-12 px-4 flex items-center gap-2 border-b border-ink-100">
           <IconInbox className="w-4 h-4 text-ink-400 shrink-0" />
           <span className="text-[14px] font-semibold text-ink-900">Inbox</span>
@@ -538,7 +564,16 @@ export function InboxView({
         </div>
       </div>
 
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className={`${pane === "detail" ? "flex" : "hidden md:flex"} flex-1 min-w-0 flex-col`}>
+        {/* Below md only: the way back to the list. Lives OUTSIDE MessageDetail so it
+            also covers the EmptyState arm and stays put while the detail scrolls.
+            SecondaryButton owns the 44px coarse-pointer floor; the call site owns its
+            px (action-button.tsx header). */}
+        <div className="md:hidden px-4 py-2 border-b border-ink-100">
+          <SecondaryButton onClick={() => setPane("list")} className="px-2.5">
+            Back to inbox
+          </SecondaryButton>
+        </div>
         {error && (
           <Alert edge="flush" className="px-6" onDismiss={() => setError(null)}>
             {error}

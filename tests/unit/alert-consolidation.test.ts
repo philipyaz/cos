@@ -13,8 +13,16 @@
 // file, via a matchAll over `<([A-Za-z][A-Za-z0-9]*)`), a strict superset of `["div","p"]`.
 //
 // ── Scope ────────────────────────────────────────────────────────────────────────────────────
-// ROOTS + the whole-`shared/`-directory exclusion are the same as every A5 gate before this one
-// (board/components + board/app; board/lib is never walked — it legitimately holds class MAPS).
+// ROOTS are the same as every A5 gate before this one (board/components + board/app; board/lib
+// is never walked — it legitimately holds class MAPS). The exclusion is
+// `walkTsxExcept(ROOTS, [ALERT_FILE])` — exactly the one file that defines what this gate pins,
+// not the whole `board/components/shared/` directory (cos-ops#103 narrowed every consolidation
+// walk in the family the same way; see drawer-shell.test.ts's header for the fuller rationale).
+//
+// Declared skip floor (cos-ops#103, Correction 1): an unresolvable or className-less opening tag
+// is invisible to `scanAlertClasses` — `classNameStrings` reports `resolved: false` and the scan
+// skips it rather than reporting it (measured count in the PR body). The one exception is the
+// `<Alert>` passthrough contract below, which keeps failing closed on `resolved: false`.
 //
 // ── Per-assertion predicate choice — each grounded in a measured site list (re-verified at
 // cos main@804cdda by the architect and again this session) ────────────────────────────────────
@@ -50,25 +58,23 @@
 // `tests/unit/*.test.ts` glob — no run.sh edit needed; imports only Node builtins + tsx-
 // controls.mjs, so no ts-resolve hook is required to run it standalone).
 //
-// Accumulation, carried here rather than silently: this is the FOURTH byte-for-byte copy of both
-// `staticClassNameLiteral` (primary-action.test.ts:76, secondary-action.test.ts:111, drawer-
-// shell.test.ts:119) and of `classTokens`/`hasAllTokens` (same three files) — folding either into
-// tsx-controls.mjs would edit three shipped gate files, which no AC here licenses. This is also
-// the fourth A5 scanner gate and the 50th tracked `tests/unit/*.test.ts`. ADR 0014's revisit
-// condition takes pressure from both sides; no single unit can see it, so it is recorded again.
+// Accumulation, resolved rather than recorded again: this file WAS the fourth byte-for-byte copy
+// of `staticClassNameLiteral` and of `classTokens`/`hasAllTokens` — cos-ops#103 is the structural
+// issue ADR 0014's revisit condition was waiting for (no single per-gate AC could license editing
+// three already-shipped gate files), and it folded all four copies plus both exclusion idioms
+// into tsx-controls.mjs in one pass. This file now imports rather than defines them.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { walkTsx, stripComments, openingTags, attrLiteral } from "./tsx-controls.mjs";
+import { stripComments, openingTags, classNameStrings, classTokens, hasAllTokens, walkTsxExcept } from "./tsx-controls.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const ROOTS = [path.join(REPO_ROOT, "board/components"), path.join(REPO_ROOT, "board/app")];
 const ALERT_FILE = path.join(REPO_ROOT, "board/components/shared/alert.tsx");
-const SHARED_DIR = path.join(REPO_ROOT, "board/components/shared") + path.sep;
 
 const DRAWER_STRING =
   "px-5 py-2 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-100 flex items-center gap-2";
@@ -111,41 +117,15 @@ function relPath(file: string): string {
   return path.relative(REPO_ROOT, file);
 }
 
-/** Every whitespace-delimited class token in `classString` (whole-token compare — never a
- * substring — so e.g. `bg-rose-50/90` never matches `bg-rose-50`). */
-function classTokens(classString: string): string[] {
-  return classString.split(/\s+/).filter(Boolean);
-}
-
-function hasAllTokens(classString: string, required: string[]): boolean {
-  const tokens = classTokens(classString);
-  return required.every((t) => tokens.includes(t));
-}
-
-/** `className="…"`, or `className={IDENT}` resolved against a same-file `const IDENT = "…"` —
- * deliberately nothing wider (see header). Returns the literal string, or null. Byte-for-byte
- * copy of primary-action.test.ts's / secondary-action.test.ts's / drawer-shell.test.ts's own
- * helper (see header — a fourth copy, recorded as residue rather than folded into
- * tsx-controls.mjs). */
-function staticClassNameLiteral(attrText: string, src: string): string | null {
-  const lit = attrLiteral(attrText, "className");
-  if (lit !== null) return lit;
-
-  const m = attrText.match(/\bclassName\s*=\s*\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/);
-  if (!m) return null;
-  const identRe = new RegExp(`\\bconst\\s+${m[1]}\\s*(?::[^=]+)?=\\s*(["'])((?:(?!\\1).)*)\\1`);
-  const cm = src.match(identRe);
-  return cm ? cm[2] : null;
-}
-
 function scanAlertClasses(): {
   drawerViolations: string[];
   cardViolations: string[];
   pairViolations: string[];
   familyViolations: string[];
   filesWalked: number;
+  files: string[];
 } {
-  const files = walkTsx(ROOTS).filter((f) => !f.startsWith(SHARED_DIR));
+  const files = walkTsxExcept(ROOTS, [ALERT_FILE]);
   const drawerViolations: string[] = [];
   const cardViolations: string[] = [];
   const pairViolations: string[] = [];
@@ -159,8 +139,9 @@ function scanAlertClasses(): {
     const tagNames = [...new Set([...src.matchAll(/<([A-Za-z][A-Za-z0-9]*)/g)].map((m) => m[1]))];
 
     for (const { tag, attrText, line } of openingTags(src, tagNames)) {
-      const lit = staticClassNameLiteral(attrText, src);
-      if (lit === null) continue;
+      const { fragments, resolved } = classNameStrings(attrText, src);
+      if (!resolved) continue; // unresolvable or absent className — invisible to this walk (floor: header)
+      const lit = fragments.join(" ");
       const tagRef = `${relPath(file)}:${line} — <${tag}> className="${lit}"`;
       if (lit.includes(DRAWER_STRING)) drawerViolations.push(tagRef);
       if (lit.includes(CARD_STRING)) cardViolations.push(tagRef);
@@ -168,7 +149,7 @@ function scanAlertClasses(): {
       if (hasAllTokens(lit, FAMILY_TOKENS)) familyViolations.push(tagRef);
     }
   }
-  return { drawerViolations, cardViolations, pairViolations, familyViolations, filesWalked: files.length };
+  return { drawerViolations, cardViolations, pairViolations, familyViolations, filesWalked: files.length, files };
 }
 
 test("consolidation: no opening tag outside board/components/shared/ carries the drawer banner string", () => {
@@ -227,7 +208,7 @@ test("routing floor: every one of the 23 routed files imports shared/alert", () 
 });
 
 test("passthrough contract: every <Alert> call site's className carries only spacing tokens", () => {
-  const files = walkTsx(ROOTS).filter((f) => !f.startsWith(SHARED_DIR));
+  const files = walkTsxExcept(ROOTS, [ALERT_FILE]);
   const violations: string[] = [];
   for (const file of files) {
     const raw = fs.readFileSync(file, "utf8");
@@ -235,11 +216,12 @@ test("passthrough contract: every <Alert> call site's className carries only spa
     for (const { attrText, line } of openingTags(src, ["Alert"])) {
       const idx = attrText.search(/\bclassName\s*=/);
       if (idx === -1) continue; // no className passed — nothing to police
-      const lit = staticClassNameLiteral(attrText, src);
-      if (lit === null) {
-        violations.push(`${relPath(file)}:${line} — <Alert> className is not statically resolvable`);
+      const { fragments, resolved } = classNameStrings(attrText, src);
+      if (!resolved) {
+        violations.push(`${relPath(file)}:${line} — <Alert> className could not be resolved`);
         continue;
       }
+      const lit = fragments.join(" ");
       const bad = classTokens(lit).filter((t) => !/^(px-|mx-|mt-|mb-)/.test(t));
       if (bad.length > 0) {
         violations.push(
@@ -256,4 +238,12 @@ test("passthrough contract: every <Alert> call site's className carries only spa
 test("vacuous-pass floor: the walk actually reaches a meaningful number of files", () => {
   const { filesWalked } = scanAlertClasses();
   assert.ok(filesWalked >= 40, `expected to walk >=40 .tsx/.ts files, got ${filesWalked}`);
+});
+
+test("coverage floor: the narrowed exclusion walks the non-definition shared/ files (cos-ops#103)", () => {
+  const { files } = scanAlertClasses();
+  assert.ok(
+    files.includes(path.join(REPO_ROOT, "board/components/shared/markdown.tsx")),
+    "expected the walk to include board/components/shared/markdown.tsx (excluded only alert.tsx, not the whole shared/ directory)",
+  );
 });
