@@ -7,17 +7,17 @@
 // ── Assertion 1 — CONSOLIDATION (AC 5) ───────────────────────────────────────────────────────
 // The secondary (border-ink-200 + hover:bg-white) and destructive (border-rose-200 +
 // text-rose-600) pairs must live in exactly board/components/shared/action-button.tsx, never
-// re-declared at any <button>/<a>/<Link> call site — byte-for-byte primary-action.test.ts's own
-// recipe: the NARROW resolver (a literal className="…", or className={IDENT} resolving to a
-// same-file string const), deliberately not tsx-controls.mjs's wider `classNameStrings` (which
-// also resolves templates/ternaries — the right choice for assertion 2 below, the wrong one
-// here).
+// re-declared at any <button>/<a>/<Link> call site — the same recipe primary-action.test.ts uses:
+// tsx-controls.mjs's shared `classNameStrings`, acted on only for its two STATIC `form`s
+// (`"literal"` — a bare `className="…"` — or `"const"` — `className={IDENT}` resolving to a
+// same-file string const), never its wider template/ternary resolution (the right choice for
+// assertion 2 below, the wrong one here).
 //
-// Why narrow, not wide: `whitelist-view.tsx:323` is a ternary flip-tier button whose "blocked"
-// arm carries the destructive pair — the same segmented/state-arm shape primary-action.test.ts's
-// own header excludes for the primary pair. Naming it here means a later reader doesn't
-// "discover" it as a missed site: the wide resolver would flag it forever, and the narrow one
-// excludes it for free.
+// Why static-only, not wide: `whitelist-view.tsx`'s flip-tier button is a ternary whose
+// "blocked" arm carries the destructive pair — the same segmented/state-arm shape
+// primary-action.test.ts's own header excludes for the primary pair. Naming it here means a
+// later reader doesn't "discover" it as a missed site: acting on the wider `form: "template"`
+// resolution would flag it forever, and the static-only check excludes it for free.
 //
 // THE DENOMINATOR THIS GATE ACTUALLY COVERS — stated outright so a green run is never read as
 // more than it is: of 48 `border-ink-200` buttons, this matches exactly the 7 routed secondary
@@ -80,7 +80,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { walkTsx, stripComments, openingTags, attrLiteral, classNameStrings } from "./tsx-controls.mjs";
+import { walkTsx, stripComments, openingTags, classNameStrings, classTokens, walkTsxExcept } from "./tsx-controls.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -89,12 +89,6 @@ const PRIMITIVE_DEFINITION_FILE = path.join(REPO_ROOT, "board/components/shared/
 
 function relPath(file) {
   return path.relative(REPO_ROOT, file);
-}
-
-/** Every whitespace-delimited class token in `classString` (whole-token compare — never a
- * substring — so e.g. `bg-ink-900/90` never matches `bg-ink-900`). */
-function classTokens(classString) {
-  return classString.split(/\s+/).filter(Boolean);
 }
 
 // ── Assertion 1 — consolidation ──────────────────────────────────────────────────────────────
@@ -106,29 +100,19 @@ function hasDestructivePair(tokens) {
   return tokens.includes("border-rose-200") && tokens.includes("text-rose-600");
 }
 
-/** `className="…"`, or `className={IDENT}` resolved against a same-file `const IDENT = "…"` —
- * deliberately nothing wider (see header). Returns the literal string, or null. */
-function staticClassNameLiteral(attrText, src) {
-  const lit = attrLiteral(attrText, "className");
-  if (lit !== null) return lit;
-
-  const m = attrText.match(/\bclassName\s*=\s*\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/);
-  if (!m) return null;
-  const identRe = new RegExp(`\\bconst\\s+${m[1]}\\s*(?::[^=]+)?=\\s*(["'])((?:(?!\\1).)*)\\1`);
-  const cm = src.match(identRe);
-  return cm ? cm[2] : null;
-}
-
 function scanConsolidation() {
-  const files = walkTsx(ROOTS).filter((f) => f !== PRIMITIVE_DEFINITION_FILE);
+  const files = walkTsxExcept(ROOTS, [PRIMITIVE_DEFINITION_FILE]);
   const violations = [];
 
   for (const file of files) {
     const raw = fs.readFileSync(file, "utf8");
     const src = stripComments(raw);
     for (const { tag, attrText, line } of openingTags(src, ["button", "a", "Link"])) {
-      const lit = staticClassNameLiteral(attrText, src);
-      if (lit === null) continue;
+      const { fragments, resolved, form } = classNameStrings(attrText, src);
+      // Static forms only (see header): flags 1 deliberate flip-tier site (whitelist-view) when
+      // this check is dropped — measured 2026-09-15.
+      if ((form !== "literal" && form !== "const") || !resolved) continue;
+      const lit = fragments.join(" ");
       const tokens = classTokens(lit);
       if (hasSecondaryPair(tokens) || hasDestructivePair(tokens)) {
         violations.push(`${relPath(file)}:${line} — <${tag}> className="${lit}"`);
