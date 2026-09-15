@@ -58,13 +58,22 @@ export function ArtifactFeed({
   const [items, setItems] = useState<CoachingArtifact[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // A surfaced LOAD failure — distinct from generateError below (that one is the Generate
+  // button's). This feed has NO server-rendered seed, so `refetch` is its ONLY load path, and a
+  // throw there is the difference between "no history" and "I couldn't find out"; only one of
+  // those is safe to tell someone. Cleared on every success, and RENDERED only when there is
+  // nothing to show — so a failed live refetch over an existing history stays silent and keeps
+  // the last-known items, which is health-view.tsx's posture.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const lastVersion = useRef<number>(0);
 
   // Refetch the history for this kind and reseed. We default the selection to the newest item
-  // when nothing is selected yet (or the selected id has fallen out of the list). A throw just
-  // leaves the last-known history in place — the next change event retries.
+  // when nothing is selected yet (or the selected id has fallen out of the list). A throw still
+  // leaves the last-known history in place — the next change event retries, since lastVersion is
+  // NOT advanced on a failure — but it is also RECORDED, so a feed with nothing loaded renders
+  // the failure rather than the reassuring "No history yet".
   const refetch = async (): Promise<void> => {
     try {
       const res: CoachingListResponse = await listCoachingArtifacts({ kind, limit: 50 });
@@ -74,8 +83,11 @@ export function ArtifactFeed({
         if (prev && res.items.some((x) => x.id === prev)) return prev;
         return res.items[0]?.id ?? null;
       });
-    } catch {
-      // Non-critical: keep the last-known history; the next change event retries.
+      setLoadError(null);
+    } catch (e) {
+      // Non-critical while a history is loaded: the banner below renders only when there are
+      // no items, so this keeps the last-known list and lets the next change event retry.
+      setLoadError(e instanceof Error ? e.message : "Couldn't load the history.");
     } finally {
       setLoading(false);
     }
@@ -176,14 +188,47 @@ export function ArtifactFeed({
         </div>
       )}
 
-      {/* Empty state — the dashed EmptyState recipe (mirrors training-plan-view's empty state). */}
-      {!loading && items.length === 0 && (
+      {/* Empty state — the dashed EmptyState recipe (mirrors training-plan-view's empty state).
+          Gated on `!loadError` as well as `!loading`: "No history yet" is a claim about the
+          user's artifacts, and we may only make it on data we actually received. A load that
+          FAILED shows the banner below instead — never the reassuring card. */}
+      {!loading && !loadError && items.length === 0 && (
         <div className="rounded-lg border border-dashed border-ink-200 bg-white py-12 px-6 text-center">
           <div className="flex justify-center mb-2 text-ink-300">
             <IconRunner className="w-6 h-6" />
           </div>
           <p className="text-[13px] text-ink-700 font-medium mb-1">No history yet</p>
           <p className="text-[12.5px] text-ink-500 max-w-[460px] mx-auto">{emptyHint}</p>
+        </div>
+      )}
+
+      {/* Load failure with NOTHING to show — the rose role="alert" banner instead of the
+          cheerful empty card, plus a Retry. NOT dismissible: dismissing would leave a blank
+          panel with no way back. With a history LOADED this renders not at all — the rail below
+          keeps showing last-known. With a history that loaded EMPTY it does replace the "No
+          history yet" card, which is deliberate and matches unanswered-messages.tsx: after a
+          failure we no longer know the feed is empty. The retry's setLoading(true) swaps this
+          block for the skeleton, which doubles as the double-submit guard.
+          The button is hand-spelled rather than routed through SecondaryButton: this sits on the
+          white page body, where that primitive's drawer-footer hover:bg-white is a dead utility
+          — the same conflict label-manager.tsx names for its own non-footer secondary, resolved
+          the same way, with the coarse-pointer floor bumped in place. */}
+      {!loading && loadError && items.length === 0 && (
+        <div className="space-y-3">
+          <Alert edge="inset" className="px-4" onDismiss={null}>
+            {loadError}
+          </Alert>
+          <div className="text-center">
+            <button
+              onClick={() => {
+                setLoading(true);
+                void refetch();
+              }}
+              className="text-[12px] px-2.5 py-1 rounded-md border border-ink-200 text-ink-900 hover:bg-ink-50 transition inline-flex items-center justify-center active:bg-ink-100 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       )}
 

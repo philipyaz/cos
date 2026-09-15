@@ -16,10 +16,10 @@
 // selected-state styling, e.g. body-profile-drawer.tsx's unit toggle
 // `` `text-[12px] px-3 py-1.5 ${unit === u ? "bg-ink-900 text-white" : "..."}` ``, is not a button
 // spelling; scanning it would flag one of the ~14 deliberate sites the issue excludes). So this
-// gate resolves only the two STATIC forms: a literal `className="…"`, or `className={IDENT}`
-// resolving to a plain same-file string const — narrower than tsx-controls.mjs's own
-// `classNameStrings` (which also resolves templates/ternaries/spreads, and is the right choice
-// for the sibling text-entry-size gate but the wrong one here).
+// gate acts only on the two STATIC `form`s tsx-controls.mjs's `classNameStrings` reports —
+// `form === "literal"` (a bare `className="…"`) or `form === "const"` (`className={IDENT}`
+// resolving to a plain same-file string const) — never its wider template/ternary resolution,
+// which is the right choice for the sibling text-entry-size gate but the wrong one here.
 //
 // Token-boundary trap (named in the census): `spoke-chip.tsx:41` carries `bg-ink-900/90` — a
 // DIFFERENT Tailwind token. Matching must compare whole whitespace-delimited tokens, never a
@@ -41,29 +41,26 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { walkTsx, stripComments, openingTags, attrLiteral } from "./tsx-controls.mjs";
+import { stripComments, openingTags, classNameStrings, classTokens, walkTsxExcept } from "./tsx-controls.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const ROOTS = [path.join(REPO_ROOT, "board/components"), path.join(REPO_ROOT, "board/app")];
 
-// The primitive's OWN definition file is not a call site — same shape as field.tsx's exclusion
-// in text-entry-size.test.ts. Here it is belt-and-braces rather than load-bearing:
+// The primitive's OWN definition file is not a call site — walked out via walkTsxExcept, the
+// same EFFECT as field.tsx's exclusion in text-entry-size.test.ts but not the same mechanism:
+// that gate keeps its own inline filter (cos-ops#103, Correction 2), this one routes through the
+// shared helper. Here the exclusion is belt-and-braces rather than load-bearing:
 // PrimaryButton/PrimaryLink's className is `className ? \`${PRIMARY_CLASS} ${className}\` :
-// PRIMARY_CLASS` — a bare ternary whose branches are a template and an identifier, neither form
-// staticClassNameLiteral (below) resolves, so it already reports nothing here. Excluding the file
-// anyway keeps the AC's own "outside action-button.tsx" wording literally true rather than true
-// by accident of today's exact source shape.
+// PRIMARY_CLASS` — a bare ternary whose branches are a template and an identifier, i.e.
+// `form: "expr"` from classNameStrings, which this gate's static-only check (below) never acts
+// on, so it already reports nothing here. Excluding the file anyway keeps the AC's own "outside
+// action-button.tsx" wording literally true rather than true by accident of today's exact source
+// shape.
 const PRIMITIVE_DEFINITION_FILE = path.join(REPO_ROOT, "board/components/shared/action-button.tsx");
 
 function relPath(file) {
   return path.relative(REPO_ROOT, file);
-}
-
-/** Every whitespace-delimited class token in `classString` (whole-token compare — never a
- * substring — so `bg-ink-900/90` never matches `bg-ink-900`). */
-function classTokens(classString) {
-  return classString.split(/\s+/).filter(Boolean);
 }
 
 function hasPrimaryActionPair(classString) {
@@ -71,29 +68,21 @@ function hasPrimaryActionPair(classString) {
   return tokens.includes("bg-ink-900") && tokens.includes("text-white");
 }
 
-/** `className="…"`, or `className={IDENT}` resolved against a same-file `const IDENT = "…"` —
- * deliberately nothing wider (see header). Returns the literal string, or null. */
-function staticClassNameLiteral(attrText, src) {
-  const lit = attrLiteral(attrText, "className");
-  if (lit !== null) return lit;
-
-  const m = attrText.match(/\bclassName\s*=\s*\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/);
-  if (!m) return null;
-  const identRe = new RegExp(`\\bconst\\s+${m[1]}\\s*(?::[^=]+)?=\\s*(["'])((?:(?!\\1).)*)\\1`);
-  const cm = src.match(identRe);
-  return cm ? cm[2] : null;
-}
-
 function scanButtonSites() {
-  const files = walkTsx(ROOTS).filter((f) => f !== PRIMITIVE_DEFINITION_FILE);
+  const files = walkTsxExcept(ROOTS, [PRIMITIVE_DEFINITION_FILE]);
   const violations = [];
 
   for (const file of files) {
     const raw = fs.readFileSync(file, "utf8");
     const src = stripComments(raw);
     for (const { tag, attrText, line } of openingTags(src, ["button", "a", "Link"])) {
-      const lit = staticClassNameLiteral(attrText, src);
-      if (lit !== null && hasPrimaryActionPair(lit)) {
+      const { fragments, resolved, form } = classNameStrings(attrText, src);
+      // Static forms only (see header): a template/ternary className is segmented state-arm
+      // styling, not a button spelling — measured 2026-09-15: acting on resolved templates here
+      // flags 7 deliberate selected-state sites.
+      if ((form !== "literal" && form !== "const") || !resolved) continue;
+      const lit = fragments.join(" ");
+      if (hasPrimaryActionPair(lit)) {
         violations.push(`${relPath(file)}:${line} — <${tag}> className="${lit}"`);
       }
     }

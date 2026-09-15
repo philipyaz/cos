@@ -67,9 +67,8 @@ export interface AddonManifest {
   mcp: {
     server: string;       // the MCP registry name (.mcp.json key)
     bridgePortVar: string;// the env var naming the bridge port (config/cos.env)
-    defaultPort: number;  // the bridge port default (probed for reachability)
+    defaultPort: number;  // the bridge port fallback (bridgePortVar's resolved value is what gets probed)
     setupSkill: string;   // the slash-skill that wires the bridge on a new machine
-    tools: string[];      // the MCP tool names this server exposes
   };
   dependsOn?: { id: string; required: boolean }[];  // OPTIONAL soft/hard edges to other add-ons
 }
@@ -242,7 +241,7 @@ comment on the `dependsOn` member for the full posture).
 ## Where to go next
 
 - **[Nutrition & Chef](../features/nutrition.md)** — the first worked example: the food log, pantry,
-  meal plan, and weight-loss verticals, the data model, the routes, the 19 MCP tools, and the operator
+  meal plan, and weight-loss verticals, the data model, the routes, the MCP tools, and the operator
   skill.
 - **[Fitness](../features/fitness.md)** — the second worked example: Apple Watch HAE ingestion,
   the canonical health taxonomy, the AI coach, and the soft nutrition dependency.
