@@ -41,8 +41,10 @@
 // board/lib is NEVER walked at that breadth (it legitimately holds class maps).
 // tests/unit/fixed-tab-widths.test.ts pins a flat six-file list instead. This gate widens to
 // include board/lib because the owner it polices LIVES there and the AC says "under board/" — the
-// widened corpus is complete: the only .ts/.tsx under board/ outside these three roots is
-// board/tailwind.config.ts (measured).
+// widened corpus is complete modulo two files (re-measured this session, corrects the plan's
+// "only board/tailwind.config.ts" claim): board/tailwind.config.ts and the generated
+// board/next-env.d.ts — the latter is pure ambient type-declaration triple-slash directives,
+// incapable of carrying a history call.
 //
 // Run: `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import
 // ./tests/unit/ts-resolve.mjs --test tests/unit/overlay-history.test.ts` (run.sh's own line,
