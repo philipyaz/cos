@@ -4,19 +4,18 @@
 // duplicate ids. Fires N parallel create_case and N parallel add_task against a
 // RUNNING board, then asserts every write persisted and every id is unique.
 //
-// It snapshots board/data/cases.json first and restores it in a `finally`, so the
-// live board is left EXACTLY as found (net-zero). Requires a running board:
+// It snapshots board/data/cases.json first and restores it in a `finally` (net-zero) — but ONLY
+// when COS_BOARD_DATA is set: unset means no snapshot/restore (a printed warning, not a guessed
+// path) rather than a silent live-store default. Requires a running board:
 //   cd board && npm run dev      # or npm run start
-//   node tests/concurrency.mjs   # CRM_BASE_URL defaults to http://localhost:3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/concurrency.mjs   # CRM_BASE_URL defaults to http://localhost:3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path), COS_CONCURRENCY (N).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore SKIPs if unset), COS_CONCURRENCY (N).
 import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 const N = Number(process.env.COS_CONCURRENCY || 25);
 
 const json = async (res) => {
@@ -34,8 +33,7 @@ const getCases = async () => (await json(await fetch(`${BASE}/api/cases`))).case
 async function main() {
   console.log(`concurrency · board=${BASE} · N=${N}`);
 
-  // Snapshot the live store so the test is net-zero.
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
   try {
     const beforeCount = (await getCases()).length;
 
@@ -75,9 +73,12 @@ async function main() {
     const reread = (await getCases()).find((c) => c.id === target);
     check(reread?.tasks.length === N, `target case has exactly ${N} tasks — no lost task writes (${reread?.tasks.length})`);
   } finally {
-    // Restore — leave the live board exactly as found.
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {
