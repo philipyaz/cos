@@ -24,21 +24,19 @@
 //                                   PROVEN clean first (GET'd empty), never a hardcoded
 //                                   date — the live store is not empty.
 //
-// It snapshots board/data/cases.json first and restores it in a `finally`, so the
-// live board is left EXACTLY as found (net-zero) — db.events lives in cases.json
-// alongside the cases. Requires a running board:
+// It snapshots board/data/cases.json first and restores it in a `finally` (net-zero — db.events
+// lives in cases.json alongside the cases) — but ONLY when COS_BOARD_DATA is set: unset means no
+// snapshot/restore (a printed warning, not a guessed path) rather than a silent live-store
+// default. Requires a running board:
 //   cd board && npm run dev          # or npm run start
-//   node tests/api-events.mjs        # CRM_BASE_URL defaults to http://localhost:3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-events.mjs        # CRM_BASE_URL defaults to http://localhost:3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore SKIPs if unset).
 import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE =
-  process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 // --- tiny check harness ------------------------------------------------------
 let failures = 0;
@@ -81,8 +79,7 @@ const EVT_ID_RE = /^EVT-\d+$/;
 async function main() {
   console.log(`api-events · board=${BASE}`);
 
-  // Snapshot the live store so the whole run is net-zero (db.events lives in cases.json).
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
 
   try {
     // ----------------------------------------------------------------------
@@ -358,12 +355,16 @@ async function main() {
     );
     const busyPlacedEvtId = busyPlaced.body.event?.id;
 
-    // Quote-bound sentinel (ADR 0021 / cos#81's trap): a bare 07:53 collides with any
-    // ISO timestamp minted during this run (e.g. "...T07:53:12.345Z"); '"07:53"' matches
-    // only a complete JSON string value, so it proves the busy INPUT was never written.
-    const rawStore = await fs.readFile(DATA_FILE, "utf8");
-    check(rawStore.includes('"10:30"'), "place: the placed 10:30 startTime IS persisted");
-    check(!rawStore.includes('"07:53"'), "place: the busyWindows input is NEVER persisted anywhere in the store");
+    if (DATA_FILE) {
+      // Quote-bound sentinel (ADR 0021 / cos#81's trap): a bare 07:53 collides with any
+      // ISO timestamp minted during this run (e.g. "...T07:53:12.345Z"); '"07:53"' matches
+      // only a complete JSON string value, so it proves the busy INPUT was never written.
+      const rawStore = await fs.readFile(DATA_FILE, "utf8");
+      check(rawStore.includes('"10:30"'), "place: the placed 10:30 startTime IS persisted");
+      check(!rawStore.includes('"07:53"'), "place: the busyWindows input is NEVER persisted anywhere in the store");
+    } else {
+      console.log("  SKIP: busyWindows-not-persisted raw-store check needs COS_BOARD_DATA (store-file surgery) — not set.");
+    }
 
     // -- 6. Validation 400s. -------------------------------------------------------
     const placeAndStart = await POST("/api/events", {
@@ -401,9 +402,12 @@ async function main() {
       await DELETE(`/api/events/${encodeURIComponent(id)}`);
     }
   } finally {
-    // Restore — leave the live board exactly as found (net-zero).
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {

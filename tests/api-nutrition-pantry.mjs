@@ -20,21 +20,19 @@
 //   • GATE                         → with the add-on DISABLED a POST/PATCH/DELETE → 404
 //                                   while GET still returns; actor attribution
 //
-// It snapshots board/data/cases.json first and restores it in a `finally`, so the live
-// board is left EXACTLY as found (net-zero) — db.pantry + settings.addons live in
-// cases.json. Requires a running board:
+// It snapshots board/data/cases.json first and restores it in a `finally` (net-zero — db.pantry
+// + settings.addons live in cases.json) — but ONLY when COS_BOARD_DATA is set: unset means no
+// snapshot/restore (a printed warning, not a guessed path) rather than a silent live-store
+// default. Requires a running board:
 //   cd board && npm run dev            # or npm run start
-//   node tests/api-nutrition-pantry.mjs   # CRM_BASE_URL defaults to http://localhost:3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-nutrition-pantry.mjs   # CRM_BASE_URL defaults to http://localhost:3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore SKIPs if unset).
 import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE =
-  process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 // --- tiny check harness ------------------------------------------------------
 let failures = 0;
@@ -76,9 +74,7 @@ const PANTRY_ID_RE = /^PANTRY-\d+$/;
 async function main() {
   console.log(`api-nutrition-pantry · board=${BASE}`);
 
-  // Snapshot the live store so the whole run is net-zero (db.pantry + settings.addons
-  // live in cases.json).
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
 
   try {
     // ----------------------------------------------------------------------
@@ -286,10 +282,12 @@ async function main() {
     const goneDetail = await GET(`/api/nutrition/pantry/${encodeURIComponent(pantryId)}`);
     check(goneDetail.status === 404, `GET the deleted item → 404 (got ${goneDetail.status})`);
   } finally {
-    // Restore — leave the live board exactly as found (net-zero; this also restores the
-    // add-on's pre-test enabled state, since settings.addons lives in cases.json).
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {

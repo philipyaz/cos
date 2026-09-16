@@ -12,20 +12,18 @@
 //     "semantic") or DOWN (engine "keyword"), so the test passes in BOTH modes
 //     (CI default = sidecar down). It does NOT assert the sidecar is up/down.
 //
-// Snapshots board/data/cases.json and restores it in a `finally`, so the live
-// board is left EXACTLY as found (net-zero). Requires a running board:
+// Snapshots board/data/cases.json and restores it in a `finally` (net-zero) — but ONLY when
+// COS_BOARD_DATA is set: unset means no snapshot/restore (a printed warning, not a guessed
+// path) rather than a silent live-store default. Requires a running board:
 //   cd board && npm run dev
-//   node tests/api-search.mjs            # CRM_BASE_URL defaults to http://localhost:3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-search.mjs            # CRM_BASE_URL defaults to http://localhost:3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore SKIPs if unset).
 import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE =
-  process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -55,7 +53,7 @@ const is2xx = (status) => status >= 200 && status < 300;
 
 async function main() {
   console.log(`api-search · board=${BASE}`);
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
 
   try {
     // Seed a marker case with a unique token so the search is unambiguous.
@@ -138,8 +136,12 @@ async function main() {
       "marker is found in batch merged.cases (no silent empty on sidecar-down)",
     );
   } finally {
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {

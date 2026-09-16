@@ -47,6 +47,7 @@ import { MessageLink } from "@/components/shared/message-link";
 import { PrimaryButton, SecondaryButton } from "@/components/shared/action-button";
 import { Alert } from "@/components/shared/alert";
 import { messageDeepLink } from "@/lib/message-url";
+import { openOverlay } from "@/lib/overlay-history";
 import {
   createCase,
   searchBatch,
@@ -98,6 +99,21 @@ export function InboxView({
   // steady state, not evidence the user opened it. At `md`+ both panes render
   // regardless and this state is inert.
   const [pane, setPane] = useState<"list" | "detail">("list");
+
+  // One history entry per detail view below `md` (cos-ops#107) — `pane` flips to "detail" only in
+  // selectMessage and back to "list" only via the Back button, so one effect keyed on it covers
+  // open (mount), UI-close (the Back button, which re-runs this effect's cleanup) and unmount
+  // (navigating away). `setPane` is a useState setter (stable), so `[pane]` deps are lint-clean —
+  // no ref needed, unlike DrawerShell's mount-once effect.
+  useEffect(() => {
+    if (pane !== "detail") return;
+    // Tailwind's `md` exactly (48rem; tailwind.config.ts overrides no screens): at md+ both panes
+    // render and `pane` is inert, so selecting a message must create no entry. Evaluated at open
+    // time only — a rotation/resize mid-open is out of scope for this unit.
+    if (window.matchMedia("(min-width: 48rem)").matches) return;
+    const handle = openOverlay(() => setPane("list"));
+    return () => handle.release();
+  }, [pane]);
 
   // Seed the selection from the DEFAULT view (newest-first), not raw store order,
   // so the opened/highlighted message matches the top of the rendered list on load.

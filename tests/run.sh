@@ -355,11 +355,12 @@ BOARD_UP=0
 # Set only for the AUTO-STARTED board (empty under COS_TEST_BOARD_URL): the
 # sandbox data dir. Once the sandbox board is UP it is exported to every api-*
 # step as COS_BOARD_DATA (the store file the tests snapshot, restore, and read
-# raw). Every api-*.mjs falls back to the literal board/data/cases.json when the
-# variable is absent — so before this export the 33 steps that were invoked
+# raw). Every api-*.mjs used to fall back to the literal board/data/cases.json when the
+# variable was absent — so before this export the 33 steps that were invoked
 # without it snapshotted + restored the LIVE file while the sandbox board wrote
 # elsewhere: their raw-store assertions were vacuous (cos#93's red api-events),
-# and on a dev hub the restore could overwrite a live write made mid-run. Never
+# and on a dev hub the restore could overwrite a live write made mid-run. Now every
+# api-*.mjs falls back to "" and SKIPs its file half instead (cos-ops#109). Never
 # points at live data.
 TEST_BOARD_DATA_DIR=""
 HTTP_CODE="test-board"
@@ -378,6 +379,11 @@ stop_test_board() {
 start_test_board() {
   if [ -n "${COS_TEST_BOARD_URL:-}" ]; then
     BASE="${COS_TEST_BOARD_URL}"; BOARD_UP=1
+    # External-board mode has no file access to that board's store ("no local path is known" —
+    # the model the gated steps document). After cos-ops#109, COS_BOARD_DATA is the ONLY route
+    # from a test to a store file, so an ambient value in the operator's shell must not point
+    # the store-touching steps at some other live file.
+    unset COS_BOARD_DATA
     echo "using external test board ${BASE} (COS_TEST_BOARD_URL) — must NOT be your live board."
     return 0
   fi
@@ -1022,9 +1028,10 @@ else
 fi
 
 # --- 6. api-prefs (only when a board is healthy) -----------------------------
-# Drives the persisted view-state API (/api/prefs → board/data/prefs.json):
-# round-trip, boardQuery canonicalisation, collapsedLanes filtering, partial
-# merge, and the empty-body 400. Snapshots + restores prefs.json (net-zero).
+# Drives the persisted view-state API (/api/prefs → the prefs.json beside
+# COS_BOARD_DATA's store): round-trip, boardQuery canonicalisation, collapsedLanes
+# filtering, partial merge, and the empty-body 400. Snapshots + restores that
+# prefs.json when COS_BOARD_DATA is set (net-zero).
 echo
 echo "--- [6] api-prefs (live board) ------------------------------"
 if [ "${BOARD_UP}" -eq 1 ]; then
@@ -1580,19 +1587,12 @@ fi
 # "nothing computed is ever persisted to the store FILE" sub-check needs FILE access to the
 # running board's store, but (unlike them) this step still runs its HTTP-only checks under an
 # external COS_TEST_BOARD_URL board — only that one sub-check SKIPs without a local path
-# (architect finding 4: TEST_BOARD_DATA_DIR is shell-local and must be passed per-command).
-# Snapshots + restores board/data/cases.json (net-zero). Skipped entirely when no board.
+# (inherits COS_BOARD_DATA from start_test_board's export like every sibling). Skipped entirely
+# when no board.
 echo
 echo "--- [10k] api-triage-decisions (live board) ------------------"
 if [ "${BOARD_UP}" -eq 1 ]; then
-  if [ -n "${TEST_BOARD_DATA_DIR}" ]; then
-    RUN_TRIAGE_OK=1
-    CRM_BASE_URL="${BASE}" COS_BOARD_DATA="${TEST_BOARD_DATA_DIR}/cases.json" node "${SCRIPT_DIR}/api-triage-decisions.mjs" || RUN_TRIAGE_OK=0
-  else
-    RUN_TRIAGE_OK=1
-    CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-triage-decisions.mjs" || RUN_TRIAGE_OK=0
-  fi
-  if [ "${RUN_TRIAGE_OK}" -eq 1 ]; then
+  if CRM_BASE_URL="${BASE}" node "${SCRIPT_DIR}/api-triage-decisions.mjs"; then
     echo "api-triage-decisions: PASS"
   else
     echo "api-triage-decisions: FAIL"

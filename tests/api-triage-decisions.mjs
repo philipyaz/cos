@@ -24,23 +24,22 @@
 //       NEVER persisted (criterion 4's second half).
 //   validation: bad `reason` / bad `source` → 400; unknown PATCH id → 404; bad `resolution` → 400.
 //
-// Snapshots board/data/cases.json first and restores it in a `finally` (net-zero) — db.
-// triageDecisions lives there alongside every other collection. Requires a running board:
+// db.triageDecisions lives in cases.json alongside every other collection. The snapshot/restore
+// and the nothing-persisted file-surgery sub-check both need a store path — run.sh's sandbox
+// exports COS_BOARD_DATA; an external COS_TEST_BOARD_URL board's file isn't reachable, so the
+// sub-check SKIPs. Requires a running board:
 //   cd board && npm run dev          # or npm run start
 //   node tests/api-triage-decisions.mjs     # CRM_BASE_URL defaults to http://localhost:3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — the
-// nothing-persisted file-surgery sub-check SKIPS, not fails, when unset: an external
-// COS_TEST_BOARD_URL board's file isn't reachable from this process — see run.sh [10k]).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore AND the nothing-persisted file-surgery sub-check both SKIP, not fail, when unset: an
+// external COS_TEST_BOARD_URL board's file isn't reachable from this process — see run.sh
+// [10k]).
 import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE_DEFAULT = path.join(HERE, "..", "board", "data", "cases.json");
-const DATA_FILE = process.env.COS_BOARD_DATA || DATA_FILE_DEFAULT;
-const FILE_SURGERY = Boolean(process.env.COS_BOARD_DATA); // only trust file access under the sandbox (see header)
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
+const FILE_SURGERY = Boolean(DATA_FILE); // file access only when a store path is named (see header)
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -75,7 +74,7 @@ const getGmail = () => GET("/api/triage-decisions?source=gmail");
 async function main() {
   console.log(`api-triage-decisions · board=${BASE}${FILE_SURGERY ? ` · store=${DATA_FILE}` : ""}`);
 
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = FILE_SURGERY ? await fs.readFile(DATA_FILE, "utf8") : null;
 
   try {
     // ------------------------------------------------------------------------
@@ -287,9 +286,12 @@ async function main() {
     const badResolution = await PATCH(`/api/triage-decisions/${encodeURIComponent(td1Id)}`, { resolution: "banana" });
     check(badResolution.status === 400, `PATCH a bad resolution → 400 (got ${badResolution.status})`);
   } finally {
-    // Restore — leave the live board exactly as found (net-zero).
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored the store to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {
