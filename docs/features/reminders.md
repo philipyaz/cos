@@ -314,9 +314,9 @@ opens the **reminders surface**:
   a task-progress chip (`<done>/<total>`) when present. It owns its own fetch/state and re-pulls
   after any mutation, then bubbles to the parent so the rest of the drawer reflects the change.
 - **One mutation path.** Every create/edit/complete/delete routes through `board-client`
-  (`createReminder` / `updateReminder` / `completeReminder` / `deleteReminder`, plus the v6
-  `linkReminderMessage` / `fetchReminder`) → the `/api/reminders` routes — the exact routes the
-  reminder tools call.
+  (`createReminder` / `updateReminder` / `completeReminder` / `deleteReminder`, plus the
+  v6 `fetchReminder`) → the `/api/reminders` routes — the exact routes the reminder tools
+  call.
 
 ## Parity rule
 

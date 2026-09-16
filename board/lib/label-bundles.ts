@@ -11,7 +11,7 @@
 // rewrites the LABEL_BUNDLES literal below in place. Then refresh docs/reference/labels.md:
 // `node scripts/gen-labels-doc.mjs`.
 
-import type { CaseDomain, LabelColor, LabelDef } from "./types";
+import type { CaseDomain, LabelDef } from "./types";
 
 // A label inside a bundle definition — same shape as LabelDef minus the `bundle`
 // provenance, which is stamped at install time.
@@ -24,16 +24,6 @@ export interface LabelBundle {
   category: "role" | "life" | "universal";
   domain: CaseDomain; // default domain affinity for the pack
   labels: BundleLabel[];
-}
-
-// Lightweight summary surfaced to the UI / MCP (counts, not the full label list).
-export interface BundleSummary {
-  id: string;
-  name: string;
-  description: string;
-  category: LabelBundle["category"];
-  domain: CaseDomain;
-  labelCount: number;
 }
 
 // ── The catalog ────────────────────────────────────────────────────────────────
@@ -3038,22 +3028,4 @@ export const LABEL_BUNDLES: LabelBundle[] = [
 // ── Accessors ────────────────────────────────────────────────────────────────
 export function findBundle(id: string): LabelBundle | undefined {
   return LABEL_BUNDLES.find((b) => b.id === id);
-}
-
-export function bundleSummaries(): BundleSummary[] {
-  return LABEL_BUNDLES.map((b) => ({
-    id: b.id,
-    name: b.name,
-    description: b.description,
-    category: b.category,
-    domain: b.domain,
-    labelCount: b.labels.length,
-  }));
-}
-
-// Every distinct chip colour the bundles actually use — handy for the UI legend.
-export function bundleColors(): LabelColor[] {
-  const seen = new Set<LabelColor>();
-  for (const b of LABEL_BUNDLES) for (const l of b.labels) if (l.color) seen.add(l.color);
-  return Array.from(seen);
 }

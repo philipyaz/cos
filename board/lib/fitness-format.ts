@@ -7,7 +7,7 @@
 // This module is I/O-free and clock-free — it imports nothing app-specific (only a TYPE), so
 // it is safe to use from server components, route handlers, AND client components alike.
 
-import type { CoachingArtifact, CoachingArtifactKind } from "./types";
+import type { CoachingArtifact } from "./types";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -76,21 +76,5 @@ export function formatArtifactLabel(a: CoachingArtifact): string {
     }
     default:
       return a.periodKey;
-  }
-}
-
-// The human display name for a coaching-artifact KIND — the feed/page title vocabulary.
-export function formatArtifactKind(kind: CoachingArtifactKind): string {
-  switch (kind) {
-    case "training_plan":
-      return "Training plan";
-    case "weekly_review":
-      return "Weekly review";
-    case "pre_workout_brief":
-      return "Pre-workout brief";
-    case "correlations":
-      return "Correlations";
-    default:
-      return kind;
   }
 }

@@ -35,9 +35,3 @@ function readPrincipal(): string | null {
   }
   return null;
 }
-
-// Test/maintenance escape hatch: drop the memoized value so a later resolve re-reads
-// env + config (used by unit tests that set COS_PRINCIPAL_EMAIL between cases).
-export function _resetPrincipalCache(): void {
-  cached = undefined;
-}

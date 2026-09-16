@@ -363,12 +363,12 @@ dropped for more than one reason needs **every** one of its ids resolved the sam
 
 ### Attention
 
-The board's own "what needs attention" read, now agent-reachable (cos-ops#20 named the shared
-staleness vocabulary — see `board/lib/staleness.ts`). Four buckets, computed live and never
-persisted (ADR 0017): `overdue`, `agingWaiting`, `untriaged`, `unlinked` — the same read
-`board/components/board/needs-attention.tsx` renders, and `get_vault_coverage` above is the
-documented complement of its `unlinked` bucket. Since cos-ops#24 the same read also serves
-`starving` — see below.
+The board's own "what needs attention" read, now agent-reachable (cos-ops#20 named the
+shared staleness vocabulary — see `board/lib/staleness.ts`). Four buckets, computed live and
+never persisted (ADR 0017): `overdue`, `agingWaiting`, `untriaged`, `unlinked` — served by
+`GET /api/cases/needs-attention`, and `get_vault_coverage` above is the documented
+complement of its `unlinked` bucket. Since cos-ops#24 the same read also serves `starving` —
+see below.
 
 #### `get_needs_attention()`
 `GET /api/cases/needs-attention`. No args — every bucket excludes archived cases by definition.

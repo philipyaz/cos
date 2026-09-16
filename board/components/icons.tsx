@@ -108,16 +108,6 @@ export function IconMore(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export function IconToday(props: SVGProps<SVGSVGElement>) {
-  // A sun/focus glyph for the "Today" worklist.
-  return (
-    <svg {...base} {...props}>
-      <circle cx="8" cy="8" r="3" />
-      <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l-1 1" />
-    </svg>
-  );
-}
-
 export function IconActivity(props: SVGProps<SVGSVGElement>) {
   // A pulse line — the live activity feed.
   return (
@@ -259,20 +249,10 @@ export function IconSpark(props: SVGProps<SVGSVGElement>) {
 }
 
 // ── Settings / security glyphs ──────────────────────────────────────────────────
-// Gear = the Settings nav footer; Shield = the whitelist/security section header;
+// Shield = the whitelist/security section header;
 // Trash = a per-row delete (a sturdier delete affordance than the inline "×" the
 // label rows use — this is a destructive whitelist removal). All 1.5-stroke,
 // matching the set above.
-
-export function IconGear(props: SVGProps<SVGSVGElement>) {
-  // A cog: a centre hub plus eight spokes around the rim.
-  return (
-    <svg {...base} {...props}>
-      <circle cx="8" cy="8" r="2" />
-      <path d="M8 1.5v1.7M8 12.8v1.7M1.5 8h1.7M12.8 8h1.7M3.4 3.4l1.2 1.2M11.4 11.4l1.2 1.2M12.6 3.4l-1.2 1.2M4.6 11.4l-1.2 1.2" />
-    </svg>
-  );
-}
 
 export function IconShield(props: SVGProps<SVGSVGElement>) {
   // A crest with a checkmark — the guard's protective second axis.
@@ -406,19 +386,6 @@ export function IconInitiative(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export function IconWorkstream(props: SVGProps<SVGSVGElement>) {
-  // A trunk that forks into two threads — a "Sub-Epic" stream of work.
-  return (
-    <svg {...base} {...props}>
-      <circle cx="4" cy="4" r="1.6" />
-      <circle cx="11.5" cy="4" r="1.6" />
-      <circle cx="4" cy="12" r="1.6" />
-      <path d="M4 5.6v4.8" />
-      <path d="M4 8h5.5a2 2 0 0 0 2-2v-.4" />
-    </svg>
-  );
-}
-
 export function IconTree(props: SVGProps<SVGSVGElement>) {
   // An indented outline — rows nested under a root (the Strategy roadmap).
   return (
@@ -429,9 +396,6 @@ export function IconTree(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-
-// Alias: the Strategy view's "roadmap" affordance shares the outline glyph.
-export const IconRoadmap = IconTree;
 
 // ── Add-on glyphs ──────────────────────────────────────────────────────────────
 // Each optional add-on contributes its own nav icon (keyed by AddonManifest.icon).

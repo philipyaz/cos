@@ -745,7 +745,6 @@ export interface NutritionTargetArtifact {
 //              "clearing" a sender = DELETE it, which returns trust:"unknown")
 //   blocked  — an explicitly distrusted sender
 export type TrustTier = "trusted" | "unknown" | "blocked";
-export const VALID_TRUST_TIER: TrustTier[] = ["trusted", "unknown", "blocked"];
 
 // One sender's trust record. `email` is the lowercased address (the map key the
 // sidecar stores by). `provenance` is an append-only audit trail of how the record
@@ -939,7 +938,6 @@ export type PushState = "pushed" | "local-only" | "unknown";
 // last run clean; error = no backups at all, or a hard failure exit; warning = the
 // in-between (stale / local-only / push-state-unknown / agent off).
 export type BackupOverall = "healthy" | "warning" | "error";
-export const VALID_BACKUP_OVERALL: BackupOverall[] = ["healthy", "warning", "error"];
 
 // ── Setup / readiness diagnostics (the deps-probe, mirroring the guard) ─────────
 // One diagnostic check in the Backups "Setup & diagnostics" section, the backups
@@ -951,7 +949,6 @@ export const VALID_BACKUP_OVERALL: BackupOverall[] = ["healthy", "warning", "err
 //   warn — a non-blocking degradation (the board can still back up on demand)
 //   fail — a blocking gap in the critical setup chain
 export type BackupCheckStatus = "ok" | "warn" | "fail";
-export const VALID_BACKUP_CHECK_STATUS: BackupCheckStatus[] = ["ok", "warn", "fail"];
 
 export interface BackupCheck {
   id: string; // stable check key (e.g. "repo-exists", "recovery-key")
@@ -967,7 +964,6 @@ export interface BackupCheck {
 //   "default"  — the ~/.cos-backups fallback (cos.env did not set BACKUP_REPO)
 //   "env"      — a COS_BACKUP_REPO env override (tests/sandboxes)
 export type BackupRepoSource = "env" | "cos.env" | "default";
-export const VALID_BACKUP_REPO_SOURCE: BackupRepoSource[] = ["env", "cos.env", "default"];
 
 // The render-ready Backups envelope — ALWAYS resolvable (the reader never throws).
 // On a reachable repo online:true with the real manifest/git/launchctl signals; on
@@ -1049,13 +1045,11 @@ export interface DeviceStatus {
 // "warning", else "healthy". Drives the at-a-glance header pill + the diagnostics
 // card; it does NOT replace `ready` (which is the narrower MCP ingest/query readiness).
 export type VaultOverall = "healthy" | "warning" | "error";
-export const VALID_VAULT_OVERALL: VaultOverall[] = ["healthy", "warning", "error"];
 
 // One vault setup/readiness check — the vault analogue of BackupCheck. ok | warn | fail,
 // where warn is a non-blocking degradation (e.g. Obsidian not registered, API key absent)
 // and fail is a blocking gap (no real vault folder yet — run setup-vault).
 export type VaultCheckStatus = "ok" | "warn" | "fail";
-export const VALID_VAULT_CHECK_STATUS: VaultCheckStatus[] = ["ok", "warn", "fail"];
 
 export interface VaultCheck {
   id: string; // stable check key (e.g. "vault-folder", "obsidian-registration")

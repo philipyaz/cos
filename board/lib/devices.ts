@@ -111,9 +111,3 @@ export function fetchDeviceStatus(): DeviceStatus {
     joinBlob: buildJoinBlob(),
   };
 }
-
-// Test-only: reset the in-memory map (the api-devices test drives recordDevice via
-// real HTTP, but the unit test pokes it directly).
-export function _resetDevices(): void {
-  seen.clear();
-}

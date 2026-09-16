@@ -140,18 +140,8 @@ const TIER_CHIP: Record<CaseKind, string> = {
   case: "bg-ink-50 text-ink-600 ring-1 ring-ink-200",
 };
 
-const TIER_DOT: Record<CaseKind, string> = {
-  initiative: "bg-violet-500",
-  workstream: "bg-sky-500",
-  case: "bg-ink-400",
-};
-
 export function tierAccent(kind?: CaseKind): string {
   return (kind && TIER_CHIP[kind]) || TIER_CHIP.case;
-}
-
-export function tierDotClass(kind?: CaseKind): string {
-  return (kind && TIER_DOT[kind]) || TIER_DOT.case;
 }
 
 // ── Trust tiers (guard sender-trust whitelist) ────────────────────────────────
