@@ -121,22 +121,8 @@ export interface NutritionTargetLatestResponse {
   artifact: NutritionTargetArtifact | null;
   version: number;
 }
-export interface NutritionTargetFeedResponse {
-  items: NutritionTargetArtifact[]; // newest first
-  total: number;
-  version: number;
-}
 
 // GET /api/nutrition/targets?latest=daily_targets — the most recent authored daily target.
 export function getLatestNutritionTarget(): Promise<NutritionTargetLatestResponse> {
   return request("/api/nutrition/targets?latest=daily_targets");
-}
-
-// GET /api/nutrition/targets[?from=&to=] — the history feed (newest first).
-export function listNutritionTargets(from?: string, to?: string): Promise<NutritionTargetFeedResponse> {
-  const qs = new URLSearchParams();
-  if (from) qs.set("from", from);
-  if (to) qs.set("to", to);
-  const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return request(`/api/nutrition/targets${suffix}`);
 }

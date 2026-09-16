@@ -275,12 +275,6 @@ export function setParent(id: string, parentId: string | null): Promise<CaseResp
   return updateCase(id, { parentId });
 }
 
-// Group many leaf cases under one container in a single batch (the headline
-// "group these under an Initiative/Workstream" verb). `null` detaches them all.
-export function regroupCases(ids: string[], parentId: string | null): Promise<CasesResponse> {
-  return updateCases(ids, { parentId });
-}
-
 // ── Tasks ────────────────────────────────────────────────────────────────────
 export function addTask(id: string, input: Record<string, unknown>): Promise<CaseTaskResponse> {
   return request<CaseTaskResponse>(`/api/cases/${encodeURIComponent(id)}/tasks`, {
@@ -523,12 +517,6 @@ export interface ReminderDetailResponse extends VersionedResponse {
   reminder: Reminder;
   messages: MessageRecord[];
 }
-// POST /api/reminders/{id}/messages — link an email to a reminder (sets the
-// message's reminderId). Returns the reminder, the (created) message, and version.
-export interface ReminderMessageResponse extends VersionedResponse {
-  reminder: Reminder;
-  message: MessageRecord;
-}
 
 // List reminders, optionally scoped by status, a linked node (caseId), and/or a
 // domain. All filters optional; omit the absent ones (a bare GET returns every
@@ -578,19 +566,6 @@ export function deleteReminder(id: string): Promise<OkResponse> {
 // [id] GET — the drawer uses this to render the read-only "Linked emails" list.
 export function fetchReminder(id: string): Promise<ReminderDetailResponse> {
   return request<ReminderDetailResponse>(`/api/reminders/${encodeURIComponent(id)}`);
-}
-
-// Link an email to a reminder (many emails about ONE matter → one reminder). Mirrors
-// the case messages POST but targets a reminder (sets message.reminderId, the single
-// source of truth for the reminder<->email link — no array on the reminder).
-export function linkReminderMessage(
-  reminderId: string,
-  input: Record<string, unknown>,
-): Promise<ReminderMessageResponse> {
-  return request<ReminderMessageResponse>(`/api/reminders/${encodeURIComponent(reminderId)}/messages`, {
-    method: "POST",
-    ...jsonBody(input),
-  });
 }
 
 // ── Priorities ─────────────────────────────────────────────────────────────
@@ -644,16 +619,7 @@ export function starCase(id: string, starred: boolean): Promise<CaseResponse> {
   return updateCase(id, { starred });
 }
 
-// ── Templates / commands / search ────────────────────────────────────────────
-export function applyTemplate(
-  templateId: string,
-  overrides?: Record<string, unknown>,
-): Promise<CaseResponse> {
-  return request<CaseResponse>("/api/templates", {
-    method: "POST",
-    ...jsonBody({ id: templateId, ...(overrides ? { overrides } : {}) }),
-  });
-}
+// ── Commands / search ────────────────────────────────────────────────────────
 
 // NL → verb dispatch. Always 200 (unrecognized text returns ran:[] + a message).
 export function runCommand(text: string): Promise<CommandResponse> {

@@ -57,10 +57,6 @@ export interface WeightEntryResponse {
   version: number;
   created?: boolean;
 }
-export interface BodyOkResponse {
-  ok: true;
-  version: number;
-}
 
 // ── Identity singleton ──────────────────────────────────────────────────────
 export function getBodyProfile(): Promise<BodyProfileResponse> {
@@ -100,7 +96,4 @@ export function upsertWeight(input: {
   note?: string;
 }): Promise<WeightEntryResponse> {
   return request("/api/body/weight", { method: "POST", body: JSON.stringify(input) });
-}
-export function deleteWeight(id: string): Promise<BodyOkResponse> {
-  return request(`/api/body/weight/${id}`, { method: "DELETE" });
 }

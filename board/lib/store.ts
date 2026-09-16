@@ -53,15 +53,8 @@ import type {
   TriageDecision,
   TriageDropReason,
 } from "./types";
-import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, VALID_ARTIFACT_SOURCE, VALID_TRAINING_STATUS, VALID_SHOPPING_CATEGORY, VALID_SHOPPING_STATUS, VALID_SHOPPING_SOURCE, caseKind } from "./types";
-import {
-  hierarchyViolation,
-  rollupFor,
-  descendantLeaves,
-  childrenOfCases,
-  messagesByReminderId,
-  type Rollup,
-} from "./selectors";
+import { SCHEMA_VERSION, VALID_CASE_STATUS, VALID_DOMAIN, VALID_REMINDER_STATUS, VALID_PRIORITY, VALID_CASE_KIND, VALID_MEAL_SLOT, VALID_HEALTH_RATING, VALID_PANTRY_CATEGORY, VALID_PANTRY_LOCATION, VALID_MEAL_PLAN_STATUS, VALID_ACTIVITY_LEVEL, VALID_BIOLOGICAL_SEX, VALID_ARTIFACT_SOURCE, VALID_TRAINING_STATUS, VALID_SHOPPING_CATEGORY, VALID_SHOPPING_STATUS, VALID_SHOPPING_SOURCE } from "./types";
+import { hierarchyViolation, messagesByReminderId } from "./selectors";
 import { resolveTrashRetentionDays, resolveReminderAutoDeleteDays } from "./retention";
 import { getDeviceRole } from "./cos-env";
 import type { PlanDayOutcome } from "./fitness-plan-status";
@@ -724,12 +717,6 @@ export function findEvent(db: DBShape, id: string): CalendarEvent | undefined {
   return (db.events ?? []).find((e) => e.id === id);
 }
 
-// Events linked to a case — event.caseId is the single source of truth for the
-// case<->event link (no eventIds[] array lives on the case).
-export function eventsForCase(db: DBShape, id: string): CalendarEvent[] {
-  return (db.events ?? []).filter((e) => e.caseId === id);
-}
-
 export function findReminder(db: DBShape, id: string): Reminder | undefined {
   return (db.reminders ?? []).find((r) => r.id === id);
 }
@@ -1378,22 +1365,10 @@ export function addNote(caseRec: CaseRecord, author: Actor, body: string): CaseN
 }
 
 // ── Hierarchy (Initiative > Workstream > Case) ─────────────────────────────────
-// Thin db-bound wrappers over the pure selectors, plus the single write-time
-// guard. assertHierarchy is the chokepoint every case write funnels its proposed
-// tier/parent change through (see the cases routes): it throws a 400-mapped
-// BadRequestError when the change would break the strict 3-tier tree.
-export function childrenOf(db: DBShape, id: string): CaseRecord[] {
-  return childrenOfCases(db.cases, id);
-}
-
-export function descendantLeavesOf(db: DBShape, id: string): CaseRecord[] {
-  return descendantLeaves(db.cases, id);
-}
-
-export function rollupOf(db: DBShape, id: string): Rollup {
-  return rollupFor(db.cases, id);
-}
-
+// The single write-time guard. assertHierarchy is the chokepoint every case
+// write funnels its proposed tier/parent change through (see the cases routes):
+// it throws a 400-mapped BadRequestError when the change would break the strict
+// 3-tier tree.
 export function assertHierarchy(
   db: DBShape,
   change: { id: string; kind: CaseKind; parentId?: string },
