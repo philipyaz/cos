@@ -13,21 +13,25 @@
 //   • PATCH collapsedLanes only        → boardQuery is preserved (partial merge)
 //   • PATCH {}                         → 400 (nothing to update)
 //
-// It snapshots board/data/prefs.json first (or notes its absence) and restores it
-// in a `finally`, so the live board is left EXACTLY as found (net-zero). Requires
-// a running board:
+// Snapshots the prefs.json beside COS_BOARD_DATA's store first (or notes its absence) and
+// restores it in a `finally`, so the live board is left EXACTLY as found (net-zero) — but ONLY
+// when COS_BOARD_DATA is set: unset means no file operation at all (a printed warning, not a
+// guessed path) rather than a silent live-store default. Requires a running board:
 //   cd board && npm run dev          # or npm run start
-//   node tests/api-prefs.mjs         # CRM_BASE_URL defaults to http://localhost:3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-prefs.mjs         # CRM_BASE_URL defaults to http://localhost:3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_PREFS (prefs file path).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — the prefs.json
+// beside it is what gets snapshotted; skipped if unset).
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PREFS_FILE =
-  process.env.COS_BOARD_PREFS || path.join(HERE, "..", "board", "data", "prefs.json");
+// Under run.sh, COS_BOARD_DATA names the sandbox store; the sandbox board keeps its prefs.json
+// in the same directory (run.sh seeds `{}` there — run.sh:400, prefs.ts:21 resolves it from
+// COS_DATA_DIR), so the derived path is the file the PATCHes below actually change. No env
+// path → no file operation at all (ADR 0029's host rule).
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
+const PREFS_FILE = DATA_FILE ? path.join(path.dirname(DATA_FILE), "prefs.json") : "";
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -58,12 +62,15 @@ async function main() {
   console.log(`api-prefs · board=${BASE}`);
 
   // Snapshot the live prefs file so the run is net-zero. It may not exist yet
-  // (a fresh board has no prefs) — remember that so we can delete it on restore.
+  // (a fresh board has no prefs) — remember that so we can delete it on restore. Only when
+  // PREFS_FILE is set (COS_BOARD_DATA names a store).
   let snapshot = null;
-  try {
-    snapshot = await fs.readFile(PREFS_FILE, "utf8");
-  } catch {
-    snapshot = null; // no file yet
+  if (PREFS_FILE) {
+    try {
+      snapshot = await fs.readFile(PREFS_FILE, "utf8");
+    } catch {
+      snapshot = null; // no file yet
+    }
   }
 
   try {
@@ -109,13 +116,15 @@ async function main() {
     const empty = await PATCH({});
     check(empty.status === 400, `empty PATCH (nothing to update) → 400 (got ${empty.status})`);
   } finally {
-    // Restore — leave the live prefs file exactly as found (net-zero).
-    if (snapshot === null) {
+    // Restore — leave the live prefs file exactly as found (net-zero), only when there is one.
+    if (!PREFS_FILE) {
+      console.log("  SKIP: COS_BOARD_DATA not set — no prefs snapshot/restore (writes made during this run are NOT reverted).");
+    } else if (snapshot === null) {
       await fs.rm(PREFS_FILE, { force: true });
       console.log("  ↩ removed test prefs.json (board had none before the run)");
     } else {
       await fs.writeFile(PREFS_FILE, snapshot, "utf8");
-      console.log("  ↩ restored board/data/prefs.json to its pre-test state");
+      console.log("  ↩ restored the prefs file to its pre-test state");
     }
   }
 

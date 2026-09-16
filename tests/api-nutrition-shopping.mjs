@@ -341,7 +341,7 @@ async function main() {
   } finally {
     if (DATA_FILE && snapshot != null) {
       await fs.writeFile(DATA_FILE, snapshot, "utf8");
-      console.log("  ↩ restored board/data/cases.json to its pre-test state");
+      console.log("  ↩ restored the store to its pre-test state");
     } else {
       console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
     }

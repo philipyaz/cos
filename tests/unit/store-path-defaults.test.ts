@@ -38,7 +38,9 @@
 // Denominator (re-derived this session, over the 57 direct-child `tests/*.mjs` files this gate
 // actually reads — NOT the issue's 72-over-115-tracked-files count, a different, larger
 // population): 75 total `process.env` `||`/`??` fallbacks — CRM_BASE_URL 37, COS_BOARD_DATA 31,
-// COS_GUARD_URL 3, COS_BOARD_PREFS 1, VAULT_SERVER 1, COS_CONCURRENCY 1, BOARD_SERVER 1.
+// COS_GUARD_URL 3, the now-deleted prefs-path env key 1 (this unit deletes it — see AC 3, and
+// this sentence deliberately does not spell its name so `git grep` for it still returns
+// nothing), VAULT_SERVER 1, COS_CONCURRENCY 1, BOARD_SERVER 1.
 //
 // Run: `node --test tests/unit/store-path-defaults.test.ts` (hub Node >= 23 strips types
 // unflagged — also rides `tests/run.sh`'s `tests/unit/*.test.ts` glob, `run.sh:510`/`:540`, so

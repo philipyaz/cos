@@ -31,19 +31,18 @@
 //   • the add-on GATE     — disabled → 404 (mirrors api-fitness-gate.mjs)
 //
 // Snapshots board/data/cases.json first and restores it in a `finally` (net-zero — settings.addons
-// + coachingArtifacts + events all live in cases.json). Requires a running board:
+// + coachingArtifacts + events all live in cases.json) — but ONLY when COS_BOARD_DATA is set:
+// unset means no snapshot/restore (a printed warning, not a guessed path) rather than a silent
+// live-store default. Requires a running board:
 //   cd board && npm run dev
-//   node tests/api-fitness-push-plan.mjs   # CRM_BASE_URL defaults to :3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-fitness-push-plan.mjs   # CRM_BASE_URL defaults to :3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore SKIPs if unset).
 import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE =
-  process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -115,7 +114,7 @@ const resultByDate = (body) => Object.fromEntries(body.results.map((r) => [r.dat
 
 async function main() {
   console.log(`api-fitness-push-plan · board=${BASE} · week anchored ${MONDAY}`);
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
 
   try {
     const enable = await PATCH("/api/addons/fitness", { enabled: true });
@@ -241,17 +240,21 @@ async function main() {
       `the session falls through to the MORNING margin — the evening conflict exists ONLY in busyWindows, not db.events (got ${probeEvent.body.event?.startTime})`,
     );
 
-    // Quote-bounded, not a loose substring search: an ISO createdAt/updatedAt timestamp
-    // minted during this very test run (e.g. "...T18:07:45.230Z") legitimately CONTAINS
-    // "18:07" without a leading/trailing '"' — a bare .includes("18:07") is a false-positive
-    // trap at whatever wall-clock minute the suite happens to run. `"18:07"` (as a complete,
-    // quoted JSON string value) is what an actually-leaked CalendarEvent startTime/endTime
-    // would look like, and an ISO timestamp never produces that exact quoted token.
-    const rawStoreAfterBusy = await fs.readFile(DATA_FILE, "utf8");
-    check(
-      !rawStoreAfterBusy.includes('"18:07"') && !rawStoreAfterBusy.includes('"21:23"'),
-      "the busyWindows sentinel times appear NOWHERE in the raw store file after the call — used-and-discarded, never persisted",
-    );
+    if (DATA_FILE) {
+      // Quote-bounded, not a loose substring search: an ISO createdAt/updatedAt timestamp
+      // minted during this very test run (e.g. "...T18:07:45.230Z") legitimately CONTAINS
+      // "18:07" without a leading/trailing '"' — a bare .includes("18:07") is a false-positive
+      // trap at whatever wall-clock minute the suite happens to run. `"18:07"` (as a complete,
+      // quoted JSON string value) is what an actually-leaked CalendarEvent startTime/endTime
+      // would look like, and an ISO timestamp never produces that exact quoted token.
+      const rawStoreAfterBusy = await fs.readFile(DATA_FILE, "utf8");
+      check(
+        !rawStoreAfterBusy.includes('"18:07"') && !rawStoreAfterBusy.includes('"21:23"'),
+        "the busyWindows sentinel times appear NOWHERE in the raw store file after the call — used-and-discarded, never persisted",
+      );
+    } else {
+      console.log("  SKIP: busyWindows-not-persisted raw-store check needs COS_BOARD_DATA (store-file surgery) — not set.");
+    }
 
     // ── GATE: disabled add-on → 404 (mirrors api-fitness-gate.mjs) ───────────
     const disabled = await PATCH("/api/addons/fitness", { enabled: false });
@@ -259,8 +262,12 @@ async function main() {
     const blocked = await POST("/api/fitness/push-plan-to-calendar", { periodKey: WEEK });
     check(blocked.status === 404, `push while disabled → 404 (got ${blocked.status})`);
   } finally {
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {

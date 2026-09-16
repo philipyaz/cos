@@ -15,22 +15,20 @@
 //     `ids` array is a 400 (a caller bug, not a no-op);
 //   • an archived gap is hidden by default and shown under ?includeArchived=1.
 //
-// Snapshots board/data/cases.json first and restores it in a `finally` (net-zero —
-// see api-clean.mjs/api-lifecycle.mjs for the same idiom). Both fixture cases are
-// created `status: "done"` so cleanup is one POST /api/cases/clean, mirroring
-// api-clean.mjs. Requires a running board:
+// Snapshots board/data/cases.json first and restores it in a `finally` (net-zero — see
+// api-clean.mjs/api-lifecycle.mjs for the same idiom) — but ONLY when COS_BOARD_DATA is set:
+// unset means no snapshot/restore (a printed warning, not a guessed path) rather than a silent
+// live-store default. Both fixture cases are created `status: "done"` so cleanup is one
+// POST /api/cases/clean, mirroring api-clean.mjs. Requires a running board:
 //   cd board && npm run dev
-//   node tests/api-vault-coverage.mjs    # CRM_BASE_URL defaults to http://localhost:3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-vault-coverage.mjs    # CRM_BASE_URL defaults to http://localhost:3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore SKIPs if unset).
 import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE =
-  process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -68,7 +66,7 @@ const gapFor = (body, id) => (body.gaps ?? []).find((g) => g.id === id);
 
 async function main() {
   console.log(`api-vault-coverage · board=${BASE}`);
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
 
   // Declared outside the try so `finally` can clean them up even if an assertion
   // throws partway through (the snapshot restore below is the real safety net either way).
@@ -179,12 +177,17 @@ async function main() {
     const cov4all = await coverage("?includeArchived=1");
     check(!!gapFor(cov4all.body, A), "archived A reappears under ?includeArchived=1");
   } finally {
-    // Cleanup: A and B are both `done` (created that way) → one clean call.
+    // Cleanup: A and B are both `done` (created that way) → one clean call (an HTTP cleanup,
+    // always runs).
     const ids = [A, B].filter(Boolean);
     if (ids.length) await POST("/api/cases/clean", { ids });
 
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {

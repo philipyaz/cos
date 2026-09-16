@@ -73,8 +73,9 @@ read-modify-write JSON store. `concurrency.mjs` is the regression guard for the
 store mutex (`board/lib/store.ts` `mutate()`): it fires **N parallel** `create_case`
 and N parallel `add_task` at a **running** board and asserts no lost writes and no
 duplicate ids (case count grows by exactly N; all case/task ids unique). It
-snapshots and restores `board/data/cases.json`, so the live board is left exactly
-as found. `run.sh` runs it as step **[4]** only when a board is reachable at
+snapshots the store file named by `COS_BOARD_DATA` (under `run.sh`, the sandbox
+store) and restores it in a `finally`; without the variable the file half SKIPs
+and HTTP writes are NOT reverted. `run.sh` runs it as step **[4]** only when a board is reachable at
 `CRM_BASE_URL`; otherwise it is **skipped** (so the suite stays headless).
 
 ### 6. API lifecycle (live board)
@@ -102,8 +103,10 @@ holds at each step:
 > `api-lifecycle.mjs` asserts no merge contract. The route→derive→push wiring that a
 > merge triggers is covered by `api-trust-derive.mjs` (§11b in `run.sh`).
 
-Like `concurrency.mjs` it snapshots `board/data/cases.json` and restores it in a
-`finally`, so the run is **net-zero**. It prints **✓/✗ per check**, exits non-zero
+Like `concurrency.mjs` it snapshots the store file named by `COS_BOARD_DATA`
+(under `run.sh`, the sandbox store) and restores it in a `finally`; without the
+variable the file half SKIPs and HTTP writes are NOT reverted. It prints **✓/✗ per
+check**, exits non-zero
 on any failure, and prints a clear "is the board running?" message when no board is
 reachable. `run.sh` runs it as step **[5]** only when a **healthy** board (a `2xx`
 from `GET /api/cases`) is reachable; otherwise it is **skipped** (not failed) — a
@@ -151,8 +154,10 @@ fail-safe semantic **POST**. It seeds a marker case and asserts:
   it passes in **both** modes (CI default = sidecar down). This is the load-bearing
   fail-safe invariant: the board searches with **no sidecar and no uv**.
 
-Like the other live checks it snapshots `board/data/cases.json` and restores it in
-a `finally` (net-zero). `run.sh` runs it as step **[8]** only when a **healthy**
+Like the other live checks it snapshots the store file named by `COS_BOARD_DATA`
+(under `run.sh`, the sandbox store) and restores it in a `finally`; without the
+variable the file half SKIPs and HTTP writes are NOT reverted. `run.sh` runs it as
+step **[8]** only when a **healthy**
 board is reachable; otherwise it is **skipped** (not failed).
 
 ### 9. API events (live board)
@@ -177,8 +182,10 @@ It drives a **running** board and asserts the contract using OUR field names:
   startTime:"9am" }` → **400** (bad `HH:MM`).
 - **DELETE `/api/events/:id`** → **200**; the id no longer appears in `GET /api/events`.
 
-Like the other live checks it snapshots `board/data/cases.json` and restores it in
-a `finally` (net-zero). `run.sh` runs it as step **[9]** only when a **healthy**
+Like the other live checks it snapshots the store file named by `COS_BOARD_DATA`
+(under `run.sh`, the sandbox store) and restores it in a `finally`; without the
+variable the file half SKIPs and HTTP writes are NOT reverted. `run.sh` runs it as
+step **[9]** only when a **healthy**
 board is reachable; otherwise it is **skipped** (not failed).
 
 ### 10. API reminders (live board)
@@ -206,8 +213,10 @@ names:
 - **DELETE `/api/reminders/:id`** → **200**; the id no longer appears in
   `GET /api/reminders`.
 
-Like the other live checks it snapshots `board/data/cases.json` and restores it in a
-`finally` (net-zero). `run.sh` runs it as step **[10]** only when a **healthy** board is
+Like the other live checks it snapshots the store file named by `COS_BOARD_DATA`
+(under `run.sh`, the sandbox store) and restores it in a `finally`; without the
+variable the file half SKIPs and HTTP writes are NOT reverted. `run.sh` runs it as
+step **[10]** only when a **healthy** board is
 reachable; otherwise it is **skipped** (not failed).
 
 ### 11. API trust whitelist (live board + guard sidecar)
@@ -449,9 +458,10 @@ node tests/board-lint.mjs /path/to/cases.json
 # Running an api-* test by hand — NEVER point it at your live board. Either let
 # run.sh spin up the throwaway board, or point CRM_BASE_URL at a DISPOSABLE board
 # whose store you've isolated with COS_DATA_DIR, e.g.:
-COS_DATA_DIR=/tmp/throwaway-data cp tests/fixtures/board-seed.json /tmp/throwaway-data/cases.json
+mkdir -p /tmp/throwaway-data
+cp tests/fixtures/board-seed.json /tmp/throwaway-data/cases.json
 ( cd board && COS_DATA_DIR=/tmp/throwaway-data PORT=3999 node_modules/.bin/next dev )  # other shell
-CRM_BASE_URL=http://localhost:3999 node tests/api-lifecycle.mjs
+COS_BOARD_DATA=/tmp/throwaway-data/cases.json CRM_BASE_URL=http://localhost:3999 node tests/api-lifecycle.mjs
 ```
 
 `run.sh` exits non-zero only when a **board invariant** is violated (the hard
@@ -471,14 +481,14 @@ may still be in flight; once migration lands they read clean and stay that way.
   - `due-status.test.ts` / `format-guards.test.ts` / `store-helpers.test.ts` — focused regression tests pinning specific fixes.
 - `fixtures/voice-note-marco.md` + `.expected.json` — voice→both golden case.
 - `fixtures/email-velastack.md` + `.expected.json` — email→update-existing golden case.
-- `concurrency.mjs` — parallel-write safety check (needs a running board; net-zero).
-- `api-lifecycle.mjs` — v3 HTTP API end-to-end lifecycle check (needs a running board; net-zero).
-- `api-prefs.mjs` — persisted view-state API check (`/api/prefs` → `prefs.json`): round-trip, query canonicalisation, lane filtering, partial merge, 400 (needs a running board; net-zero).
-- `api-search.mjs` — search API check (`/api/search`): keyword GET back-compat, semantic POST batch envelope, 400 guard, and the always-2xx-finds-the-marker fail-safe property (needs a running board; net-zero).
-- `api-events.mjs` — v4 calendar-events API check (`/api/events[/:id]`): create→`EVT-<n>`+version bump, list + `from`/`to`/`caseId` filters, PATCH persist, the case↔event link (case GET lists it), the bad-case/missing-title/bad-date/bad-`HH:MM` 400s, and delete (needs a running board; net-zero).
-- `api-reminders.mjs` — v5 reminders API check (`/api/reminders[/:id]`): create→`REM-<n>`+version bump, list + `status`/`caseId`/`domain` filters, PATCH persist (`status:done` sets `completedAt`), the node↔reminder link (case GET lists it) + unlink, the bad-case/missing-title/bad-status/bad-`dueAt` 400s, and delete (needs a running board; net-zero).
+- `concurrency.mjs` — parallel-write safety check (needs a running board; net-zero when `COS_BOARD_DATA` is set).
+- `api-lifecycle.mjs` — v3 HTTP API end-to-end lifecycle check (needs a running board; net-zero when `COS_BOARD_DATA` is set).
+- `api-prefs.mjs` — persisted view-state API check (`/api/prefs` → `prefs.json`): round-trip, query canonicalisation, lane filtering, partial merge, 400 (needs a running board; net-zero when `COS_BOARD_DATA` is set).
+- `api-search.mjs` — search API check (`/api/search`): keyword GET back-compat, semantic POST batch envelope, 400 guard, and the always-2xx-finds-the-marker fail-safe property (needs a running board; net-zero when `COS_BOARD_DATA` is set).
+- `api-events.mjs` — v4 calendar-events API check (`/api/events[/:id]`): create→`EVT-<n>`+version bump, list + `from`/`to`/`caseId` filters, PATCH persist, the case↔event link (case GET lists it), the bad-case/missing-title/bad-date/bad-`HH:MM` 400s, and delete (needs a running board; net-zero when `COS_BOARD_DATA` is set).
+- `api-reminders.mjs` — v5 reminders API check (`/api/reminders[/:id]`): create→`REM-<n>`+version bump, list + `status`/`caseId`/`domain` filters, PATCH persist (`status:done` sets `completedAt`), the node↔reminder link (case GET lists it) + unlink, the bad-case/missing-title/bad-status/bad-`dueAt` 400s, and delete (needs a running board; net-zero when `COS_BOARD_DATA` is set).
 - `api-trust.mjs` — guard sender-trust **whitelist** API check via the board's thin PROXY routes (`/api/trust[/:email]` → the guard sidecar `:8009`): GET always-200 online shape (SKIPs the lifecycle when `online:false`), add (default `trusted`) → list → tier-flip (`blocked`) → delete lifecycle, and the `unknown`-tier / bad-email 400s. Uses a unique throwaway email and removes it in a `finally` — the whitelist lives in the sidecar, not `cases.json`, so net-zero is via that cleanup (needs a running board + a live guard sidecar).
-- `api-trust-derive.mjs` — **end-to-end AUTOMATIC trust DERIVATION** check across every trigger that writes the whitelist as a side effect of a board mutation: `link_message` (case handshake + origination incl. **Cc**), `link_reminder_message` (a **reminder is a first-class trust source**), and relink (`PATCH /api/messages/:id`) — plus the **security** property that a reply-all to a thread someone else started does **not** trust the room. Complements the pure-rule unit suite (`unit/trust-derive.test.ts`) by proving the route→`deriveTrustTargets`→`pushDerivedTrust`→sidecar **wiring**. Snapshots+restores `cases.json` and `DELETE`s every throwaway sender in a `finally` (net-zero on both stores); SKIPs gracefully when the guard is `online:false` (needs a running board + a live guard sidecar; `run.sh` step [11b]).
+- `api-trust-derive.mjs` — **end-to-end AUTOMATIC trust DERIVATION** check across every trigger that writes the whitelist as a side effect of a board mutation: `link_message` (case handshake + origination incl. **Cc**), `link_reminder_message` (a **reminder is a first-class trust source**), and relink (`PATCH /api/messages/:id`) — plus the **security** property that a reply-all to a thread someone else started does **not** trust the room. Complements the pure-rule unit suite (`unit/trust-derive.test.ts`) by proving the route→`deriveTrustTargets`→`pushDerivedTrust`→sidecar **wiring**. Snapshots+restores `cases.json` and `DELETE`s every throwaway sender in a `finally` (net-zero on both stores when `COS_BOARD_DATA` is set; the sidecar cleanup always runs); SKIPs gracefully when the guard is `online:false` (needs a running board + a live guard sidecar; `run.sh` step [11b]).
 - `guard-quarantine-release.mjs` — quarantine **release/replay** contract check, driven **directly** against the guard sidecar (`:8009`, `COS_GUARD_URL`): (a) `PATCH status=released` upserts the sender as `trusted` ifAbsent while `status=dismissed` is **inert** (no trust write); (b) `GET /quarantine/released` = `status==released && !replayed`, and `replayed=true` drops the record; (c) `POST /scan` with `threadId` stores it and the released row exposes it. Seeds a strong injection so records flag under both classifiers; uses unique throwaway senders + `DELETE`s every minted record + sender in a `finally` (net-zero across both sidecar stores). SKIPs gracefully when `/healthz` is unreachable (needs a live guard sidecar; run unconditionally as step [12]).
 - `../search/test_search.py` — headless, offline tests for the semantic search sidecar (index/top-k/batch/determinism/reindex over both backends; uv-gated in `run.sh` step [14]).
 - `../guard/test_guard.py` — headless, hermetic tests for the prompt-injection guard sidecar (HeuristicClassifier scoring + adversarial evasion corpus, `assess` windowing, `scan_segments`, the Trust/Quarantine/Config stores, FastAPI smoke; `COS_GUARD_CLASSIFIER=heuristic`, uv-gated in `run.sh` step [15]).

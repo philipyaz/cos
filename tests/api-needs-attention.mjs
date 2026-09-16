@@ -32,22 +32,20 @@
 // route 404s (there was no GET /api/cases/needs-attention).
 //
 // Snapshots board/data/cases.json first and restores it in a `finally` (net-zero — see
-// api-vault-coverage.mjs for the same idiom). Fixtures are created NON-done — the
-// OPPOSITE of api-vault-coverage's all-done fixtures, since a done case can never enter
-// any bucket — so cleanup PATCHes each to `done` before the single POST /api/cases/clean.
-// Requires a running board:
+// api-vault-coverage.mjs for the same idiom) — but ONLY when COS_BOARD_DATA is set: unset means
+// no snapshot/restore (a printed warning, not a guessed path) rather than a silent live-store
+// default. Fixtures are created NON-done — the OPPOSITE of api-vault-coverage's all-done
+// fixtures, since a done case can never enter any bucket — so cleanup PATCHes each to `done`
+// before the single POST /api/cases/clean. Requires a running board:
 //   cd board && npm run dev
-//   node tests/api-needs-attention.mjs    # CRM_BASE_URL defaults to http://localhost:3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-needs-attention.mjs    # CRM_BASE_URL defaults to http://localhost:3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore SKIPs if unset).
 import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE =
-  process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -84,7 +82,7 @@ const inBucket = (body, bucket, id) => (body[bucket] ?? []).some((c) => c.id ===
 
 async function main() {
   console.log(`api-needs-attention · board=${BASE}`);
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
 
   // Declared outside the try so `finally` can clean up even if an assertion throws
   // partway through (the snapshot restore below is the real safety net either way).
@@ -306,15 +304,20 @@ async function main() {
     // Cleanup: fixtures were created non-done (the opposite of api-vault-coverage's
     // all-done fixtures — a done case never enters any bucket) — PATCH each to done,
     // then one clean call, mirroring api-vault-coverage.mjs. Seeded events are backstopped
-    // by the snapshot restore below (db.events lives in cases.json, like api-events.mjs).
+    // by the snapshot restore below when COS_BOARD_DATA is set (db.events lives in
+    // cases.json, like api-events.mjs).
     const ids = [overdueId, futureId, untriagedId, unlinkedId, overdueId2].filter(Boolean);
     for (const id of ids) {
       await PATCH(`/api/cases/${encodeURIComponent(id)}`, { status: "done" });
     }
     if (ids.length) await POST("/api/cases/clean", { ids });
 
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {

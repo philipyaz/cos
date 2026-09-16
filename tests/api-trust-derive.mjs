@@ -19,15 +19,21 @@
 //
 // NET-ZERO on BOTH stores:
 //   • cases.json (cases/reminders/messages live there) is snapshotted and restored in a
-//     `finally` — the running board re-reads the file per request (no cache), so the
-//     restore is picked up live.
+//     `finally` — the running board re-reads the file per request (no cache), so the restore
+//     is picked up live — but ONLY when COS_BOARD_DATA is set: unset means no snapshot/restore
+//     of cases.json (a printed warning, not a guessed path) rather than a silent live-store
+//     default.
 //   • every correspondent is a UNIQUE throwaway address; all are DELETEd from the whitelist
-//     in the `finally`, so the live trust store is left EXACTLY as found.
+//     in the `finally`, so the live trust store is left EXACTLY as found (this half is an HTTP
+//     cleanup, not a file operation, so it always runs).
 //
 // Requires a running board AND a live guard sidecar:
 //   cd guard && uv run uvicorn sidecar:app --port 8009
 //   cd board && npm run dev            # or npm run start
-//   node tests/api-trust-derive.mjs    # CRM_BASE_URL defaults to http://localhost:3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-trust-derive.mjs    # CRM_BASE_URL defaults to http://localhost:3000
+//
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore of cases.json SKIPs if unset; the trust-store cleanup above is unconditional).
 
 import { readFile, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -36,7 +42,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const DATA_FILE = process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 // ── principal resolution (mirror board/lib/principal.ts: env wins, else config) ──
 function readPrincipal() {
@@ -118,7 +124,7 @@ async function main() {
     return;
   }
 
-  const snapshot = await readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await readFile(DATA_FILE, "utf8") : null;
 
   try {
     // ── S1 — link_message, case HANDSHAKE ────────────────────────────────────
@@ -194,7 +200,8 @@ async function main() {
       check((await tier(N)) === "trusted", "S6 relink completes the handshake → N now trusted");
     }
   } finally {
-    // Clean BOTH stores: remove every throwaway sender, then restore cases.json.
+    // Clean BOTH stores: remove every throwaway sender (an HTTP cleanup, always runs), then
+    // restore cases.json only when there is a snapshot to restore.
     for (const email of created) {
       try {
         await DELETE(`/api/trust/${encodeURIComponent(email)}`);
@@ -202,8 +209,12 @@ async function main() {
         /* best-effort */
       }
     }
-    await writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ cleaned up throwaway trust entries + restored board/data/cases.json");
+    if (DATA_FILE && snapshot != null) {
+      await writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ cleaned up throwaway trust entries + restored the store to its pre-test state");
+    } else {
+      console.log("  ↩ cleaned up throwaway trust entries. SKIP: COS_BOARD_DATA not set — no file snapshot/restore of cases.json (writes made during this run are NOT reverted).");
+    }
   }
 
   console.log("");

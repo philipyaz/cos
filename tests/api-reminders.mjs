@@ -33,21 +33,19 @@
 //                                   by applyReminderUpdate's coercion), empty-set completes
 //                                   the reminder, and absent+empty creates nothing.
 //
-// It snapshots board/data/cases.json first and restores it in a `finally`, so the
-// live board is left EXACTLY as found (net-zero) — db.reminders lives in cases.json
-// alongside the cases. Requires a running board:
+// It snapshots board/data/cases.json first and restores it in a `finally` (net-zero — db.reminders
+// lives in cases.json alongside the cases) — but ONLY when COS_BOARD_DATA is set: unset means no
+// snapshot/restore (a printed warning, not a guessed path) rather than a silent live-store
+// default. Requires a running board:
 //   cd board && npm run dev          # or npm run start
-//   node tests/api-reminders.mjs     # CRM_BASE_URL defaults to http://localhost:3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-reminders.mjs     # CRM_BASE_URL defaults to http://localhost:3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore SKIPs if unset).
 import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE =
-  process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 // --- tiny check harness ------------------------------------------------------
 let failures = 0;
@@ -90,8 +88,7 @@ const REM_ID_RE = /^REM-\d+$/;
 async function main() {
   console.log(`api-reminders · board=${BASE}`);
 
-  // Snapshot the live store so the whole run is net-zero (db.reminders lives in cases.json).
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
 
   try {
     // ----------------------------------------------------------------------
@@ -584,9 +581,12 @@ async function main() {
     check(remindersAfterClean.length === countBeforeClean, "a clean deposit (absent + empty) creates no reminder");
     check(!remindersAfterClean.some((r) => r.title === cleanTitle), `no reminder titled '${cleanTitle}' exists`);
   } finally {
-    // Restore — leave the live board exactly as found (net-zero).
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {

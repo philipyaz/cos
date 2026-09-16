@@ -2,15 +2,14 @@
 // api-nutrition-diet-profile.mjs — the v14 nutrition surfaces: the dietary PROFILE (allergies/
 // dietType/notes/philosophy, with the default-when-empty diet-views philosophy) and the AGENT-
 // AUTHORED daily-targets feed (save/list/latest + the board-computed `warnings` sibling). Modeled
-// on api-fitness-gate.mjs. Against a RUNNING board; snapshots + restores cases.json (net-zero).
-//   cd board && npm run dev ; node tests/api-nutrition-diet-profile.mjs   # CRM_BASE_URL :3000
+// on api-fitness-gate.mjs. Against a RUNNING board; snapshots + restores cases.json (net-zero)
+// ONLY when COS_BOARD_DATA is set — unset means no snapshot/restore (a printed warning, not a
+// guessed path) rather than a silent live-store default.
+//   cd board && npm run dev ; COS_BOARD_DATA=<that board's cases.json> node tests/api-nutrition-diet-profile.mjs   # CRM_BASE_URL :3000
 import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -42,7 +41,7 @@ const PATCH = (p, b) => api("PATCH", p, b);
 
 async function main() {
   console.log(`api-nutrition-diet-profile · board=${BASE}`);
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
 
   try {
     // ── default-when-empty philosophy is served even before anything is set / while disabled ──
@@ -99,8 +98,12 @@ async function main() {
     // ── shape validation: a target with no daily_calories → 400 ──
     check((await POST("/api/nutrition/targets", { payload: { foo: 1 } }, AGENT)).status === 400, "a payload without daily_calories → 400");
   } finally {
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {

@@ -28,20 +28,21 @@
 //                          nothing is created at all
 //
 // Snapshots board/data/cases.json first and restores it in a `finally` (net-zero —
-// coachingArtifacts + healthEntries + settings.addons all live in cases.json). Requires a
-// running board:
+// coachingArtifacts + healthEntries + settings.addons all live in cases.json) — but ONLY when
+// COS_BOARD_DATA is set: unset means no snapshot/restore (a printed warning, not a guessed path)
+// rather than a silent live-store default. Requires a running board:
 //   cd board && npm run dev
-//   node tests/api-fitness-plan-outcome.mjs   # CRM_BASE_URL defaults to :3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-fitness-plan-outcome.mjs   # CRM_BASE_URL defaults to :3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore SKIPs if unset).
 import { promises as fs, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE =
-  process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -125,8 +126,8 @@ const resultByDate = (body) => Object.fromEntries(body.results.map((r) => [r.dat
 
 async function main() {
   console.log(`api-fitness-plan-outcome · board=${BASE}`);
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
-  const schemaVersionBefore = JSON.parse(snapshot).schemaVersion;
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
+  const schemaVersionBefore = snapshot != null ? JSON.parse(snapshot).schemaVersion : null;
 
   checkRouteVsTool();
 
@@ -159,16 +160,20 @@ async function main() {
     check(afterD1.body.artifact.payload.weekly_notes === "outcome-channel test plan", "plan-level 'weekly_notes' is untouched");
 
     // ── (b) schema untouched — the outcome rides the verbatim payload ───────────
-    // The sandbox store is the seeded fixture (an OLDER schemaVersion by design), so the first
-    // write of this run stamps the CODE's version: "no migration of its own" is asserted against
-    // /api/healthz's schemaVersion (the code), never the pre-write file.
-    const hz = await GET("/api/healthz");
-    const rawAfterD1 = await fs.readFile(DATA_FILE, "utf8");
-    const schemaVersionAfter = JSON.parse(rawAfterD1).schemaVersion;
-    check(
-      typeof hz.body?.schemaVersion === "number" && schemaVersionAfter === hz.body.schemaVersion,
-      `a day write leaves the store at the code's SCHEMA_VERSION (seed ${schemaVersionBefore} → ${schemaVersionAfter}, code ${hz.body?.schemaVersion}) — no migration of its own`,
-    );
+    if (DATA_FILE) {
+      // The sandbox store is the seeded fixture (an OLDER schemaVersion by design), so the first
+      // write of this run stamps the CODE's version: "no migration of its own" is asserted against
+      // /api/healthz's schemaVersion (the code), never the pre-write file.
+      const hz = await GET("/api/healthz");
+      const rawAfterD1 = await fs.readFile(DATA_FILE, "utf8");
+      const schemaVersionAfter = JSON.parse(rawAfterD1).schemaVersion;
+      check(
+        typeof hz.body?.schemaVersion === "number" && schemaVersionAfter === hz.body.schemaVersion,
+        `a day write leaves the store at the code's SCHEMA_VERSION (seed ${schemaVersionBefore} → ${schemaVersionAfter}, code ${hz.body?.schemaVersion}) — no migration of its own`,
+      );
+    } else {
+      console.log("  SKIP: schema-untouched raw-store check needs COS_BOARD_DATA (store-file surgery) — not set.");
+    }
 
     // ── (c) computed + immediate — reconciliation reflects the write right away ─
     const unresolvedAfterD1 = new Set(afterD1.body.reconciliation.unresolvedDays.days.map((d) => d.date));
@@ -276,8 +281,12 @@ async function main() {
     check(afterNull[D1]?.status === "done" && afterNull[D2]?.status === "done", `…and the recorded outcomes carried forward over status:null (${D1}=${afterNull[D1]?.status}, ${D2}=${afterNull[D2]?.status})`);
     check(!("status" in (afterNull[D3] ?? {})), `…while a never-answered day (${D3}) gains no null status key`);
   } finally {
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {

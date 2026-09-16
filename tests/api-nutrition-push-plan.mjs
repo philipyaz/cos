@@ -23,19 +23,18 @@
 // is safe on a weekend (outside the default Mon-Fri working window), so those assertions stay
 // green regardless of the margins rule below. The margins rule itself gets its own weekday probe.
 //
-// Snapshots board/data/cases.json first and restores it in a `finally`. Requires a running board:
+// Snapshots board/data/cases.json first and restores it in a `finally` (net-zero) — but ONLY
+// when COS_BOARD_DATA is set: unset means no snapshot/restore (a printed warning, not a guessed
+// path) rather than a silent live-store default. Requires a running board:
 //   cd board && npm run dev
-//   node tests/api-nutrition-push-plan.mjs   # CRM_BASE_URL defaults to :3000
+//   COS_BOARD_DATA=<that board's cases.json> node tests/api-nutrition-push-plan.mjs   # CRM_BASE_URL defaults to :3000
 //
-// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (data file path).
+// Env: CRM_BASE_URL (board url), COS_BOARD_DATA (the RUNNING board's cases.json — snapshot/
+// restore SKIPs if unset).
 import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE =
-  process.env.COS_BOARD_DATA || path.join(HERE, "..", "board", "data", "cases.json");
+const DATA_FILE = process.env.COS_BOARD_DATA || "";
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -85,7 +84,7 @@ const SUN = addDays(SAT, 1);
 
 async function main() {
   console.log(`api-nutrition-push-plan · board=${BASE} · weekend anchored ${SAT}/${SUN}`);
-  const snapshot = await fs.readFile(DATA_FILE, "utf8");
+  const snapshot = DATA_FILE ? await fs.readFile(DATA_FILE, "utf8") : null;
 
   try {
     const enable = await PATCH("/api/addons/nutrition", { enabled: true });
@@ -204,8 +203,12 @@ async function main() {
     const blocked = await POST("/api/nutrition/push-plan-to-calendar", { from, to });
     check(blocked.status === 404, `push while disabled → 404 (got ${blocked.status})`);
   } finally {
-    await fs.writeFile(DATA_FILE, snapshot, "utf8");
-    console.log("  ↩ restored board/data/cases.json to its pre-test state");
+    if (DATA_FILE && snapshot != null) {
+      await fs.writeFile(DATA_FILE, snapshot, "utf8");
+      console.log("  ↩ restored the store to its pre-test state");
+    } else {
+      console.log("  SKIP: COS_BOARD_DATA not set — no file snapshot/restore (writes made during this run are NOT reverted).");
+    }
   }
 
   if (failures) {
