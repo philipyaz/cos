@@ -5,9 +5,10 @@
 // Escape-to-close, deleted from all nine call sites). Idiom follows field.tsx / action-button.tsx:
 // module-private class constants (never exported — ADR 0035 "not exporting the base string is
 // part of the decision"), full literal class strings per board/lib/format.ts:90-93. One
-// divergence from those two: this file needs a hook (the Escape effect), so it opens with
-// "use client" and imports useEffect — markdown.tsx is the in-tree precedent for a hook-using
-// shared component (field.tsx:2 / action-button.tsx:2 already name it the sole exception).
+// divergence from those two: this file needs hooks (the Escape effect, and since cos-ops#107 the
+// one-history-entry-per-open effect), so it opens with "use client" and imports useEffect/useRef
+// — markdown.tsx is the in-tree precedent for a hook-using shared component (field.tsx:2 /
+// action-button.tsx:2 already name it the sole exception).
 //
 // ADR 0035's base/call-site split, restated a third time — its own revisit clause ("a third
 // primitive lands and the split has to be restated a third time") names exactly this remedy, a
@@ -18,7 +19,8 @@
 // path to fire. A future edit that adds a passthrough must move `px-*`/`ml-*` out to call sites
 // in the same change — don't read this file as "bases may own `px-*` now".
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { openOverlay } from "@/lib/overlay-history";
 
 const HEADER_CLASS = "px-5 h-12 flex items-center border-b border-ink-100 gap-2";
 const CLOSE_CLASS =
@@ -72,8 +74,9 @@ export function DrawerHeader({
   );
 }
 
-// Stage 2 — the shell. Renders the scrim + <aside> and owns the Escape-to-close effect once
-// (deleted from all nine call sites). `footer` is optional and rendered verbatim after children:
+// Stage 2 — the shell. Renders the scrim + <aside> and owns the Escape-to-close effect and the
+// one-history-entry-per-open effect (cos-ops#107), each once (deleted from all nine call sites).
+// `footer` is optional and rendered verbatim after children:
 // the call site's own footer container (six `min-h-14`, one `min-h-12`) travels through this slot
 // byte-unchanged — normalizing the containers is a geometry change this unit does not make.
 export function DrawerShell({
@@ -98,6 +101,18 @@ export function DrawerShell({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+  // Mount-once with a ref, deliberately unlike the Escape effect's [onClose] deps above:
+  // re-adding a keydown listener per render is free, but re-running open/release per render would
+  // churn history entries (adoption would absorb it, but the correct shape is not to churn at
+  // all). DrawerShell has no `open` prop — mounted ⇔ visible — so mount = open, cleanup = close.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+  useEffect(() => {
+    const handle = openOverlay(() => onCloseRef.current());
+    return () => handle.release();
+  }, []);
   return (
     <>
       <div className={`${SCRIM_CLASS} ${LAYER_CLASS[layer].scrim}`} onClick={onClose} aria-hidden />
