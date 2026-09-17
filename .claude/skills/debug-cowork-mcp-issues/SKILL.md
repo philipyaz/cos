@@ -1,6 +1,6 @@
 ---
 name: debug-cowork-mcp-issues
-description: Diagnose and fix a Cos MCP server that is failing in Claude Cowork Desktop (or in Claude Code) — "board not responding", a server missing from the tool list, a tool call erroring, vault 401, openwhispr can't open its DB, whatsapp dead, or a server that dies after a while. Walks the escalation ladder (relaunch → read Cowork's per-server logs → reproduce the spawn outside Cowork → apply the known fix → regenerate config) and knows the two distinct wiring paths (Cowork = direct stdio from claude_desktop_config.json; Claude Code = launchd supergateway bridges on :8001–:8006). Use when Cowork or Code "can't see" board/calendar/guard/vault/openwhispr/whatsapp, when an MCP tool call fails or times out, when a server shows as failed/disconnected, after editing claude_desktop_config.json or .mcp.json, or whenever an MCP server is misbehaving and you need to find the real cause.
+description: Diagnose and fix a Cos MCP server that is failing in Claude Cowork Desktop (or in Claude Code) — "board not responding", a server missing from the tool list, a tool call erroring, vault 401, openwhispr can't open its DB, whatsapp dead, or a server that dies after a while. Walks the escalation ladder (relaunch → read Cowork's per-server logs → reproduce the spawn outside Cowork → apply the known fix → regenerate config) and knows the two distinct wiring paths (Cowork = direct stdio from claude_desktop_config.json; Claude Code = launchd supergateway bridges). Use when Cowork or Code "can't see" board/calendar/guard/vault/nutrition/fitness/body/openwhispr/whatsapp, when an MCP tool call fails or times out, when a server shows as failed/disconnected, after editing claude_desktop_config.json or .mcp.json, or whenever an MCP server is misbehaving and you need to find the real cause.
 allowed-tools: Bash, Read
 ---
 
@@ -12,10 +12,10 @@ hitting **before** doing anything — the diagnosis and the fix differ.
 | Layer | How the server runs | Config | Reads config… |
 |---|---|---|---|
 | **Claude Cowork Desktop** | Cowork spawns each server **directly** as a stdio `command` | `~/Library/Application Support/Claude/claude_desktop_config.json` | **only at launch** (⌘Q to reload) |
-| **Claude Code** | a launchd **`supergateway` bridge** per server (:8001–:8006) | `$REPO_ROOT/.mcp.json` | per session (launchd supervises the bridge) |
+| **Claude Code** | a launchd **`supergateway` bridge** per server | `$REPO_ROOT/.mcp.json` | per session (launchd supervises the bridge) |
 
-The board **app** (:3000) is a third, independent thing — it works with no bridges at all. Don't
-chase an MCP bug that's really "the board app isn't running on :3000" (see step 4).
+The board **app** ($BOARD_URL) is a third, independent thing — it works with no bridges at all. Don't
+chase an MCP bug that's really "the board app isn't answering at $BOARD_URL" (see step 4).
 
 Every shell block below starts with the loader so nothing is hardcoded:
 ```sh
@@ -29,9 +29,10 @@ The full reference for this runbook is
 
 ## Step 0 — Scope it
 
-Ask / confirm: **which client** (Cowork or Claude Code), **which server** (board / calendar / guard /
-vault / openwhispr / whatsapp), and **what the user sees** (missing from tools, "not responding", a
-tool call erroring, a specific error string). Then take the matching path below.
+Ask / confirm: **which client** (Cowork or Claude Code), **which server** (any name
+`node "$REPO_ROOT/mcp/service-manifest.mjs"` prints — the core four plus this machine's installed
+add-ons), and **what the user sees** (missing from tools, "not responding", a tool call erroring, a
+specific error string). Then take the matching path below.
 
 ## Step 1 — (Cowork) Relaunch first
 
@@ -59,7 +60,7 @@ If a server is **absent** from `mcpServers`, or its `command`/`args` point at a 
 
 Cowork writes a per-server log. This is where the actual cause lives — read it instead of guessing:
 ```sh
-NAME=board    # board | calendar | guard | vault | openwhispr | whatsapp
+NAME=board    # any server name from `node "$REPO_ROOT/mcp/service-manifest.mjs"`
 tail -n 80 "$HOME/Library/Logs/Claude/mcp-server-$NAME.log"   # per-server stderr + the spawn line
 tail -n 80 "$HOME/Library/Logs/Claude/mcp.log"                # all servers: init / teardown / disconnect
 ```
@@ -108,7 +109,7 @@ problem was Cowork running stale state → **⌘Q**.
 | Symptom (from logs / repro) | Cause | Fix |
 |---|---|---|
 | "not responding" after a while; log says *process exiting early* | A server self-exited on idle (the idle-exit is now **off by default** for direct stdio clients — a stale build can still show it) | ⌘Q + relaunch so Cowork respawns the current code |
-| `board`/`calendar` tool **calls** fail, but `tools/list` is fine | the board app isn't on **:3000** | `cd board && npm run dev`; confirm it bound **:3000** (its startup banner shows the actual port if it bumped) — `curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/` |
+| tool **calls** fail on the board-proxying servers (any whose descriptor env sets `CRM_BASE_URL` — board, calendar, and the add-on wrappers), while `tools/list` is fine | the board app isn't answering at **$BOARD_URL** | `curl -fsS --max-time 5 "$BOARD_URL/api/healthz"`; then branch on `COS_DEVICE_ROLE`: **spoke** → the hub (or the tailnet) is down — never start a local board (the spoke guards refuse one anyway); **hub** with the `boardapp` LaunchAgent installed → `launchctl kickstart -k gui/$(id -u)/com.chiefofstaff.mcp-boardapp` and read `mcp/logs/boardapp.err.log` (a `next dev` on the port keeps the production board down — `boardapp-run.mjs` refuses a busy port); **hub** without it → `cd board && npm run dev` and confirm the startup banner bound `$BOARD_PORT`, not a bumped port |
 | `vault` → `http=401 / Invalid API key` **in Cowork while Claude Code works** | Cowork holds an **early-bound COPY** of the key in `claude_desktop_config.json` (`vault.env.ANTHROPIC_API_KEY`); Claude Code late-binds it from `config/secrets.env` on every bridge start. The copy rots two ways: a **placeholder** snapshotted before the real key was filled in, or **rotation drift** (you edited `secrets.env` + kickstarted, which fixes only Code). Neither ever self-heals | `node scripts/check-cowork-secrets.mjs` names which one it is; fix per Step 5, ⌘Q |
 | `guard` → **every** message comes back `UNAVAILABLE … FAIL CLOSED … UNTRUSTED` | the guard **sidecar (:8009) is down/cold**; the guard MCP fails closed (4 s timeout → untrusted). **guardsvc is launchd-owned — Cowork does NOT start it** | `curl -s "$GUARD_SIDECAR_URL/healthz"`; if down/cold: `launchctl kickstart -k gui/$(id -u)/com.chiefofstaff.mcp-guardsvc`, wait for it to warm, retry |
 | `openwhispr` → `unable to open database file (14)` | WAL DB lost its `-shm` after a clean OpenWhispr shutdown. **Current code self-heals** (retries read-only via an `immutable=1` URI) | if you still see it → **stale build** (⌘Q to pick up current code) or `OPENWHISPR_DB` is the wrong path (verify it). Last resort: open the OpenWhispr app once |
@@ -134,26 +135,21 @@ down — only sends + the initial pairing need it.
 
 ## Step 5 — Repair the Cowork config (when an entry is wrong)
 
-Edit the entry from **resolved config**, never hand-type machine paths or secrets — a backup-first
-node merge that preserves the other servers + `preferences` (mirrors the setup skills). Example
-re-deriving `board`; adapt the `server` object per the server you're fixing. **For the `vault`
-entry, re-run `/mcp-bridge-setup` instead of this snippet** — it sources `config/secrets.env` and
-validates the key, whereas `load-config.sh` deliberately does NOT load secrets, so a hand-adapt here
-would write `ANTHROPIC_API_KEY: undefined` and break vault.
+Never hand-edit the entry — regenerate it from the service descriptor. The generator is a
+backup-first, **named** merge: it rewrites exactly the entries you name, preserves every other
+server + `preferences`, and validates any secret before inlining it
+(`config/secret-validation.mjs` refuses a placeholder atomically — so a `vault` repair validates
+the key instead of freezing a bad copy in).
+
 ```sh
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
-"$NODE_BIN" - <<'NODE'
-const fs = require("node:fs"), E = process.env;
-const p = E.COWORK_CONFIG, cfg = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p,"utf8")) : {};
-cfg.mcpServers = cfg.mcpServers || {};
-cfg.mcpServers.board = { command: E.NODE_BIN, args: [`${E.REPO_ROOT}/mcp/board-server/server.mjs`], env: { CRM_BASE_URL: E.BOARD_URL } };
-if (fs.existsSync(p)) fs.copyFileSync(p, fs.existsSync(p + ".bak") ? `${p}.bak.${Date.now()}` : p + ".bak"); // don't clobber an earlier backup
-fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n");
-console.log("rewrote board; servers:", Object.keys(cfg.mcpServers).join(", "));
-NODE
+node "$REPO_ROOT/scripts/gen-cowork-config.mjs" board   # name the server you're fixing; add --print first to inspect
 ```
-For a wholesale rebuild of all entries, re-run **`/mcp-bridge-setup`** (core four) or the add-on
-skill (`/openwhispr-mcp-setup`, `/whatsapp-mcp-setup`). Then **⌘Q** Cowork.
+
+Then **⌘Q** Cowork. For a wholesale rebuild, re-run the setup skills (`/mcp-bridge-setup` for
+the core four; each add-on's own setup skill) — the generator's bare no-name form writes every
+entry this role is *eligible* for, installed or not (it would re-add an add-on you removed), so
+don't reach for it mid-repair.
 
 ## Claude Code (bridge) path
 
@@ -161,13 +157,22 @@ If the trouble is in **Claude Code**, target the launchd bridges instead:
 ```sh
 source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 launchctl list | grep chiefofstaff          # each: a PID + last exit 0 = healthy
-# core four below; the optional add-ons openwhispr (:8002) and whatsapp (:8006) are bridges too —
-# add "$OPENWHISPR_BRIDGE_PORT" / "$WHATSAPP_MCP_BRIDGE_PORT" to check them the same way.
-for p in "$BOARD_BRIDGE_PORT" "$CALENDAR_BRIDGE_PORT" "$GUARD_BRIDGE_PORT" "$VAULT_BRIDGE_PORT"; do
-  curl -s -X POST "http://127.0.0.1:$p/mcp" \
+# One line per bridge THIS machine's role runs — the set comes from the manifest, never a hand-kept list:
+PROBE_LIST=$(node "$REPO_ROOT/mcp/service-manifest.mjs" --probe-list)
+[ -n "$PROBE_LIST" ] || echo "COULD NOT READ THE MANIFEST — the bridge set is UNCHECKED, not clear (node + mcp/service-manifest.mjs; see its error above)"
+echo "$PROBE_LIST" | while IFS=$'\t' read -r name port kind probe gate roles autostart label; do
+  [ "$kind" = bridge ] || continue
+  case ",$roles," in *",${COS_DEVICE_ROLE:-hub},"*) ;; *) continue ;; esac
+  if [ ! -f "$LAUNCH_AGENTS_DIR/$label.plist" ]; then
+    if [ "$gate" = core ]; then echo "$name (:$port) — NOT INSTALLED (no $label.plist — run cos-setup)"
+    else echo "$name (:$port) — NOT INSTALLED (no $label.plist — an add-on this machine hasn't set up)"; fi
+    continue
+  fi
+  got=$(curl -s -X POST "http://127.0.0.1:$port/mcp" \
     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"c","version":"0"}}}' \
-    | grep -o '"name":"[a-z]*"' | head -1
+    | grep -o '"name":"[a-z0-9_-]*"' | head -1)
+  echo "$name (:$port) -> ${got:-NO ANSWER — kickstart it and read mcp/logs/$name.err.log}"
 done
 tail -n 80 "$REPO_ROOT/mcp/logs/<name>.err.log"            # bridge stderr
 launchctl kickstart -k gui/$(id -u)/com.chiefofstaff.mcp-<name>   # restart one bridge
@@ -180,5 +185,6 @@ sidecars (`:8009`/`:8008`) warm asynchronously — probe `"$GUARD_SIDECAR_URL/he
 ## Verify the fix
 
 Re-run Step 3's repro (must print `SPAWN OK`), and for Cowork have the user confirm the server +
-its tools appear after the ⌘Q relaunch. For a bridge, re-run the initialize loop above and confirm
-the right `serverInfo.name`.
+its tools appear after the ⌘Q relaunch. For a bridge, re-run the bridge check above and confirm the
+pass condition: every installed bridge for this machine's role answers with its own
+`serverInfo.name`; a `NOT INSTALLED` line for an add-on this machine never set up is not a failure.
