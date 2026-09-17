@@ -97,15 +97,23 @@
 // Resolution is against the git INDEX, not the disk, plus one `git check-ignore --no-index` spawn
 // for whatever the index misses — so the hub (which carries untracked residue, e.g. a stray
 // tests/lib/) and a fresh CI checkout give the same verdict (the ops#87 -> cos#155 precedent for
-// [1]). Measured the same session: of 134 $REPO_ROOT/ tokens checked, 106 resolve via the index
-// and 28 via gitignore (14 unique ignored tokens — config/cos.env, mcp/logs/…,
-// board/data/cases.json, …), all 14 matching the COMMITTED root .gitignore (this hub's
-// core.excludesFile is unset; .git/info/exclude holds only .context/). State this as a BOUND, not
-// an equivalence: check-ignore also consults those two machine-local files, so hub/CI agreement
-// is measured, not structural — a token ignored only by a machine-local exclude would diverge
-// hub-green/CI-red, never silently the other way. Never parse .gitignore in JS — execute git's
-// own grammar instead (ADR 0040). When git cannot list the index (not a checkout), the scan says
-// so and never claims the contract held (ADR 0036 obligation 3; ADR 0029 is the ADR that picks
+// [1]). Every unresolved token is queried BOTH bare and with a trailing slash appended: a
+// directory-only gitignore pattern (`mcp/logs/`) matches a query only when git can confirm the
+// path IS a directory, which it cannot for a path that does not currently exist on disk — caught
+// live on this PR's own CI run, which failed on `mcp/logs` and `backup/logs` (bare) precisely
+// because a fresh checkout has neither directory yet (both are gitignored-only, no tracked file
+// inside either, so a first clone lacks them entirely) even though this hub's own long-lived copy
+// resolved them fine. Asserting the slash ourselves makes resolution independent of whether some
+// process happened to create the directory here before. Measured the same session: of 134
+// $REPO_ROOT/ tokens checked, 106 resolve via the index and 28 via gitignore (14 unique ignored
+// tokens — config/cos.env, mcp/logs/…, board/data/cases.json, …), all 14 matching the COMMITTED
+// root .gitignore (this hub's core.excludesFile is unset; .git/info/exclude holds only
+// .context/). State this as a BOUND, not an equivalence: check-ignore also consults those two
+// machine-local files, so hub/CI agreement on THAT axis is measured, not structural — a token
+// ignored only by a machine-local exclude would diverge hub-green/CI-red, never silently the
+// other way. Never parse .gitignore in JS — execute git's own grammar instead (ADR 0040). When
+// git cannot list the index (not a checkout), the scan says so and never claims the contract held
+// (ADR 0036 obligation 3; ADR 0029 is the ADR that picks
 // this branch over the host one). This is NOT an ADR 0030 *-consumers gate — it asserts path
 // existence, not a board field or MCP tool — which is why [2b] governs, the same disambiguation
 // SCAN 4 and SCAN 5 state for themselves.
@@ -592,10 +600,17 @@ if (lsFiles.status !== 0 || !indexSet.has('tests/skill-reachability.mjs')) {
   let ignoredSet = new Set()
   let checkIgnoreOk = true
   if (uniqueUnresolvedToks.length > 0) {
+    // Query both the bare token and a trailing-slash-asserted form: a directory-only gitignore
+    // pattern (e.g. `mcp/logs/`) matches a query only when git can confirm the path IS a
+    // directory, which it cannot for a bare path that does not currently exist on disk — a
+    // fresh checkout with no mcp/logs/ or backup/logs/ yet (neither dir holds a tracked file,
+    // so a first clone lacks them entirely). Asserting the slash ourselves makes resolution
+    // independent of whether some process has happened to create the directory here before.
+    const queries = uniqueUnresolvedToks.flatMap((tok) => [tok, `${tok}/`])
     const checkIgnore = spawnSync('git', ['check-ignore', '--no-index', '--stdin'], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
-      input: uniqueUnresolvedToks.join('\n'),
+      input: queries.join('\n'),
       maxBuffer: 16 * 1024 * 1024,
     })
     // Exit 0 ("some paths ignored") and 1 ("none ignored") are both valid outcomes; only >= 2 or a
@@ -606,13 +621,14 @@ if (lsFiles.status !== 0 || !indexSet.has('tests/skill-reachability.mjs')) {
       checkIgnoreOk = false
     }
   }
+  const isGitignored = (tok) => ignoredSet.has(tok) || ignoredSet.has(`${tok}/`)
 
   if (!checkIgnoreOk) {
     scan6Ran = false
   } else {
     repoRootRefsChecked = repoRootOccurrences.length
     for (const o of repoRootOccurrences) {
-      if (!resolvedByIndex(o.tok) && !ignoredSet.has(o.tok)) {
+      if (!resolvedByIndex(o.tok) && !isGitignored(o.tok)) {
         violations.push(
           `${o.rel}:${o.line} — \`$REPO_ROOT/${o.tok}\` names a path that is neither tracked nor ` +
             'gitignored — the file moved or was deleted after this instruction was written (cos-ops#114)',
