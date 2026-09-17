@@ -10,7 +10,7 @@ classes from its stored `category` + `location` — nothing new is captured, not
 
 | Class | Rule | What it means for reconciliation |
 |---|---|---|
-| **fresh** | `produce`/`dairy`, anything `location: fridge`, or `frozen` category/freezer location | The routine sweep's whole scope — this is what gets asked about |
+| **fresh** | `produce`/`dairy`, anything `location: fridge`, or `frozen` category/freezer location | The routine sweep's whole scope — what gets asked about, and what the standing ramp task is quantified from |
 | **staple** | `pantry`, tinned `protein`/`grain` with no location, and the no-field default | Raised only on an explicit stock-take |
 | **spice** | `category: spice` | Never raised unless you mention it or a planned meal needs one |
 

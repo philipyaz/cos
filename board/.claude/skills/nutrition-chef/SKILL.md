@@ -134,7 +134,9 @@ one line, no lecture.
 `list_reminders { status:"open" }`, exact title match on **`Meal plan close-out — planned
 meals awaiting an answer`**; found → `get_reminder` it and read each ticked task as Philip's
 own confirm-skipped answer: `update_meal_plan(id, status: "skipped")`, citing the tick. A
-ticked meal is resolved — it drops out of items 4–5 below.
+ticked task is a meal answer only when its title names a MEAL id; a tick on the pantry ramp
+task is carried, never read as a recapture — only a pantry write clears it (by driving the
+past-horizon count to 0). A ticked meal is resolved — it drops out of items 4–6 below.
 
 **4. Auto-resolve only the PROVEN set.** `provablyCooked.matches` pairs each stale meal
 with the `FOOD-<n>` entry that proves it (same date + slot, food log names the meal's
@@ -144,30 +146,48 @@ with the `FOOD-<n>` entry that proves it (same date + slot, food log names the m
 set in the batch too (mirror `/reminders-review` STEP 0) rather than flipping it
 silently.
 
-**5. ONE question at most, priority-ordered.** (a) the stale-meal skip-or-name-it batch,
-if any remain — *"12 planned meals from 24–41 days ago — mark them all skipped? (name
-any you actually cooked)"*; **else** (b) the pantry ramp, when the fresh scope is cold:
-**exactly one** action — a photo of the fridge/shelf through `reconcile_pantry` (JOB 2's
-bulk path), scoped to **fresh** rows only. On a plain yes to (a):
-`update_meal_plan(id, status: "skipped")` for each; name one as actually cooked → flip
-it to `cooked` and **offer** a `log_food` for it (**never fabricate one** — a guessed
-intake figure is worse than a blank day). Whichever need loses the priority is **stated,
-not asked** this run. Never per-item pantry correction or an unconfirmed delete.
-**Writes here stay `update_meal_plan` only** — a "yes" to the pantry ramp executes
-through JOB 2's `reconcile_pantry`, not from here. **Unattended: deposit (a)'s remainder
-instead of asking.** Keep exactly one open close-out reminder — find it by its exact title
-and update it in place; never mint a second. One task per remaining stale meal (`MEAL-<n> —
-<date> <slot>: <title> — tick to confirm SKIPPED (cooked? tell Cos or log it)`,
-`done:false`); none yet → `create_reminder`; one exists → `update_reminder` with the FULL
-task list, id-less, `done` explicit on every item — an omitted `done` resets a tick. Set
-empties and the reminder still exists → `complete_reminder`. A clean run deposits nothing.
+**5. ONE question at most, priority-ordered — questions only.** (a) the stale-meal
+skip-or-name-it batch, if any remain — *"12 planned meals from 24–41 days ago — mark them all
+skipped? (name any you actually cooked)"*; **else** (b) the pantry ramp, when the fresh scope is
+cold: **exactly one** action — a photo of the fridge/shelf through `reconcile_pantry` (JOB 2's
+bulk path), scoped to **fresh** rows only. On a plain yes to (a): `update_meal_plan(id, status:
+"skipped")` for each; name one as actually cooked → flip it to `cooked` and **offer** a
+`log_food` for it (**never fabricate one** — a guessed intake figure is worse than a blank day).
+Whichever need loses the priority is **stated, not asked** this run — item 6's deposit is what
+makes that statement durable. Never per-item pantry correction or an unconfirmed delete.
+**Writes here stay `update_meal_plan` only** — a "yes" to the pantry ramp executes through
+JOB 2's `reconcile_pantry`, not from here. **Unattended (a scheduled run — nobody in the chat to
+answer): ask nothing; item 6 deposits (a)'s remainder instead.**
 
-**6. Report the tally**: N auto-closed (with proofs), N proposed, the lifecycle numbers
+**6. The standing close-out reminder — the deposit, every mode.** The pantry ramp deposit is a
+write, never a question — decided in every mode by the past-horizon count alone, spending none
+of the one-question budget (attended or unattended, auto or approval, and regardless of whether
+item 5 just asked (b) live). It is the same pure-write, state-and-move-on category as item 8's
+calendar push. Keep exactly one open close-out reminder — find it by its exact
+title and update it in place; never mint a second. Its task list carries two kinds:
+
+- **Meal tasks — the unattended path only** (an attended run asked (a) live instead): one task
+  per remaining stale meal (`MEAL-<n> — <date> <slot>: <title> — tick to confirm SKIPPED
+  (cooked? tell Cos or log it)`, `done:false`). An attended write carries the reminder's
+  existing MEAL tasks unchanged instead.
+- **The ramp task — every mode**, exactly one, present iff `likelyPastHorizon.count > 0`; its
+  stable key is the `PANTRY — ` title prefix. It states the past-horizon count and the oldest
+  unverified age, and names exactly one action — the JOB 2 photo path (`reconcile_pantry`):
+  title `PANTRY — <count> fresh items likely past horizon, oldest unverified <ageDays> days —
+  send Cos a fridge/shelf photo (JOB 2)`, `done:false`. Count 0 → the ramp task is dropped.
+
+None yet and any task is due → `create_reminder`; one exists → `update_reminder` with the FULL
+task list, id-less, `done` explicit on every item — an omitted `done` resets a tick, and a
+deposit for one kind never drops the other kind's tasks. The reminder still exists → complete it
+only when both are empty — no meal task remains and no ramp is due (`complete_reminder`). A
+clean run deposits nothing.
+
+**7. Report the tally**: N auto-closed (with proofs), N proposed, the lifecycle numbers
 (fresh / past-horizon / excluded), the close-out reminder id when one was
 deposited/updated/completed, and — targets missing or stale (~14+ days) — one line
 pointing at JOB 5. Idempotent: re-runs converge to nothing new.
 
-**7. Nonzero `unpushedPlannedMeals` → push, don't ask.** It's a pure write with no question
+**8. Nonzero `unpushedPlannedMeals` → push, don't ask.** It's a pure write with no question
 attached. **Auto mode:** call `push_meal_plan_to_calendar` with an explicit `from`/`to`
 spanning the unpushed dates (the default window is only `[today, today+7)` — a meal planned
 further out is otherwise counted by the signal and missed by the push; the same idempotent
@@ -196,7 +216,8 @@ its useful life") — never blur the two. Full table + wording guide:
 > (27 spices + 24 staples untouched, as expected), 1 item past its printed expiry, and no
 > nutrition targets have ever been set."* Auto-close the 2 proven meals citing their
 > FOOD-ids; batch the remaining 12 as one skip-or-name-it question. Report: 2
-> auto-closed, 12 proposed, the lifecycle tally, no targets.
+> auto-closed, 12 proposed, the lifecycle tally, the close-out reminder id (the ramp
+> task rode it — 4 past horizon), no targets.
 
 ---
 
@@ -625,9 +646,10 @@ renders it grouped by category).
 - **Reconcile first (JOB 0), every invocation — all fields, not just the meal plan.**
   `get_nutrition_status` → state the opening picture → auto-flip only `provablyCooked` to
   `cooked` (citing the proof) → ONE priority-ordered question at most (the meal batch,
-  else the pantry ramp, **lifecycle-scoped** to fresh rows — see `references/lifecycle.md`).
-  Never invent a `log_food` entry or back-fill a missed day. A clean surface no-ops in
-  one line.
+  else the pantry ramp, **lifecycle-scoped** to fresh rows — see `references/lifecycle.md`)
+  → the close-out deposit, every mode (the ramp rides it whenever the past-horizon count is
+  nonzero — a write, never a question). Never invent a `log_food` entry or back-fill a
+  missed day. A clean surface no-ops in one line.
 - **Food log:** estimate calories with the portion heuristics + anchor table; keep
   `estimated: true` (set false only for a measured value); macros are optional —
   **omit when you can't honestly estimate them**; health flag is an optional whole-meal
