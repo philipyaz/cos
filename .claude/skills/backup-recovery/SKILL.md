@@ -262,14 +262,12 @@ source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 #    (edit config/cos.env → BACKUP_REPO="…"), then `source …/config/load-config.sh` again.
 # 2) Move/clone the repo there (it must contain .git + an 'origin' remote):
 git clone "$(gh repo view cos-backups --json sshUrl -q .sshUrl)" "$BACKUP_REPO"   # or `mv` the old clone
-# 3) Re-point the launchd plist's COS_BACKUP_REPO at $BACKUP_REPO and reinstall the agent
-#    (this re-runs §1.4 verbatim — the template's __BACKUP_REPO__ token becomes $BACKUP_REPO):
-U="$(id -u)"
-sed -e "s|__NODE__|$BREW_PREFIX/bin/node|g" -e "s|__REPO_ROOT__|$REPO_ROOT|g" -e "s|__BACKUP_REPO__|$BACKUP_REPO|g" \
-  "$REPO_ROOT/backup/deploy/com.chiefofstaff.backup.plist.template" \
-  > "$LAUNCH_AGENTS_DIR/com.chiefofstaff.backup.plist"
-launchctl bootout "gui/$U/com.chiefofstaff.backup" 2>/dev/null || true
-launchctl bootstrap "gui/$U" "$LAUNCH_AGENTS_DIR/com.chiefofstaff.backup.plist"
+# 3) Re-point the installed agent and reload it — the same generator line as §1.4. The
+#    descriptor backup/backup.service.json declares env COS_BACKUP_REPO="${BACKUP_REPO}"
+#    (verified: backup/backup.service.json:11), so gen-launchd renders the NEW cos.env value
+#    into the plist; --install reloads the agent and, since cos#131 (ops#59), reports a load
+#    failure instead of printing success.
+node "$REPO_ROOT/scripts/gen-launchd.mjs" --install backup
 ```
 
 The board's `agent-target` readiness check WARNS when the installed plist's `COS_BACKUP_REPO`
