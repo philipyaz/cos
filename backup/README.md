@@ -104,8 +104,8 @@ network.
 
 ## Schedule
 
-`deploy/com.chiefofstaff.backup.plist.template` → daily 03:30 LaunchAgent. The skill
-substitutes paths and bootstraps it. Logs: `backup/logs/backup.{out,err}.log`.
+`backup.service.json` (the service descriptor) → daily 03:30 LaunchAgent, rendered and loaded
+by `node scripts/gen-launchd.mjs --install backup`. Logs: `backup/logs/backup.{out,err}.log`.
 
 ## Threat model / guarantees
 
