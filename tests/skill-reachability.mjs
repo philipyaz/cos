@@ -1,4 +1,4 @@
-// tests/skill-reachability.mjs — this file owns FIVE reachability contracts, in both directions:
+// tests/skill-reachability.mjs — this file owns SIX reachability contracts, in both directions:
 //
 // SCAN 1 (delegation -> target): a skill may only delegate to a slash-skill that exists in ITS
 // OWN runtime (board/.claude/CLAUDE.md: "a skill may only compose tools that already exist").
@@ -72,16 +72,69 @@
 // recurrence of the founding incident — a future live-first authoring event that adds NEW doctrine
 // stays invisible here until it, too, is ported by hand.
 //
+// SCAN 6 ($REPO_ROOT path existence, cos-ops#114): a root setup skill that names a path via
+// $REPO_ROOT/ or ${REPO_ROOT}/ must point at something that still exists — tracked in the git
+// index, or deliberately gitignored. That is exactly how cos-ops#114 happened:
+// backup-recovery/SKILL.md's §6 step 3 rendered the backup LaunchAgent by sed-ing
+// backup/deploy/com.chiefofstaff.backup.plist.template, a file deleted 2026-07-14 in 1d1f97e —
+// the SAME commit that rewrote §1.4 in the same file to the generator and missed this call site.
+// The step has no `set -e`, so following it truncates the installed plist to 0 bytes (the shell
+// opens the `>` target before sed fails), `launchctl bootout` then unloads the running agent, and
+// `bootstrap` is handed the empty file — the daily 03:30 backup silently disabled, surfacing only
+// as an `agent-installed: warn` on /backups. 64 days undetected, because the failure is silent by
+// construction (ADR 0015's Why, the decision that created [2b]) and CI never runs a runbook; SCAN
+// 2 and SCAN 4 are this scan's earlier root-skill members of that same family.
+//
+// The $REPO_ROOT/ anchor is kept, not because it marks every executable reference (it doesn't),
+// but because it marks the ones whose meaning is independent of the shell's working directory. A
+// bare relative path (`node backup/restore.mjs`) depends on cwd, so scanning those would fail a
+// correct tree whose block `cd`s first (ADR 0038). Measured 2026-09-17 at c0db969: 52 lines
+// across 11 root skills (11 of them in backup-recovery itself) name a script by a bare
+// repo-relative path after node/sh/bash — this scan deliberately reads NONE of them (matcher: any
+// line containing node/sh/bash followed by a slash-containing relative path that is not itself
+// $-anchored); re-measure this count at any future revisit, since the corpus moves.
+//
+// Resolution is against the git INDEX, not the disk, plus one `git check-ignore --no-index` spawn
+// for whatever the index misses — so the hub (which carries untracked residue, e.g. a stray
+// tests/lib/) and a fresh CI checkout give the same verdict (the ops#87 -> cos#155 precedent for
+// [1]). Every unresolved token is queried BOTH bare and with a trailing slash appended: a
+// directory-only gitignore pattern (`mcp/logs/`) matches a query only when git can confirm the
+// path IS a directory, which it cannot for a path that does not currently exist on disk — caught
+// live on this PR's own CI run, which failed on `mcp/logs` and `backup/logs` (bare) precisely
+// because a fresh checkout has neither directory yet (both are gitignored-only, no tracked file
+// inside either, so a first clone lacks them entirely) even though this hub's own long-lived copy
+// resolved them fine. Asserting the slash ourselves makes resolution independent of whether some
+// process happened to create the directory here before. Measured the same session: of 134
+// $REPO_ROOT/ tokens checked, 106 resolve via the index and 28 via gitignore (14 unique ignored
+// tokens — config/cos.env, mcp/logs/…, board/data/cases.json, …), all 14 matching the COMMITTED
+// root .gitignore (this hub's core.excludesFile is unset; .git/info/exclude holds only
+// .context/). State this as a BOUND, not an equivalence: check-ignore also consults those two
+// machine-local files, so hub/CI agreement on THAT axis is measured, not structural — a token
+// ignored only by a machine-local exclude would diverge hub-green/CI-red, never silently the
+// other way. Never parse .gitignore in JS — execute git's own grammar instead (ADR 0040). When
+// git cannot list the index (not a checkout), the scan says so and never claims the contract held
+// (ADR 0036 obligation 3; ADR 0029 is the ADR that picks
+// this branch over the host one). This is NOT an ADR 0030 *-consumers gate — it asserts path
+// existence, not a board field or MCP tool — which is why [2b] governs, the same disambiguation
+// SCAN 4 and SCAN 5 state for themselves.
+//
+// This file's own source carries $REPO_ROOT/ literals in comments and violation messages, but the
+// corpus below is .claude/skills/*/SKILL.md by construction, so there is no exclusion list to go
+// vacuous (unlike SCAN 1's NON_SKILL_TOKENS).
+//
 //   node tests/skill-reachability.mjs
 //
-// Read-only, no deps — scans the checked-in tree directly (board-lint.mjs is the precedent for a
-// static invariant checker living in tests/; this is a fourth, disjoint gate: pack-skills --check
-// owns bundle FRESHNESS + catalog SYNC, this file owns five narrower contracts instead — delegation
-// reachability, registry reachability, fetch screening, upload receipting, and (as of SCAN 5) the
-// tracked vault template's doctrine + privacy — not the single EXISTENCE claim this sentence used
-// to make).
+// Scans the checked-in tree directly (board-lint.mjs is the precedent for a static invariant
+// checker living in tests/; this is a fourth, disjoint gate: pack-skills --check owns bundle
+// FRESHNESS + catalog SYNC, this file owns six narrower contracts instead — delegation
+// reachability, registry reachability, fetch screening, upload receipting, (as of SCAN 5) the
+// tracked vault template's doctrine + privacy, and (as of SCAN 6) setup-skill $REPO_ROOT/
+// path-reference existence against the git index/ignore state — not the single EXISTENCE claim
+// this sentence used to make). Still no npm deps and still writes nothing; SCAN 6 is the first to
+// spawn git (`ls-files`, `check-ignore --no-index`), both read-only, to answer that last contract.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { join, relative } from 'node:path'
 import { REPO_ROOT } from '../config/load-config.mjs'
 
@@ -285,6 +338,7 @@ const RECEIPT_TOKEN = 'mark-skill-uploaded' // a script identifier: matched case
 const RECEIPT_FLOOR_SKILLS = ['cos-setup', 'setup-vault'] // cos-ops#74's two upload paths: each MUST stay visible to the detector
 let uploadSectionsChecked = 0
 const uploadSectionsBySkill = new Map()
+const rootSkillDocs = [] // SCAN 6 reuses this walk — every root skill's { rel, content }, no second readdir
 for (const entry of readdirSync(ROOT_SKILLS_DIR, { withFileTypes: true })) {
   if (!entry.isDirectory() || isIgnored(entry.name)) continue
   const abs = join(ROOT_SKILLS_DIR, entry.name, 'SKILL.md')
@@ -295,6 +349,7 @@ for (const entry of readdirSync(ROOT_SKILLS_DIR, { withFileTypes: true })) {
     continue // a directory without SKILL.md is not a skill
   }
   const rel = relative(REPO_ROOT, abs)
+  rootSkillDocs.push({ rel, content })
   let detected = 0
   for (const { start, text } of sectionsOf(content)) {
     // Conjunctive detector: an upload verb AND the bundle directory's literal path token in one
@@ -482,6 +537,128 @@ if (emailsChecked < 1) {
 
 const scan5Count = violations.length - scan1Count - scan2Count - scan3Count - scan4Count
 
+// SCAN 6 ($REPO_ROOT path existence, cos-ops#114): see the file header for the founding incident
+// and the anchor rationale. Walks rootSkillDocs (SCAN 4's own readdir, no second walk).
+const REPO_ROOT_NEEDLES = ['$REPO_ROOT/', '${REPO_ROOT}/']
+
+/** Every $REPO_ROOT/ or ${REPO_ROOT}/ token on a line, as the maximal run of [A-Za-z0-9._/-]
+ * after the needle, trailing sentence punctuation stripped. Skipped (a placeholder continuation,
+ * never a violation) when the run is empty or the next character is $, <, { or *. */
+function repoRootTokensOn(line) {
+  const out = []
+  for (const needle of REPO_ROOT_NEEDLES) {
+    let from = 0
+    let idx
+    while ((idx = line.indexOf(needle, from)) !== -1) {
+      const rest = line.slice(idx + needle.length)
+      from = idx + needle.length
+      const run = (rest.match(/^[A-Za-z0-9._/-]*/) || [''])[0]
+      const nextChar = rest[run.length]
+      if (run === '' || nextChar === '$' || nextChar === '<' || nextChar === '{' || nextChar === '*') {
+        continue
+      }
+      out.push(run.replace(/[/.,]+$/, ''))
+    }
+  }
+  return out
+}
+
+const repoRootOccurrences = [] // { rel, line, tok }, one entry per occurrence (a token named twice counts twice, like SCAN 1)
+for (const { rel, content } of rootSkillDocs) {
+  content.split('\n').forEach((line, i) => {
+    for (const tok of repoRootTokensOn(line)) {
+      repoRootOccurrences.push({ rel, line: i + 1, tok })
+    }
+  })
+}
+
+let scan6Ran = true
+let repoRootRefsChecked = 0
+
+// Two git spawns total, both read-only: `ls-files -z` for the index, then ONE `check-ignore`
+// call (skipped entirely when nothing is left unresolved) for the rest. Never parse .gitignore in
+// JS — execute git's own grammar instead (ADR 0040).
+const lsFiles = spawnSync('git', ['ls-files', '-z'], {
+  cwd: REPO_ROOT,
+  encoding: 'utf8',
+  maxBuffer: 64 * 1024 * 1024,
+})
+const indexEntries = lsFiles.status === 0 ? lsFiles.stdout.split('\0').filter(Boolean) : []
+const indexSet = new Set(indexEntries)
+
+// Identity guard: if the index git found doesn't even contain this file, it isn't this repo's
+// index (a degit'd/foreign ancestor) — treat exactly like any other did-not-run cause.
+if (lsFiles.status !== 0 || !indexSet.has('tests/skill-reachability.mjs')) {
+  scan6Ran = false
+} else {
+  // Resolved = an exact index hit, or some index entry starts with "tok/" (a tracked DIRECTORY,
+  // e.g. `backup`, resolves this way).
+  const resolvedByIndex = (tok) => indexSet.has(tok) || indexEntries.some((e) => e.startsWith(tok + '/'))
+  const unresolved = repoRootOccurrences.filter((o) => !resolvedByIndex(o.tok))
+  const uniqueUnresolvedToks = [...new Set(unresolved.map((o) => o.tok))]
+
+  let ignoredSet = new Set()
+  let checkIgnoreOk = true
+  if (uniqueUnresolvedToks.length > 0) {
+    // Query both the bare token and a trailing-slash-asserted form: a directory-only gitignore
+    // pattern (e.g. `mcp/logs/`) matches a query only when git can confirm the path IS a
+    // directory, which it cannot for a bare path that does not currently exist on disk — a
+    // fresh checkout with no mcp/logs/ or backup/logs/ yet (neither dir holds a tracked file,
+    // so a first clone lacks them entirely). Asserting the slash ourselves makes resolution
+    // independent of whether some process has happened to create the directory here before.
+    const queries = uniqueUnresolvedToks.flatMap((tok) => [tok, `${tok}/`])
+    const checkIgnore = spawnSync('git', ['check-ignore', '--no-index', '--stdin'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      input: queries.join('\n'),
+      maxBuffer: 16 * 1024 * 1024,
+    })
+    // Exit 0 ("some paths ignored") and 1 ("none ignored") are both valid outcomes; only >= 2 or a
+    // spawn error means git couldn't answer.
+    if (checkIgnore.status === 0 || checkIgnore.status === 1) {
+      ignoredSet = new Set(checkIgnore.stdout.split('\n').filter(Boolean))
+    } else {
+      checkIgnoreOk = false
+    }
+  }
+  const isGitignored = (tok) => ignoredSet.has(tok) || ignoredSet.has(`${tok}/`)
+
+  if (!checkIgnoreOk) {
+    scan6Ran = false
+  } else {
+    repoRootRefsChecked = repoRootOccurrences.length
+    for (const o of repoRootOccurrences) {
+      if (!resolvedByIndex(o.tok) && !isGitignored(o.tok)) {
+        violations.push(
+          `${o.rel}:${o.line} — \`$REPO_ROOT/${o.tok}\` names a path that is neither tracked nor ` +
+            'gitignored — the file moved or was deleted after this instruction was written (cos-ops#114)',
+        )
+      }
+    }
+    // Floor (the SCAN 5 vacuous-pass discipline): only meaningful once the scan actually ran —
+    // a git failure above already reports itself via the did-not-run branch below.
+    if (repoRootOccurrences.length === 0) {
+      violations.push(
+        'SCAN 6 found zero $REPO_ROOT/ tokens across all root setup skills — the detector may ' +
+          'have lost its input; re-anchor deliberately (cos-ops#114)',
+      )
+    }
+  }
+}
+
+// Did-not-run (ADR 0036 obligation 3 + ADR 0029's subject branch): one distinct note, zero
+// violations, and the process still exits 0 when SCANs 1-5 are green — printed here so it
+// surfaces in BOTH the pass and fail paths, never folded into the violations report below.
+if (!scan6Ran) {
+  console.error(
+    '[skill-reachability] note: SCAN 6 did not run — git cannot resolve the $REPO_ROOT path ' +
+      'index/ignore state here; $REPO_ROOT path token(s) UNCHECKED.',
+  )
+}
+
+const scan6Count =
+  violations.length - scan1Count - scan2Count - scan3Count - scan4Count - scan5Count
+
 if (violations.length) {
   console.error('[skill-reachability] reachability violation(s):')
   for (const v of violations) console.error(`  ${v}`)
@@ -518,6 +695,12 @@ if (violations.length) {
         'allowlist + personal-path ban (see cos-ops#78).',
     )
   }
+  if (scan6Count > 0) {
+    contracts.push(
+      `${scan6Count} across ${rootSkillDocs.length} root setup skill(s) — every $REPO_ROOT/<path> ` +
+        'token must resolve to a tracked or gitignored path (see cos-ops#114).',
+    )
+  }
   console.error(`[skill-reachability] ${violations.length} violation(s) total. ${contracts.join(' ')}`)
   process.exit(1)
 }
@@ -528,6 +711,7 @@ console.log(
     `${filesWithFetch} fetch-instructing file(s) screened, ` +
     `${uploadSectionsChecked} upload section(s) receipted, ` +
     `${templateMdFiles.length} template file(s) privacy-clean, ${doctrinePinsHeld} doctrine ` +
-    'pin(s) held — all reachable.',
+    `pin(s) held, ${scan6Ran ? `${repoRootRefsChecked} $REPO_ROOT path token(s) resolved` : '$REPO_ROOT path tokens UNCHECKED (no git index)'} ` +
+    '— all reachable.',
 )
 process.exit(0)

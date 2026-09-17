@@ -92,6 +92,7 @@ async function main() {
   check(r.code === 0 && /StartCalendarInterval/.test(r.out) && /<integer>3<\/integer>/.test(r.out), "backup plist is StartCalendarInterval 03:30");
   check(!/KeepAlive/.test(r.out), "a scheduled job has no KeepAlive (it would loop)");
   check(/com\.chiefofstaff\.backup</.test(r.out), "backup plist uses the historical label");
+  check(/<key>COS_BACKUP_REPO<\/key>/.test(r.out), "backup plist carries COS_BACKUP_REPO (rendered from the descriptor's env; §6 re-points it via cos.env)");
   r = run("node", ["scripts/gen-launchd.mjs", "--print", "boardapp"]);
   check(r.code === 0 && /boardapp-run\.mjs/.test(r.out) && /KeepAlive/.test(r.out), "boardapp plist runs the build-then-start entry under KeepAlive");
   // Generation must NOT require supergateway to be installed HERE (it's a pure text step;
