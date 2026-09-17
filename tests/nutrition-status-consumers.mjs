@@ -4,6 +4,8 @@
 // given a defined action, or an explicit state-and-move-on — by JOB 0 of nutrition-chef/SKILL.md,
 // the job that reads the status FIRST on every invocation. A field the engine computes and no job
 // ever reads is exactly the defect cos-ops#18 measured: the board answers a question nobody asks.
+// Also pins the cos-ops#112 ramp-deposit contract in JOB 0, plus the one MCP-projection property
+// that contract's wording leans on (oldest-first render — ADR 0037's pin-the-consequence clause).
 //
 // Static, read-only, zero deps — parses the `NutritionStatus` interface by TEXT (no TS compiler)
 // to get the field list, and greps ONLY JOB 0's own section of SKILL.md, not the whole file: a
@@ -20,6 +22,7 @@ import { REPO_ROOT } from "../config/load-config.mjs";
 
 const ENGINE_FILE = join(REPO_ROOT, "board", "lib", "nutrition-status.ts");
 const SKILL_FILE = join(REPO_ROOT, "board", ".claude", "skills", "nutrition-chef", "SKILL.md");
+const SERVER_FILE = join(REPO_ROOT, "mcp", "nutrition-server", "server.mjs");
 const MIN_KEYS = 9; // the post-change field count — see the header comment above.
 
 let failures = 0;
@@ -93,6 +96,45 @@ for (const phrase of [
 ]) {
   check(phraseRe(phrase).test(job0), `JOB 0 states (wrap-tolerantly) '${phrase}'`);
 }
+
+// --- pantry-ramp deposit contract, cos-ops#112: the ramp is a WRITE on the standing
+// close-out reminder, decided by the past-horizon count alone in EVERY mode — never a
+// clause of the one-question step's unattended branch (which held it unreachable on six
+// consecutive Friday firings). Same matcher idiom as the cos-ops#67 block above:
+// identifiers as case-sensitive substrings, canonical sentences wrap-tolerant via
+// phraseRe. Textual only (ADR 0030's family): this proves JOB 0 *instructs* the deposit;
+// whether a run performed one is observable only on the store.
+check(
+  job0.includes("likelyPastHorizon.count"),
+  "JOB 0 names 'likelyPastHorizon.count' (the ramp deposit's whole predicate, cos-ops#112)",
+);
+check(
+  job0.includes("PANTRY —"),
+  "JOB 0 names the 'PANTRY —' title prefix (the ramp task's stable key, cos-ops#112)",
+);
+for (const phrase of [
+  "the pantry ramp deposit is a write, never a question — decided in every mode by the past-horizon count alone, spending none of the one-question budget",
+  "a ticked task is a meal answer only when its title names a MEAL id; a tick on the pantry ramp task is carried, never read as a recapture — only a pantry write clears it",
+  "states the past-horizon count and the oldest unverified age, and names exactly one action — the JOB 2 photo path",
+  "complete it only when both are empty — no meal task remains and no ramp is due",
+  "a deposit for one kind never drops the other kind's tasks",
+]) {
+  check(phraseRe(phrase).test(job0), `JOB 0 states (wrap-tolerantly) '${phrase}'`);
+}
+
+// The ramp task's "oldest unverified age" is read off the FIRST item get_nutrition_status
+// renders, so the deposit's wording is correct only while that render stays oldest-first.
+// ADR 0037: the consequence a consumer leans on is pinned by a test, not assumed. These two
+// are GREEN on main — forward regression pins, deliberately not part of the ADR 0014 red.
+const serverSrc = readFileSync(SERVER_FILE, "utf8");
+check(
+  serverSrc.includes("sort((a, b) => b.ageDays - a.ageDays)"),
+  "the status projection sorts likelyPastHorizon items OLDEST-FIRST (server.mjs — the ramp task's 'oldest' premise)",
+);
+check(
+  serverSrc.includes("slice(0, 5)"),
+  "the status projection caps the past-horizon render at 5 items (the cap lifecycle.md narrates)",
+);
 
 if (failures) {
   console.error(`\nFAIL — ${failures} check(s) failed.`);
