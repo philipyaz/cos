@@ -144,6 +144,9 @@ node scripts/mark-skill-uploaded.mjs <skill>|--all|--list   # per-machine receip
   never a reassurance. A check that cannot observe its subject reports UNKNOWN, never clear.
   **Census a source tree with `git grep` or a `node` walk, never `grep -r`** — one committed
   NUL byte makes `grep` drop that whole file from `-r`/`-l` output silently, at exit 0.
+- **Resolve a repo path against the git index (`git ls-files`, `git check-ignore`), never the
+  working tree** — the hub holds files and directories a fresh checkout lacks, so a disk check goes
+  green here and red in CI.
 - **A new `mcp/*-server` is a root workspace member** — `npm install` at the repo root and commit
   `package-lock.json`, or CI's `npm ci` fails fast.
 - **Never `next build` in `board/` while a `next dev` is running** — they share `.next` and the running
