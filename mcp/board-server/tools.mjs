@@ -1184,9 +1184,11 @@ const GET_DEVICE_STATUS_TOOL = {
   description:
     "Read this Cos deployment's MULTI-DEVICE status: which machine this board is (device id + role: " +
     "hub or spoke), whether its code schema matches the store on disk (the drift handshake), who holds " +
-    "the HUB lease (the one machine allowed to produce backups), and which other devices' agents have " +
-    "recently talked to this board (ephemeral last-seen). Read-only. Use it to answer 'which machine am " +
-    "I on / is this the hub / who is the hub / is my code in sync'. `GET /api/devices`.",
+    "the HUB lease (the one machine allowed to produce backups), which other devices' agents have " +
+    "recently talked to this board (ephemeral last-seen), and whether Cowork-installed operator skills " +
+    "match the repo's bundles (per-skill current/stale/not-installed/unknown + a stale count). Read-only. " +
+    "Use it to answer 'which machine am I on / is this the hub / who is the hub / is my code in sync / is " +
+    "Cowork running the current skill bundles / which skills need re-uploading'. `GET /api/devices`.",
   inputSchema: { type: "object", properties: {} },
 };
 

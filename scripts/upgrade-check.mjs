@@ -21,8 +21,10 @@
 // upload time, and a new scheduled trigger in automation.json runs nowhere until someone creates
 // it. Each of those is a silent no-op, not an error. This script turns the diff into the list.
 //
-// Cowork cannot be read back (ADR 0020), so bundle drift is made COMPUTABLE by a local receipt:
-// `scripts/mark-skill-uploaded.mjs` records the sha256 of each zip you uploaded into
+// Cowork's installed state IS now readable on a hub (board/lib/cowork-skills.ts → the Devices
+// surface / get_device_status, ops#117) — but this script has no board to query (it runs
+// standalone, often before the board is even built), so it still computes the upload list from a
+// local receipt: `scripts/mark-skill-uploaded.mjs` records the sha256 of each zip you uploaded into
 // mcp/logs/.cowork-skills-uploaded.json (gitignored, per machine); when the receipt exists the
 // upload list is "every zip whose hash differs from its receipt", regardless of how many pulls ago
 // it changed. Without a receipt the list falls back to the git range.

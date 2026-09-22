@@ -95,6 +95,23 @@ ephemeral last-seen of devices whose agents have talked to this board + the join
 browser shows a bottom-right "Connected to &lt;hub&gt;" reachability chip. Last-seen is keyed on the
 `x-device` header the wrappers send, so it is *agent* last-seen — a plain browser sends none.
 
+The same envelope also carries **Cowork skill drift**: `board/lib/cowork-skills.ts` compares each
+operator skill this repo bundles (`board/.claude/skills/<skill>/`) against the copy Claude Cowork
+Desktop holds on this machine's disk, and classifies each `current` / `stale` / `not-installed` /
+`unknown` — `current` only when every file byte-matches the repo folder. Rows also carry `installedAt`
+(the manifest's `updatedAt`) and `enabled` (a deliberately disabled skill is excluded from the stale
+count so its badge never lights up). The Devices page's "Cowork skills" section and
+`get_device_status` both render it, and a `coworkSkillsStaleCount > 0` badges the sidebar Devices row
+and the phone's More tab, refreshed on the next full page load (no SSE — no store write ever changes
+this value). The cache location is the `COWORK_SKILLS_DIR` config key; absent or unreadable ⇒ every
+row `unknown`, never a false "current". **Honest limits:** the reader compares against the
+**working tree**, not `refs/heads/main` — a feature branch or uncommitted skill residue reads `stale`
+while it sits there (a false alarm, safe), but a hub checked out to a commit from *before* a skill
+merge can read that skill `current` while it is actually stale against `main` (the one named
+false-reassurance window; narrow, since the hub normally sits on parked `main`). Re-uploading a stale
+bundle in Cowork (Settings → Capabilities → Skills) is still a manual, desktop-side action — this
+surface only reports the drift, it cannot fix it.
+
 ## Adding a device
 
 On the hub, the **Devices → Add a device** panel (or `node scripts/join-blob.mjs`) emits a

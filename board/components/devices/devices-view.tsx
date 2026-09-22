@@ -12,7 +12,7 @@
 // traffic carries — so the list is "agent last-seen", not a claim about browser sessions.
 
 import { useMemo, useState } from "react";
-import type { DeviceStatus, DeviceSeen, HubLease } from "@/lib/types";
+import type { DeviceStatus, DeviceSeen, HubLease, CoworkSkillRow } from "@/lib/types";
 import { fetchDeviceStatus } from "@/lib/board-client";
 import { relativeTime, formatDateTime } from "@/lib/format";
 import { IconBolt, IconRefresh, IconCheckCircle, IconWarning, IconCopy, IconCheck, IconChevronRight } from "@/components/icons";
@@ -127,6 +127,31 @@ export function DevicesView({ now, initial }: { now: string; initial: DeviceStat
               ))}
             </div>
           )}
+        </section>
+
+        {/* ── Cowork skills (installed-copy drift) ─────────────────────── */}
+        <section className="rounded-md border border-ink-100 bg-white shadow-card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
+            <h2 className="text-[13px] font-semibold text-ink-900">Cowork skills</h2>
+            <span className="ml-auto">{coworkSummary(data)}</span>
+          </div>
+          {data.coworkSkills.length === 0 || data.coworkSkills.every((r) => r.state === "unknown") ? (
+            <div className="px-5 py-4 text-[12.5px] text-ink-500">
+              Cowork&rsquo;s installed-skill cache isn&rsquo;t readable on this machine — the location is
+              the <code className="font-mono text-ink-700">COWORK_SKILLS_DIR</code> config key. A machine
+              with no Cowork install reads unknown here — never rendered as a match.
+            </div>
+          ) : (
+            <div className="divide-y divide-ink-50">
+              {data.coworkSkills.map((row) => (
+                <CoworkSkillRowView key={row.skill} row={row} clock={clock} />
+              ))}
+            </div>
+          )}
+          <div className="px-5 py-2.5 border-t border-ink-100 text-[11.5px] text-ink-500">
+            Re-uploading is a desktop action in Cowork — this page only reports; the badge clears on the
+            next page load after the copies match.
+          </div>
         </section>
 
         {/* ── Add a device (hub only, join blob) ───────────────────────── */}
@@ -286,14 +311,61 @@ function DeviceRow({ d, clock, isSelf, isHub }: { d: DeviceSeen; clock: Date; is
   );
 }
 
-function Tag({ text, tone }: { text: string; tone: "ink" | "emerald" | "sky" }) {
+function Tag({ text, tone }: { text: string; tone: "ink" | "emerald" | "sky" | "amber" }) {
   const cls =
     tone === "emerald"
       ? "bg-emerald-50 text-emerald-700"
       : tone === "sky"
         ? "bg-sky-50 text-sky-700"
-        : "bg-ink-100 text-ink-600";
+        : tone === "amber"
+          ? "bg-amber-50 text-amber-700"
+          : "bg-ink-100 text-ink-600";
   return <span className={"text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded-full " + cls}>{text}</span>;
+}
+
+// The Cowork-skills header chip. Precedence: any stale (and enabled) skill wins (amber,
+// the actionable case) — else all rows current (emerald) — else unknown, which also
+// covers the empty-enumeration case (rows.length === 0 can never satisfy "every === current"
+// below, so it falls through here rather than rendering as clear).
+function coworkSummary(data: DeviceStatus): React.ReactNode {
+  if (data.coworkSkillsStaleCount > 0) {
+    return <span className="text-[10.5px] uppercase tracking-wide text-amber-700">{data.coworkSkillsStaleCount} stale</span>;
+  }
+  if (data.coworkSkills.length > 0 && data.coworkSkills.every((r) => r.state === "current")) {
+    return <span className="text-[10.5px] uppercase tracking-wide text-emerald-700">all current</span>;
+  }
+  return <span className="text-[10.5px] uppercase tracking-wide text-ink-400">unknown</span>;
+}
+
+function CoworkSkillRowView({ row, clock }: { row: CoworkSkillRow; clock: Date }) {
+  const tone =
+    row.state === "current" ? "emerald" : row.state === "stale" ? "amber" : row.state === "not-installed" ? "sky" : "ink";
+  return (
+    <div className="px-5 py-2.5">
+      <div className="flex items-center gap-3">
+        <span className="min-w-0 flex-1 flex items-center gap-1.5">
+          <span className="text-[13px] text-ink-900 font-mono truncate" title={row.skill}>
+            {row.skill}
+          </span>
+          <Tag text={row.state} tone={tone} />
+          {row.enabled === false && <Tag text="disabled" tone="ink" />}
+        </span>
+        <span
+          className="text-[11.5px] text-ink-400 tabular-nums text-right shrink-0"
+          title={row.installedAt ? formatDateTime(row.installedAt) : undefined}
+        >
+          {row.installedAt ? relativeTime(row.installedAt, clock) : "—"}
+        </span>
+      </div>
+      {(row.state === "stale" || row.state === "not-installed") && (
+        <p className="mt-1 text-[11.5px] text-ink-500 break-words">
+          re-upload{" "}
+          <code className="font-mono text-ink-700">board/.claude/skill-bundles/{row.skill}.zip</code> in
+          Cowork (Settings → Capabilities → Skills)
+        </p>
+      )}
+    </div>
+  );
 }
 
 function leaseBadge(lease: HubLease | null): React.ReactNode {
