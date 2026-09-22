@@ -37,3 +37,14 @@ export const ADDONS_HREF = "/addons";
 // The 4 fixed phone tabs (the 5th is More). Calendar holds the last slot per the
 // issue's stated default; swapping in Food Log is deliberately this one line.
 export const MOBILE_TAB_HREFS = ["/my-issues", "/inbox", "/reminders", "/calendar"];
+
+// The More sheet's SECTION order — the one phone-only ordering rule, stated here rather
+// than in JSX. The sheet caps at 75dvh with 44px coarse rows, so it has a fold the
+// desktop's full-height sidebar column does not; below `md` the sheet therefore orders
+// by value — the daily remainder first, the add-on groups next, and SYSTEM_NAV (the
+// group this file itself ranks "visit less often") last. The desktop sidebar keeps the
+// two-section order the header above describes; only the phone sheet reorders. Membership
+// is NOT stated here: DAILY_NAV / SYSTEM_NAV above and the live AddonNavGroup feed remain
+// the single sources for what each section contains (cos-ops#10's one-nav-source constraint).
+export const MOBILE_SHEET_SECTIONS = ["daily", "addons", "system"] as const;
+export type MobileSheetSection = (typeof MOBILE_SHEET_SECTIONS)[number];
