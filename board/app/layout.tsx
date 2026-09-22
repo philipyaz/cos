@@ -8,6 +8,7 @@ import { SpokeChip } from "@/components/spoke-chip";
 import { readDB, diskSchemaVersion } from "@/lib/store";
 import { ADDON_REGISTRY, isAddonEnabled } from "@/lib/addons";
 import { getDeviceRole } from "@/lib/cos-env";
+import { readCoworkSkills } from "@/lib/cowork-skills";
 import type { AddonNavGroup } from "@/lib/board-client";
 
 export const metadata: Metadata = {
@@ -52,6 +53,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     // Degrade gracefully — a missing/locked DB shouldn't blank the whole shell.
   }
 
+  // A SEPARATE statement, deliberately outside the db try/catch above — readCoworkSkills
+  // never throws on its own (a filesystem reader, not a db read), so a db failure can
+  // never mask this second, independent badge source.
+  const coworkStaleCount = readCoworkSkills().staleCount;
+
   return (
     <html lang="en">
       <body className="font-sans text-ink-900 antialiased">
@@ -60,13 +66,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {/* Spoke reachability chip — renders only on a SPOKE served over the network. */}
         <SpokeChip role={getDeviceRole()} />
         <div className="flex h-dvh-fallback w-full overflow-hidden bg-ink-50">
-          <Sidebar unreadCount={unreadCount} addonGroups={addonGroups} />
+          <Sidebar unreadCount={unreadCount} addonGroups={addonGroups} coworkStaleCount={coworkStaleCount} />
           <main className="flex-1 flex flex-col min-w-0 bg-white border-l border-ink-100 pb-tabbar">
             {children}
           </main>
         </div>
         {/* Bottom tab bar + More sheet below `md` — shares Sidebar's SSR seeds + nav model. */}
-        <MobileNav unreadCount={unreadCount} addonGroups={addonGroups} />
+        <MobileNav unreadCount={unreadCount} addonGroups={addonGroups} coworkStaleCount={coworkStaleCount} />
         {/* Global Cmd/Ctrl+K palette — a self-sufficient client island; needs no props. */}
         <CommandPalette />
       </body>
