@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // scripts/mark-skill-uploaded.mjs — record which operator-skill bundles THIS machine's Cowork
 // has been given, so the next upgrade can compute bundle drift instead of guessing from a git
-// range. Cowork's installed state cannot be read back (ADR 0020); this is the honest substitute:
-// a receipt YOU write right after uploading, holding the sha256 of the exact .zip you uploaded.
+// range. The board can now observe Cowork's installed state directly (board/lib/cowork-skills.ts →
+// the Devices surface, ops#117) — this receipt is a different, complementary thing: a record of
+// what YOU uploaded, written right after uploading, holding the sha256 of the exact .zip.
 //
 //   node scripts/mark-skill-uploaded.mjs nutrition-chef mail-to-board   # after uploading those two
 //   node scripts/mark-skill-uploaded.mjs --all                           # after a first-run upload of every bundle

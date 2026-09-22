@@ -65,6 +65,19 @@ async function main() {
     r.body?.joinBlob === null || /^cos-join:\/\/v1\?hub=https?/.test(r.body.joinBlob),
     `joinBlob is null or a well-formed cos-join:// string (got ${JSON.stringify(r.body?.joinBlob)})`,
   );
+  // COWORK_SKILLS_DIR is this machine's local source for Cowork-installed-skill drift
+  // (board/lib/cowork-skills.ts, ops#117) — shape-only, same as joinBlob above: on the hub
+  // the sandbox board reads the REAL cache read-only; on CI the path is absent and every
+  // row reads unknown, staleCount 0. Both are accepted modes; no value assertion either way.
+  check(
+    Array.isArray(r.body?.coworkSkills) &&
+      r.body.coworkSkills.every((row) => ["current", "stale", "not-installed", "unknown"].includes(row?.state)),
+    "coworkSkills[] is an array with every state in the four-value set",
+  );
+  check(
+    typeof r.body?.coworkSkillsStaleCount === "number" && r.body.coworkSkillsStaleCount >= 0,
+    `coworkSkillsStaleCount is a number >= 0 (got ${r.body?.coworkSkillsStaleCount})`,
+  );
 
   // ── x-device registers a device; re-hit bumps count, no dup ──────────────
   const D1 = `test-dev-${Date.now()}`;

@@ -10,7 +10,8 @@ Two rules carry most of the weight; the rest of this file explains why they exis
 > **1. A skill is prose, not code — and it never calls an LLM itself.**
 > **2. After touching ANY file under `skills/`, run `node scripts/pack-skills.mjs` and commit the
 >    changed `.zip`.** The bundle is the thing Cowork actually runs. A stale zip silently ships an
->    old procedure, and nothing at runtime will tell you.
+>    old procedure — the board's Devices surface / `get_device_status` reports a stale installed
+>    copy (ops#117), but the re-upload itself is still yours to do by hand.
 
 ---
 

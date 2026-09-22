@@ -60,8 +60,12 @@ optional args.
 `GET /api/devices`. This deployment's multi-device status: which machine this board is
 (device id + role `hub`/`spoke`), whether its code schema matches the store on disk (the
 drift handshake), who holds the HUB lease (the one machine allowed to produce backups),
-and which other devices' agents have recently touched this board (ephemeral last-seen).
-Read-only. Answers "which machine am I on / is this the hub / is my code in sync".
+which other devices' agents have recently touched this board (ephemeral last-seen), and
+whether Cowork's installed operator skills match the repo's bundles — per skill,
+`current`/`stale`/`not-installed`/`unknown` (never `current` unless verified byte-equal),
+`installedAt`, `enabled`, plus a `staleCount` that excludes disabled and not-installed/
+unknown skills. Read-only. Answers "which machine am I on / is this the hub / is my code
+in sync / is Cowork running the current skill bundles / which skills need re-uploading".
 
 #### `get_case(id)`
 `GET /api/cases/{id}`. Loads a case's current state. Returns the case fields — including

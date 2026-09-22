@@ -90,8 +90,9 @@ node scripts/pack-skills.mjs --check  # CI gate: fails if a bundle is stale/miss
 
 !!! warning "A stale zip is a silent failure"
     The bundle is what Cowork actually runs. Edit a guardrail in `SKILL.md`, skip the rebuild, and
-    the scheduled task keeps following the *old* procedure — with nothing at runtime to tell you.
-    That is why `--check` is a hard CI gate rather than a convention.
+    the scheduled task keeps following the *old* procedure — the board's Devices page /
+    `get_device_status` will report the installed copy as stale (ops#117), but nothing forces the
+    re-upload for you. That is why `--check` is a hard CI gate rather than a convention.
 
 The archives are written **deterministically** — entries sorted, fixed 1980-01-01 timestamps, fixed
 permissions, and entries *stored rather than compressed* — so rebuilding an unchanged skill is

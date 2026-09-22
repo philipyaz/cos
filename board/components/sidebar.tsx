@@ -28,6 +28,7 @@ type Item = {
 export function Sidebar({
   unreadCount,
   addonGroups,
+  coworkStaleCount,
 }: {
   unreadCount?: number;
   // The enabled add-ons, grouped, computed server-side in layout.tsx and threaded down
@@ -35,6 +36,11 @@ export function Sidebar({
   // — a catalog toggle bumps db.version, so a section appears/disappears without a
   // reload, exactly like the unread badge.
   addonGroups?: AddonNavGroup[];
+  // Cowork-installed-skill drift count, computed server-side in layout.tsx
+  // (lib/cowork-skills.ts). Deliberately NOT threaded through useNavLive below: no
+  // store write ever changes this value (neither a merge nor a re-upload bumps
+  // db.version), so "correct on every full page load" is the honest contract, not SSE.
+  coworkStaleCount?: number;
 }) {
   const path = usePathname() ?? "/";
 
@@ -76,6 +82,7 @@ export function Sidebar({
     href: it.href,
     label: it.label,
     icon: navIcon(it.icon),
+    ...(it.href === "/devices" && (coworkStaleCount ?? 0) > 0 ? { badge: coworkStaleCount } : {}),
   }));
 
   return (

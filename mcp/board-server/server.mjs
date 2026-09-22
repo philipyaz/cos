@@ -1437,6 +1437,41 @@ async function handleGetDeviceStatus() {
     lines.push("\nNo other devices seen yet.");
   }
 
+  // Cowork-installed-skill drift (ops#117). Branch order matters: `[].every(...)` is
+  // `true`, so the empty-array case must be decided BEFORE any "every row is X" line can
+  // run, and "not an array at all" (an older board on the other end) must render its own
+  // line rather than silence — an agent that read the tool description's promise of this
+  // block and gets nothing can't tell "older board" from "nothing to report".
+  const coworkSkills = Array.isArray(data.coworkSkills) ? data.coworkSkills : null;
+  if (coworkSkills === null) {
+    lines.push(
+      "\nCowork skills: unknown — this board does not report installed-skill drift (no coworkSkills in the envelope).",
+    );
+  } else if (coworkSkills.length === 0) {
+    lines.push("\nCowork skills: unknown — 0 operator skills enumerated on this board.");
+  } else if (coworkSkills.every((r) => r.state === "unknown")) {
+    lines.push(
+      `\nCowork skills: unknown (${coworkSkills.length} skills) — Cowork's installed-skill cache is not readable on this machine (COWORK_SKILLS_DIR).`,
+    );
+  } else if (coworkSkills.every((r) => r.state === "current")) {
+    lines.push(`\nCowork skills: all ${coworkSkills.length} installed copies match the repo.`);
+  } else {
+    const staleCount = data.coworkSkillsStaleCount ?? 0;
+    const notInstalled = coworkSkills.filter((r) => r.state === "not-installed").length;
+    const unknownCount = coworkSkills.filter((r) => r.state === "unknown").length;
+    lines.push(
+      `\nCowork skills: ${staleCount} stale · ${notInstalled} not-installed · ${unknownCount} unknown of ` +
+        `${coworkSkills.length} — re-upload each stale skill's zip in Cowork (Settings → Capabilities → Skills)`,
+    );
+    for (const row of coworkSkills) {
+      if (row.state === "current") continue;
+      let line = `  ${row.skill} — ${row.state}`;
+      if (row.installedAt) line += `, installed ${row.installedAt}`;
+      if (row.enabled === false) line += " (disabled in Cowork)";
+      lines.push(line);
+    }
+  }
+
   if (data.joinBlob) lines.push(`\nAdd a device (paste into spoke-setup): ${data.joinBlob}`);
   return text(lines.join("\n"));
 }

@@ -8,7 +8,9 @@
 // the `x-device` / `x-device-role` headers the MCP wrappers send (see
 // packages/mcp-kit); fetchDeviceStatus() folds that map together with THIS
 // machine's identity (cos-env) and the hub lease (backup-status) into one
-// render-ready envelope. Like every status reader here, it NEVER throws.
+// render-ready envelope. Like every status reader here, it NEVER throws. It also folds
+// in Cowork's installed-skill drift (readCoworkSkills, ops#117) — a THIRD independent
+// source, same never-throws contract.
 //
 // Honest scoping: last-seen is keyed on `x-device`, which only agent/MCP traffic
 // carries — a plain browser sends none. So the column is "agent last-seen", not a
@@ -18,6 +20,7 @@ import type { NextRequest } from "next/server";
 import type { DeviceStatus, DeviceSeen } from "./types";
 import { getDeviceId, getDeviceRole, machineValue, slugifyDeviceId } from "./cos-env";
 import { readHubLease, LEASE_STALE_HOURS } from "./backup-status";
+import { readCoworkSkills } from "./cowork-skills";
 import { SCHEMA_VERSION } from "./types";
 
 // ── The ephemeral last-seen map (module singleton) ────────────────────────────
@@ -100,6 +103,7 @@ export function buildJoinBlob(): string | null {
 export function fetchDeviceStatus(): DeviceStatus {
   const lease = readHubLease();
   const devices = [...seen.values()].sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+  const cowork = readCoworkSkills();
   return {
     online: true,
     role: getDeviceRole(),
@@ -109,5 +113,7 @@ export function fetchDeviceStatus(): DeviceStatus {
     leaseStaleHours: LEASE_STALE_HOURS,
     devices,
     joinBlob: buildJoinBlob(),
+    coworkSkills: cowork.rows,
+    coworkSkillsStaleCount: cowork.staleCount,
   };
 }
