@@ -23,6 +23,10 @@
 //       the board side — see the deviation note above mirror #6 below)
 //   #7  board/lib/devices.ts buildJoinBlob      ↔ scripts/join-blob.mjs
 //
+// An eighth mirror joined this family with ops#117 (board/lib/cowork-skills.ts ↔
+// scripts/pack-skills.mjs) — it is pinned by its OWN test (tests/unit/cowork-skills.test.ts),
+// not repeated here, so this file's count stays the six that didn't already have one.
+//
 // ADR 0014 already settled whether any of these could instead be deleted
 // (loosening board/tsconfig.json for cross-boundary imports): rejected, for all
 // of them — "mirrored and pinned by a test running both copies over one fixture

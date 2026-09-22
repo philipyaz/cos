@@ -1018,6 +1018,17 @@ export interface DeviceSeen {
   count: number; // requests seen from this device this process lifetime
 }
 
+// One operator skill's Cowork-installed-copy drift, derived on read (never stored —
+// see lib/cowork-skills.ts). `unknown` is the never-clear absent case: it means the
+// cache couldn't be verified, NOT that the copy matches.
+export type CoworkSkillState = "current" | "stale" | "not-installed" | "unknown";
+export interface CoworkSkillRow {
+  skill: string; // the repo skill directory name
+  state: CoworkSkillState;
+  installedAt: string | null; // manifest updatedAt (ISO), else null
+  enabled: boolean | null; // manifest enabled; null = no entry / not boolean
+}
+
 // The render-ready Devices envelope (lib/devices.ts fetchDeviceStatus → /api/devices →
 // the Devices view + the get_device_status MCP tool). Always online:true (the board
 // process answered); a null lease / empty devices list is a normal state.
@@ -1030,6 +1041,8 @@ export interface DeviceStatus {
   leaseStaleHours: number; // the staleness window the lease uses (26)
   devices: DeviceSeen[]; // known devices, newest-seen first (agent last-seen only)
   joinBlob: string | null; // the cos-join:// string for adding a device, or null (COS_HUB_PUBLIC_URL unset)
+  coworkSkills: CoworkSkillRow[]; // per-skill drift vs Cowork's installed copy — see lib/cowork-skills.ts
+  coworkSkillsStaleCount: number; // rows.filter(stale && enabled !== false).length — the badge count
 }
 
 // ── Vault surface (the knowledge half) ──────────────────────────────────────────

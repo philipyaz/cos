@@ -25,9 +25,13 @@ import { IconSearch, IconMore } from "@/components/icons";
 export function MobileNav({
   unreadCount,
   addonGroups,
+  coworkStaleCount,
 }: {
   unreadCount?: number;
   addonGroups?: AddonNavGroup[];
+  // Cowork-installed-skill drift count (lib/cowork-skills.ts) — see sidebar.tsx's prop
+  // comment for why this is NOT threaded through useNavLive.
+  coworkStaleCount?: number;
 }) {
   const path = usePathname() ?? "/";
   const { unread, addons } = useNavLive({ unreadCount, addonGroups });
@@ -187,8 +191,13 @@ export function MobileNav({
               sheetOpen ? "text-ink-900 font-medium" : "text-ink-500"
             }`}
           >
-            <span className="w-4 h-4">
+            <span className="relative w-4 h-4">
               <IconMore />
+              {(coworkStaleCount ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-violet-600 text-white text-[9px] leading-[15px] text-center tabular-nums">
+                  {coworkStaleCount! > 99 ? "99+" : coworkStaleCount}
+                </span>
+              )}
             </span>
             <span>More</span>
           </button>
