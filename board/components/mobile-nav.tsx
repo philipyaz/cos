@@ -2,10 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { type AddonNavGroup } from "@/lib/board-client";
-import { DAILY_NAV, SYSTEM_NAV, ADDONS_HREF, MOBILE_TAB_HREFS } from "@/lib/nav";
+import {
+  DAILY_NAV,
+  SYSTEM_NAV,
+  ADDONS_HREF,
+  MOBILE_TAB_HREFS,
+  MOBILE_SHEET_SECTIONS,
+  type MobileSheetSection,
+} from "@/lib/nav";
 import { navIcon } from "@/components/nav-icons";
 import { useNavLive } from "@/lib/nav-live";
 import { IconSearch, IconMore } from "@/components/icons";
@@ -51,6 +58,100 @@ export function MobileNav({
     (it): it is (typeof DAILY_NAV)[number] => it !== undefined,
   );
   const moreDaily = DAILY_NAV.filter((it) => !MOBILE_TAB_HREFS.includes(it.href));
+
+  // One named thunk per sheet section, bound by key just below. MOBILE_SHEET_SECTIONS
+  // (lib/nav.ts) is the ONLY ordering — declaration order and the Record's key order
+  // carry no render semantics. Thunks, so a closed sheet constructs nothing (matching
+  // today's sheetOpen guard); a Record, so a future section member is a compile error
+  // here instead of a silently-unrendered key.
+  const renderDailySection = (): ReactNode => (
+    <>
+      <div className="px-3 pt-3 space-y-0.5">
+        {/* Opens the global command palette (Cmd/Ctrl+K) — the palette's click
+            listener fires on any element bearing this attribute, so search is
+            reachable here with zero palette changes. */}
+        <button
+          data-command-palette="search"
+          className="w-full flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-500 hover:bg-ink-100/80 transition pointer-coarse:min-h-11 active:bg-ink-200"
+        >
+          <IconSearch className="w-4 h-4" />
+          <span className="flex-1 text-left">Search...</span>
+        </button>
+      </div>
+
+      <nav className="px-3 mt-2 space-y-0.5">
+        {moreDaily.map((it) => (
+          <SheetItem
+            key={it.href}
+            href={it.href}
+            label={it.label}
+            icon={navIcon(it.icon)}
+            active={path.startsWith(it.href)}
+          />
+        ))}
+      </nav>
+    </>
+  );
+  const renderAddonsSection = (): ReactNode => (
+    <>
+      <div className="px-3 mt-4">
+        <div className="border-t border-ink-100" />
+        <Link
+          href={ADDONS_HREF}
+          className={`flex items-center gap-1 px-2 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wider transition ${
+            path.startsWith(ADDONS_HREF) ? "text-ink-700" : "text-ink-400 hover:text-ink-700"
+          }`}
+        >
+          Add-ons
+        </Link>
+      </div>
+      {/* Flat header + items per enabled add-on — no collapse state (a transient
+          sheet doesn't persist chrome the way the sidebar's sections do). */}
+      {addons.map((group) => (
+        <nav key={group.id} className="px-3 space-y-0.5">
+          <div className="flex items-center gap-2.5 px-2 py-1.5 text-[13px] text-ink-700">
+            <span className="w-4 h-4 text-ink-500">{navIcon(group.icon)}</span>
+            <span className="flex-1 font-medium">{group.title}</span>
+          </div>
+          {group.navItems.map((it) => (
+            <SheetItem
+              key={it.href}
+              href={it.href}
+              label={it.label}
+              icon={navIcon(it.icon)}
+              active={path.startsWith(it.href)}
+            />
+          ))}
+        </nav>
+      ))}
+    </>
+  );
+  const renderSystemSection = (): ReactNode => (
+    <>
+      <div className="px-3 mt-4">
+        <div className="border-t border-ink-100" />
+        <p className="px-2 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wider text-ink-400">
+          Review
+        </p>
+      </div>
+      <nav className="px-3 space-y-0.5">
+        {SYSTEM_NAV.map((it) => (
+          <SheetItem
+            key={it.href}
+            href={it.href}
+            label={it.label}
+            icon={navIcon(it.icon)}
+            active={path.startsWith(it.href)}
+          />
+        ))}
+      </nav>
+    </>
+  );
+  const sheetSections: Record<MobileSheetSection, () => ReactNode> = {
+    daily: renderDailySection,
+    addons: renderAddonsSection,
+    system: renderSystemSection,
+  };
 
   return (
     <>
@@ -116,78 +217,8 @@ export function MobileNav({
             className="fixed inset-x-0 bottom-0 z-50 md:hidden max-h-[75dvh] rounded-t-xl bg-white shadow-xl flex flex-col"
           >
             <div className="overflow-y-auto min-h-0 pb-safe">
-              <div className="px-3 pt-3 space-y-0.5">
-                {/* Opens the global command palette (Cmd/Ctrl+K) — the palette's click
-                    listener fires on any element bearing this attribute, so search is
-                    reachable here with zero palette changes. */}
-                <button
-                  data-command-palette="search"
-                  className="w-full flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-500 hover:bg-ink-100/80 transition pointer-coarse:min-h-11 active:bg-ink-200"
-                >
-                  <IconSearch className="w-4 h-4" />
-                  <span className="flex-1 text-left">Search...</span>
-                </button>
-              </div>
-
-              <nav className="px-3 mt-2 space-y-0.5">
-                {moreDaily.map((it) => (
-                  <SheetItem
-                    key={it.href}
-                    href={it.href}
-                    label={it.label}
-                    icon={navIcon(it.icon)}
-                    active={path.startsWith(it.href)}
-                  />
-                ))}
-              </nav>
-
-              <div className="px-3 mt-4">
-                <div className="border-t border-ink-100" />
-                <p className="px-2 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wider text-ink-400">
-                  Review
-                </p>
-              </div>
-              <nav className="px-3 space-y-0.5">
-                {SYSTEM_NAV.map((it) => (
-                  <SheetItem
-                    key={it.href}
-                    href={it.href}
-                    label={it.label}
-                    icon={navIcon(it.icon)}
-                    active={path.startsWith(it.href)}
-                  />
-                ))}
-              </nav>
-
-              <div className="px-3 mt-4">
-                <div className="border-t border-ink-100" />
-                <Link
-                  href={ADDONS_HREF}
-                  className={`flex items-center gap-1 px-2 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wider transition ${
-                    path.startsWith(ADDONS_HREF) ? "text-ink-700" : "text-ink-400 hover:text-ink-700"
-                  }`}
-                >
-                  Add-ons
-                </Link>
-              </div>
-              {/* Flat header + items per enabled add-on — no collapse state (a transient
-                  sheet doesn't persist chrome the way the sidebar's sections do). */}
-              {addons.map((group) => (
-                <nav key={group.id} className="px-3 space-y-0.5">
-                  <div className="flex items-center gap-2.5 px-2 py-1.5 text-[13px] text-ink-700">
-                    <span className="w-4 h-4 text-ink-500">{navIcon(group.icon)}</span>
-                    <span className="flex-1 font-medium">{group.title}</span>
-                  </div>
-                  {group.navItems.map((it) => (
-                    <SheetItem
-                      key={it.href}
-                      href={it.href}
-                      label={it.label}
-                      icon={navIcon(it.icon)}
-                      active={path.startsWith(it.href)}
-                    />
-                  ))}
-                </nav>
+              {MOBILE_SHEET_SECTIONS.map((section) => (
+                <Fragment key={section}>{sheetSections[section]()}</Fragment>
               ))}
             </div>
           </div>
