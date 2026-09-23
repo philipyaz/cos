@@ -811,9 +811,10 @@ const toOptionalString = (v: unknown): string | undefined =>
 // Merge a partial patch onto a case. Only the keys present in `patch` are
 // touched (so `null` clears a field, an absent key leaves it). Identity and
 // sub-resources (id, createdAt, tasks, messageIds, activity, notes) are never
-// changed here. This is the single un-validating chokepoint (the pending-commit
-// path feeds it raw agent payload), so it guards the enum/required fields itself
-// rather than trusting callers: an out-of-enum status or empty title is ignored.
+// changed here. This is the single un-validating chokepoint (defence in depth
+// below the validated write cores in lib/case-writes.ts), so it guards the
+// enum/required fields itself rather than trusting callers: an out-of-enum
+// status or empty title is ignored.
 export function applyCaseUpdate(caseRec: CaseRecord, patch: Record<string, unknown>): CaseRecord {
   if ("title" in patch && typeof patch.title === "string" && patch.title.trim() !== "") {
     caseRec.title = patch.title.trim();
@@ -826,8 +827,9 @@ export function applyCaseUpdate(caseRec: CaseRecord, patch: Record<string, unkno
     caseRec.domain = patch.domain as CaseDomain;
   }
   // Hierarchy tier + parent. Coercive only (the RELATIONAL validity — parent
-  // exists / tier rules — is asserted by the route via assertHierarchy before
-  // this runs). A leaf normalizes back to an absent kind so cases stay byte-clean
+  // exists / tier rules — is asserted by the validated write cores
+  // (lib/case-writes.ts) via assertHierarchy before this runs). A leaf
+  // normalizes back to an absent kind so cases stay byte-clean
   // (absent === "case" everywhere downstream); parentId null/"" detaches.
   if ("kind" in patch && VALID_CASE_KIND.includes(patch.kind as CaseKind)) {
     caseRec.kind = patch.kind === "case" ? undefined : (patch.kind as CaseKind);
@@ -1366,9 +1368,9 @@ export function addNote(caseRec: CaseRecord, author: Actor, body: string): CaseN
 
 // ── Hierarchy (Initiative > Workstream > Case) ─────────────────────────────────
 // The single write-time guard. assertHierarchy is the chokepoint every case
-// write funnels its proposed tier/parent change through (see the cases routes):
-// it throws a 400-mapped BadRequestError when the change would break the strict
-// 3-tier tree.
+// write funnels its proposed tier/parent change through (see
+// lib/case-writes.ts): it throws a 400-mapped BadRequestError when the change
+// would break the strict 3-tier tree.
 export function assertHierarchy(
   db: DBShape,
   change: { id: string; kind: CaseKind; parentId?: string },

@@ -1371,7 +1371,8 @@ const LIST_PENDING_TOOL = {
   name: "list_pending",
   description:
     "List the board's pending approval queue — agent-proposed mutations awaiting a human " +
-    "approve/reject. Read-only. Each entry has an id, the proposed verb + payload, and a summary.",
+    "approve/reject. Read-only. Each entry has an id, the proposed verb (+ target when it names " +
+    "a case), and a summary.",
   inputSchema: { type: "object", properties: {} },
 };
 
@@ -1434,15 +1435,25 @@ const UNINSTALL_LABEL_BUNDLE_TOOL = {
 const PROPOSE_TOOL = {
   name: "propose",
   description:
-    "Propose a board mutation for human approval instead of doing it directly. The proposal lands " +
-    "in the pending queue; on approve it is COMMITTED through the matching verb. Use for changes " +
-    "that should have a human in the loop. `verb` is the board verb to run (e.g. 'update_case', " +
-    "'move', 'archive', 'restore'), `payload` its arguments, `summary` a one-line human-readable description.",
+    "Propose a board mutation for human approval instead of doing it directly. Validated at " +
+    "propose time: the board dry-runs the commit and refuses a proposal that could never be " +
+    "approved, so nothing parks dead in the queue; on approve it is committed through the same " +
+    "write path as the direct verb. `verb` is the board verb to run: `update_case` (any case " +
+    "patch — re-parent via `payload.parentId`), `move` (lane change via `payload.status`), " +
+    "`create_case` (`payload.kind` mints an Initiative or Workstream), `archive`, `restore`, " +
+    "`add_task`, `complete_task`, `add_note`. Targeted verbs take the case id in `target` — or as " +
+    "the verb's own `payload.id` (honoured and lifted into `target`; a disagreeing pair is " +
+    "refused). `payload` carries the verb's arguments, `summary` a one-line human-readable description.",
   inputSchema: {
     type: "object",
     properties: {
       verb: { type: "string", description: "The board verb to run on approval, e.g. 'update_case', 'move', 'archive', 'restore'." },
-      target: { type: "string", description: "Optional target id the verb acts on, e.g. 'CASE-1'." },
+      target: {
+        type: "string",
+        description:
+          "The case id the verb acts on. Optional when the verb's own payload.id names it (it is " +
+          "lifted into target); present-and-disagreeing pairs are refused.",
+      },
       payload: {
         type: "object",
         description: "Arguments for the verb (the same shape that verb's tool would take).",
