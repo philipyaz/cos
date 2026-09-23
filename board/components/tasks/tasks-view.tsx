@@ -224,17 +224,18 @@ function groupCompleted(rows: TaskListRow[]): { days: { day: string; items: Task
 // The case chip every row carries — id + title, deep-linking to /my-issues?case=
 // (caseHref, board-view.tsx's own deep-link consumer; the board's ROOT `/` just
 // redirects to /my-issues without forwarding query params, so that would silently
-// never open the drawer).
+// never open the drawer). id at every width, title >=sm only (the 331px phone line
+// is the task title's — cos-ops#133).
 function CaseChip({ caseId, caseTitle }: { caseId: string; caseTitle: string }) {
   return (
     <Link
       href={caseHref(caseId)}
       onClick={(e) => e.stopPropagation()}
       title={`${caseId} · ${caseTitle}`}
-      className="shrink-0 inline-flex items-center gap-1.5 max-w-[220px] px-1.5 py-0.5 rounded-md border border-ink-100 bg-ink-50/60 text-[11px] text-ink-600 hover:bg-ink-100/60 transition"
+      className="shrink-0 inline-flex items-center gap-1.5 sm:max-w-[220px] px-1.5 py-0.5 rounded-md border border-ink-100 bg-ink-50/60 text-[11px] text-ink-600 hover:bg-ink-100/60 transition"
     >
       <span className="tabular-nums text-ink-500 font-medium shrink-0">{caseId}</span>
-      <span className="truncate">{caseTitle}</span>
+      <span className="hidden sm:inline truncate">{caseTitle}</span>
     </Link>
   );
 }
@@ -278,7 +279,7 @@ function OpenTaskRow({
         disabled={busy}
         aria-label="Mark done"
         title="Mark done"
-        className="shrink-0 text-ink-300 hover:text-lane-done transition disabled:opacity-50"
+        className="shrink-0 inline-flex items-center justify-center pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-ink-300 hover:text-lane-done transition disabled:opacity-50"
       >
         <IconCircle className="w-4 h-4" />
       </button>

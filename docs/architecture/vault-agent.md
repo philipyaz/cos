@@ -197,8 +197,9 @@ crash-loop the KeepAlive'd process:
 
 The vault runs over stdio. Claude Cowork Desktop spawns it as a direct stdio command; Claude Code
 reaches it over `.mcp.json` through a supergateway + launchd HTTP bridge on **`:8005`**. A
-`launch.sh` wrapper (the plist's only `ProgramArguments` entry) sources the API key from
-`config/secrets.env` before exec'ing supergateway, keeping the secret out of the installed plist.
+`launch.sh` wrapper (the plist's first `ProgramArguments` entry, ahead of the shared supergateway
+argv) sources the API key from `config/secrets.env` before exec'ing supergateway, keeping the
+secret out of the installed plist.
 The [`setup-vault`](https://github.com/philipyaz/cos/tree/main/.claude/skills/setup-vault) skill
 bootstraps a private vault from the committed `example-vault` template and points the bridge at it;
 [`mcp-bridge-setup`](mcp-servers.md) wires the bridge.
