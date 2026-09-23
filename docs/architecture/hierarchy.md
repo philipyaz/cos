@@ -109,7 +109,9 @@ point calls *it*:
 
 1. **Store** — `assertHierarchy(db, change)` throws `BadRequestError(hierarchyViolation(...))`.
    The HTTP API calls it inside the lock, **before** the write, on every create / single
-   PATCH / batch PATCH that touches `kind` or `parentId`.
+   PATCH / batch PATCH that touches `kind` or `parentId`, and — via the same shared write
+   cores in `board/lib/case-writes.ts` — on every approved `create_case`/`update_case`
+   proposal.
 2. **Lint** — `tests/board-lint.mjs` re-asserts the tier rules over the persisted store as a
    hard gate (dangling parent, wrong-tier parent, a leaf as someone's parent, cycles, depth > 3
    all FAIL).
@@ -145,7 +147,7 @@ existing route idioms: `force-dynamic`, `resolveActor` (human default; `x-actor:
 
 | route | change |
 |---|---|
-| `POST /api/cases` | accepts optional `kind` (∈ `VALID_CASE_KIND`) and `parentId`; calls `assertHierarchy` inside the lock **before** insert; violation → `400` |
+| `POST /api/cases` | accepts optional `kind` (∈ `VALID_CASE_KIND`) and `parentId`; asserts via the shared write core (`lib/case-writes.ts`), inside the lock **before** insert; violation → `400` |
 | `PATCH /api/cases/[id]` | accepts `kind` and `parentId` (`parentId: null` clears); asserts the *intended* kind+parent before `applyCaseUpdate`; the activity log records kind/parent changes |
 | `PATCH /api/cases` (batch) | the `update_cases` patch may set `parentId` / `kind`; asserts per id inside the lock; **any** violation 400s the whole batch (the labels-reject-whole-batch precedent) |
 | `GET /api/tree` | **new.** `?includeArchived=0&domain=work\|life` → `{ tree: TreeNode[], version }` via `buildForest`; `domain` filters roots by `root.domain` |

@@ -105,8 +105,8 @@ doc-checklist and a generic follow-up). Read-only. Use to discover a template `i
 
 #### `list_pending()`
 `GET /api/pending`. Lists the approval queue — agent-proposed mutations awaiting a human
-approve/reject. Read-only. Each entry has an `id`, the proposed `verb` + `payload`, a
-`summary`, and a `status`.
+approve/reject. Read-only. Each entry has an `id`, the proposed `verb` (+ `target` when it names
+a case), a `summary`, and a `status`.
 
 #### `get_tree([rootId], [domain], [includeArchived])`
 `GET /api/tree`. Reads the board **hierarchy** as an indented outline — `Initiative > Workstream >
@@ -550,9 +550,14 @@ ids, how many cases were scrubbed, and the new catalog size.
 
 #### `propose(verb, [target], payload, summary)`
 `POST /api/pending`. Proposes a board mutation for human approval instead of doing it directly.
-Lands in the pending queue; on approve it is committed through the matching `verb`. `verb` is the
-board verb to run (e.g. `update_case`, `move`, `archive`, `restore`), `payload` its arguments,
-`summary` a one-line human-readable description.
+Validated at propose time: the board dry-runs the commit and refuses a proposal that could never
+be approved, so nothing parks dead in the queue. Lands in the pending queue; on approve it is
+committed through the same write path as the direct verb. `verb` is the board verb to run:
+`update_case` (any case patch — re-parent via `payload.parentId`), `move` (lane change via
+`payload.status`), `create_case` (`payload.kind` mints an Initiative or Workstream), `archive`,
+`restore`, `add_task`, `complete_task`, `add_note`. Targeted verbs take the case id in `target` —
+or as the verb's own `payload.id` (honoured and lifted into `target`; a disagreeing pair is
+refused). `payload` carries the verb's arguments, `summary` a one-line human-readable description.
 
 #### `approve(pendingId)`
 `POST /api/pending/{id} { decision: "approve" }`. Commits a pending proposal through its verb and
