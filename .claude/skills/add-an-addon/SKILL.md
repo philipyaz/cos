@@ -144,7 +144,8 @@ committed plist template, **no** `ensure-bridges.sh` edit, **no** second port ma
 - **If your write tools need a machine-local secret** (e.g. the vault's `ANTHROPIC_API_KEY`; no add-on
   ships one today), add `secrets:["<TOKEN>"]` + `secretWrapper:"${REPO_ROOT}/mcp/<name>-server/launch.sh"`
   to the descriptor and ship a `launch.sh` (copy `mcp/vault-server/launch.sh`) that sources
-  `config/secrets.env` then execs supergateway — so the secret never lands in the rendered plist or
+  `config/secrets.env` then `exec "$@"` — gen-launchd renders the shared supergateway argv
+  (preload included) after the wrapper, so the secret never lands in the rendered plist or
   `.mcp.json`. Most add-ons need no secret (copy nutrition, which has none).
 - **Do NOT smuggle in pm2** or any new process manager, and **never hand-edit `.mcp.json`** (it is a
   generated, CI-checked artifact). The bridge is a launchd LaunchAgent rendered by `gen-launchd.mjs`;

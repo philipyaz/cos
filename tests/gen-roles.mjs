@@ -7,10 +7,11 @@
 // Asserts:
 //   • the probe-list carries the roles + label columns; boardapp/backup exist,
 //     hub-only; the board-facing wrappers declare hub+spoke;
-//   • gen-launchd renders bridges through `node --require loopback-bind.cjs`
-//     (supergateway has no bind-host option) and renders the backup job as a
-//     SCHEDULED plist (StartCalendarInterval, no KeepAlive) under its historical
-//     label com.chiefofstaff.backup;
+//   • gen-launchd renders EVERY bridge through `node --require loopback-bind.cjs`
+//     — a census over the whole family, not a sample, printing the count it
+//     checked (supergateway has no bind-host option) — and renders the backup job
+//     as a SCHEDULED plist (StartCalendarInterval, no KeepAlive) under its
+//     historical label com.chiefofstaff.backup;
 //   • role scoping: a SPOKE's default install set is only the spoke-capable core
 //     bridges; explicitly naming a hub-only service on a spoke is a LOUD error;
 //   • the loader hard-fails on spoke + localhost BOARD_URL (the one misconfig
@@ -85,9 +86,39 @@ async function main() {
   check(rows.backup?.roles === "hub" && rows.backup?.probe === "scheduled", "backup exists, hub-only, scheduled probe");
   check(rows.backup?.label === "com.chiefofstaff.backup", `backup keeps its historical label (got ${rows.backup?.label})`);
 
-  // ── [2] gen-launchd rendering: loopback preload + scheduled plist ─────────
-  r = run("node", ["scripts/gen-launchd.mjs", "--print", "board"]);
-  check(r.code === 0 && /--require/.test(r.out) && /loopback-bind\.cjs/.test(r.out), "bridge plists spawn supergateway through the loopback preload");
+  // ── [2] gen-launchd rendering: loopback preload on EVERY bridge + scheduled plist ─
+  // A census, not a sample (cos-ops#123: vault's secretWrapper branch bypassed the preload
+  // for 3 months while this step sampled only `board` and stayed green). Population from
+  // the probe-list rows above; the empty case is decided BEFORE any "all N" claim
+  // ([].every is true — an empty enumeration must never render as clear).
+  const bridgeNames = Object.entries(rows).filter(([, v]) => v.kind === "bridge").map(([n]) => n).sort();
+  const unpinned = [];
+  const secretLeaks = [];
+  const misordered = [];
+  for (const name of bridgeNames) {
+    const p = run("node", ["scripts/gen-launchd.mjs", "--print", name]);
+    const pinned = p.code === 0 && /--require/.test(p.out) && /loopback-bind\.cjs/.test(p.out);
+    if (!pinned) unpinned.push(name);
+    if (/ANTHROPIC/.test(p.out)) secretLeaks.push(name);
+    // A secret bridge's wrapper must PRECEDE the shared argv (wrapper-last would hand
+    // launch.sh to supergateway as a stray positional: preload present, key never sourced,
+    // fail-soft — green on both checks above). Fold condition keeps this skipped on a tree
+    // where the preload is missing entirely (that tree is already the census red).
+    const w = p.out.indexOf("launch.sh");
+    if (pinned && w !== -1 && !(w < p.out.indexOf("--require"))) misordered.push(name);
+  }
+  check(
+    bridgeNames.length > 0 && unpinned.length === 0,
+    `every bridge plist spawns supergateway through the loopback preload (${bridgeNames.length} bridges checked${unpinned.length ? `; UNPINNED: ${unpinned.join(", ")}` : ""})`,
+  );
+  check(
+    bridgeNames.length > 0 && secretLeaks.length === 0,
+    `no rendered bridge plist contains ANTHROPIC — the vault key stays in launch.sh/secrets.env (${bridgeNames.length} rendered)`,
+  );
+  check(
+    misordered.length === 0,
+    `a secret bridge's wrapper precedes the shared argv — wrapper-last never sources the key${misordered.length ? ` (MISORDERED: ${misordered.join(", ")})` : ""}`,
+  );
   r = run("node", ["scripts/gen-launchd.mjs", "--print", "backup"]);
   check(r.code === 0 && /StartCalendarInterval/.test(r.out) && /<integer>3<\/integer>/.test(r.out), "backup plist is StartCalendarInterval 03:30");
   check(!/KeepAlive/.test(r.out), "a scheduled job has no KeepAlive (it would loop)");
