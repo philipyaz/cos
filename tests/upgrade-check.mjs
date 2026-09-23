@@ -119,6 +119,10 @@ check(ids(p9).includes("services-regenerate") && !ids(p9).includes("restart-boar
 check(p9.steps.find((s) => s.id === "services-regenerate").command === "node scripts/gen-launchd.mjs --install board vault guardsvc boardapp backup whatsappbridge", "the regenerate names exactly the INSTALLED services for this role (never --all)");
 check(plan({ changedPaths: ["mcp/board-server/board.service.json"], role: "spoke", storeSchema: null }).steps.find((s) => s.id === "services-regenerate").command === "node scripts/gen-launchd.mjs --install board", "on a spoke only the spoke-capable installed services are named");
 
+const pLw = plan({ changedPaths: ["mcp/vault-server/launch.sh"] });
+check(ids(pLw).includes("services-regenerate") && !ids(pLw).includes("restart-vault"),
+  "a vault launch.sh diff → full re-render, not a kickstart (the plist owns the argv; a kickstart cannot re-render it)");
+
 const pd = plan({ changedPaths: ["mcp/board-server/server.mjs"], toolDelta: { board: { added: ["list_triage_decisions", "record_triage_decision"], removed: [] } } });
 check(/tools gained: list_triage_decisions, record_triage_decision/.test(pd.steps.find((s) => s.id === "restart-board").title), "a restart step names the tools the server gained in the range");
 

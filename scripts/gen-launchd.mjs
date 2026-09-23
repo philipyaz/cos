@@ -65,16 +65,21 @@ const xDict = (obj) =>
 
 // The argv that launchd's ProgramArguments runs for one service.
 function programArguments(e) {
-  // Secret services run their wrapper (it sources config/secrets.env then execs the real command),
-  // keeping the key out of the plist — identical to today's vault/launch.sh + jobs-runner-launch.sh.
-  if (e.secretWrapper) return [e.secretWrapper]
-
   if (e.runtime === 'bridge') {
     // supergateway fronts the stdio command as Streamable HTTP on the bridge port at /mcp,
     // spawned through node with the loopback preload so the bridge listens on 127.0.0.1
     // ONLY (supergateway has no bind-host option; unpinned it serves every interface).
-    return supergatewayArgv({ nodeBin: NODE_BIN, preloadPath: LOOPBACK_PRELOAD, distPath: SUPERGATEWAY_DIST, entry: e })
+    const argv = supergatewayArgv({ nodeBin: NODE_BIN, preloadPath: LOOPBACK_PRELOAD, distPath: SUPERGATEWAY_DIST, entry: e })
+    // A secret bridge (vault) runs its wrapper FIRST: the wrapper sources config/secrets.env,
+    // then `exec "$@"` runs this same argv — the key stays out of the plist while the
+    // security-critical recipe keeps its one owner (supergatewayArgv), preload included.
+    // Windows already works this way (cos-services.mjs injects secrets into the spawn env
+    // and routes every bridge through the shared argv).
+    return e.secretWrapper ? [e.secretWrapper, ...argv] : argv
   }
+  // A non-bridge secret service (vaultjobs, runtime exec) keeps the wrapper-alone shape:
+  // its wrapper IS the program (sources config/secrets.env, then execs its own fixed command).
+  if (e.secretWrapper) return [e.secretWrapper]
   if (e.runtime === 'uvicorn') {
     // uv self-provisions the venv then runs uvicorn. --extra pulls in optional deps (e.g. the guard
     // 'model' extra = torch+transformers for the real classifier).
