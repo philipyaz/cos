@@ -2,6 +2,7 @@ import { readDB } from "@/lib/store";
 import { readPrefs } from "@/lib/prefs";
 import { TopBar } from "@/components/topbar";
 import { BoardView } from "@/components/board/board-view";
+import { PendingTray } from "@/components/board/pending-tray";
 import { parseBoardQuery, encodeBoardQuery } from "@/lib/selectors";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +36,9 @@ export default async function MyIssuesPage({
   return (
     <>
       <TopBar crumbs={["Cos", "My Issues"]} />
+      <div className="px-3 pt-3">
+        <PendingTray pending={db.pending ?? []} version={db.version} now={now} />
+      </div>
       <BoardView
         now={now}
         cases={db.cases}
