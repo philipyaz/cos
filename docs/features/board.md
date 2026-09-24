@@ -249,7 +249,14 @@ The board's reason to exist over a generic kanban: the AI chief-of-staff operate
 | Stale / aging detection | Flag cards idle > N days (esp. `waiting_for_input`) | The chase that quietly dies — surfaced; feeds nudges | Derived from `updatedAt`/activity | P0 | S |
 | NL board commands | "move the Acme onboarding to done" → verb dispatch | The conversational twin of drag-drop | Maps NL→existing MCP verbs | P0 | M |
 | Draft-reply for waiting | Draft the chase email for an aging `waiting_for_input` case via Gmail MCP | Closes ingest→board→outbound loop | Cross-MCP; Gmail draft | P2 | M |
-| Pending-actions approval queue | When `auto-sync` is off, agent-proposed mutations land in an in-board tray → approve/reject commits through the same verb | The product's approval mode (§5) has no surface today — this is where "confirm before committing" actually happens, and a preview of the trust ledger | Proposed-mutation store (`pending.json` or `Case.pending[]`) + approve/reject route; writes the activity log on commit | P1 | M |
+| Pending-actions approval queue | When `auto-sync` is off, agent-proposed mutations land in an in-board tray → approve/reject commits through the same verb | Where "confirm before committing" actually happens, and a preview of the trust ledger | `db.pending[]` + approve/reject route; writes the activity log on commit | ✅ | M |
+
+> **Pending-approvals tray ✅ shipped.** Agent proposals (`db.pending[]`) render on `/my-issues`
+> as stacked cards — approve commits through the same `lib/case-writes.ts` cores the direct
+> routes call, reject settles the row, and one human-initiated control bulk-rejects everything
+> older than a chosen age after stating the affected count. The phone tab bar badges the
+> pending count on My Issues (the `/inbox` pill's geometry), so the queue reaches a phone at
+> zero taps.
 
 ### Notifications, reminders & follow-ups
 
@@ -386,7 +393,7 @@ Agent-native parity means **one mutation path**: every human gesture in the tabl
 | `search` | `GET /api/search` (keyword) · `POST /api/search` (batch semantic top-K) | ✅ | spotlight · command palette |
 | `list_views` / `save_view` | `GET·POST /api/views` | 🆕 | saved views |
 | `list_templates` / `apply_template` | `GET·POST /api/templates` | 🆕 | case templates |
-| `propose` / `approve` / `reject` | `…/api/pending` | 🆕 | approval queue |
+| `propose` / `approve` / `reject` | `…/api/pending` | ✅ | approval tray · tab-bar badge |
 | — (live) | `GET /api/stream` (SSE) | 🆕 | live refresh |
 
 Two rules keep parity honest: **(1) no human-only or agent-only mutation** — if the UI can do it a verb exists, and every verb has a UI twin; **(2)** every verb writes through the single atomic, version-guarded store path (see *Persistence — Safe concurrent writes*). The lone deliberate exception to (1) is the **Clean Done** purge (`POST /api/cases/clean`): a destructive bulk-housekeeping action kept off the agent surface on purpose — the agent has per-case `delete_case(hard:true)` but no mass-purge.
