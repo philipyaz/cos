@@ -241,8 +241,12 @@ export function planUpgrade(i) {
   // 4. Service definitions changed → re-render + reload every plist (supersedes per-service kicks).
   // mcp/vault-server/launch.sh: post-#123 the plist owns the vault argv (the wrapper is a
   // fixed prefix ahead of it), so a launch.sh diff needs the full re-render, not a kickstart
-  // (a kickstart cannot re-render ProgramArguments).
-  const serviceDefPaths = ["mcp/service-manifest.mjs", "scripts/gen-launchd.mjs", "scripts/loopback-bind.cjs", "scripts/boardapp-run.mjs", "mcp/ensure-bridges.sh", "mcp/ensure-bridges.mjs", "mcp/vault-server/launch.sh"];
+  // (a kickstart cannot re-render ProgramArguments). config/load-config.sh(.mjs): the loader
+  // has been the source of EVERY rendered plist value since the manifest existed (${NODE_BIN},
+  // ${REPO_ROOT}, every port) — this closes a PRE-EXISTING gap (cos-ops#137), not a new one.
+  // Both halves: the shell loader itself, and config/load-config.mjs — the only path by which
+  // gen-launchd/gen-mcp-json (Node) read it.
+  const serviceDefPaths = ["mcp/service-manifest.mjs", "scripts/gen-launchd.mjs", "scripts/loopback-bind.cjs", "scripts/boardapp-run.mjs", "mcp/ensure-bridges.sh", "mcp/ensure-bridges.mjs", "mcp/vault-server/launch.sh", "config/load-config.sh", "config/load-config.mjs"];
   const descriptorsChanged = P.filter((p) => p.endsWith(".service.json") || serviceDefPaths.includes(p));
   const regenerate = descriptorsChanged.length > 0;
   const installedNames = i.manifest.filter((e) => e.roles?.includes(i.role) && i.installedLabels.has(e.label)).map((e) => e.name);

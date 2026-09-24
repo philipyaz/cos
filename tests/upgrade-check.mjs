@@ -123,6 +123,16 @@ const pLw = plan({ changedPaths: ["mcp/vault-server/launch.sh"] });
 check(ids(pLw).includes("services-regenerate") && !ids(pLw).includes("restart-vault"),
   "a vault launch.sh diff → full re-render, not a kickstart (the plist owns the argv; a kickstart cannot re-render it)");
 
+// cos-ops#137: the loader has been the source of every rendered plist VALUE since the
+// manifest existed (${NODE_BIN}, ${REPO_ROOT}, every port), yet a loader-only diff triggered
+// no re-render step before this widening — a pre-existing gap the new COS_DEVICE_ID key just
+// made visible. Both halves: the shell loader itself, and the Node-side read path
+// (config/load-config.mjs) that gen-launchd/gen-mcp-json actually import.
+const pLc = plan({ changedPaths: ["config/load-config.sh"] });
+check(ids(pLc).includes("services-regenerate"), "a config/load-config.sh diff → services-regenerate (cos-ops#137: the loader is a plist-value source; this closes a PRE-EXISTING gap)");
+const pLcMjs = plan({ changedPaths: ["config/load-config.mjs"] });
+check(ids(pLcMjs).includes("services-regenerate"), "a config/load-config.mjs diff ALSO → services-regenerate (the symmetric Node-side read path gen-launchd/gen-mcp-json import)");
+
 const pd = plan({ changedPaths: ["mcp/board-server/server.mjs"], toolDelta: { board: { added: ["list_triage_decisions", "record_triage_decision"], removed: [] } } });
 check(/tools gained: list_triage_decisions, record_triage_decision/.test(pd.steps.find((s) => s.id === "restart-board").title), "a restart step names the tools the server gained in the range");
 

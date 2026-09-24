@@ -147,6 +147,7 @@ board/calendar/nutrition, because this server needs **no secret**). The generate
 the descriptor) is:
 - `PATH` starting with `$BREW_PREFIX/bin` (launchd can't see an nvm/asdf shim),
 - `CRM_BASE_URL=${BOARD_URL}` (the board; from `env` in the descriptor, pinned so it doesn't depend on the launchd cwd),
+- `COS_DEVICE_ID`/`COS_DEVICE_ROLE` (this machine's identity — the multi-device Devices last-seen signal),
 - `COS_MCP_IDLE_EXIT_MS=300000` — the idle-exit **OPT-IN** (`idleExit:true`), on the bridge only, never in
   the direct-stdio Cowork config (see Gotchas).
 

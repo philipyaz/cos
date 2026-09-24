@@ -224,7 +224,8 @@ board backend (data model + `board/app/api/nutrition/*` + the `board/lib/addons.
 relative path; (3) `npm install` at root + committed lockfile; (4) `NUTRITION_BRIDGE_PORT=8007` in
 `config/load-config.sh` (+ `cos.env.example`); (5) **one** descriptor
 `mcp/nutrition-server/nutrition.service.json` (`kind/runtime: bridge`, `addon:"nutrition"`,
-`env: {CRM_BASE_URL: "${BOARD_URL}"}`, `clients: ["claude-code","cowork"]`); (6) the generators install
+`env: {CRM_BASE_URL: "${BOARD_URL}", COS_DEVICE_ID: "${COS_DEVICE_ID}", COS_DEVICE_ROLE:
+"${COS_DEVICE_ROLE}"}`, `clients: ["claude-code","cowork"]`); (6) the generators install
 the plist / Windows spawn / `.mcp.json` / Cowork entry from that descriptor; (7) `PATCH
 /api/addons/nutrition {"enabled":true}` flips the gate. No template, no `SERVICES[]`, no probe-list edit.
 

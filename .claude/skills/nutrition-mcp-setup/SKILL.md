@@ -128,6 +128,7 @@ The bridge runs supergateway DIRECTLY around the node child (no launch wrapper �
 board/calendar, UNLIKE vault, because this server needs **no secret**). Its only env is:
 - `PATH` starting with `$BREW_PREFIX/bin` (launchd can't see an nvm/asdf shim),
 - `CRM_BASE_URL=http://localhost:3000` (the board; pinned so it doesn't depend on the launchd cwd),
+- `COS_DEVICE_ID`/`COS_DEVICE_ROLE` (this machine's identity — the multi-device Devices last-seen signal),
 - `COS_MCP_IDLE_EXIT_MS=300000` — the idle-exit **OPT-IN**, set **ONLY here** (the bridge), never in
   the direct-stdio Cowork config (see Gotchas).
 
