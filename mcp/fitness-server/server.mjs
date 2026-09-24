@@ -23,7 +23,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { err, text, str, start, baseUrl } from "../../packages/mcp-kit/index.mjs";
+import { err, text, str, start, baseUrl, makeBoardApi } from "../../packages/mcp-kit/index.mjs";
 
 const CRM_BASE_URL = baseUrl("CRM_BASE_URL", "http://localhost:3000");
 
@@ -34,37 +34,10 @@ const HEALTH_TYPES = ["workout", "sleep_night", "sleep_nap", "hrv", "resting_hr"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-async function healthApi(method, path, payload) {
-  const headers = {};
-  let body;
-
-  if (payload !== undefined) {
-    headers["Content-Type"] = "application/json";
-    body = JSON.stringify(payload);
-  }
-  // Writes are attributed to the agent via x-actor (the board's resolveActor reads it) and
-  // gated by the board's add-on enabled toggle (a disabled add-on 404s every write).
-  if (method !== "GET") {
-    headers["x-actor"] = "agent";
-  }
-
-  let res, data;
-  try {
-    const url = `${CRM_BASE_URL}${path}`;
-    res = await fetch(url, {
-      method,
-      headers: Object.keys(headers).length ? headers : undefined,
-      body,
-    });
-    data = await res.json().catch(() => ({}));
-  } catch (e) {
-    return { errorResult: err(`Could not reach the board at ${CRM_BASE_URL}: ${e.message}`) };
-  }
-  if (res.status === 401) return { errorResult: err(data.error ?? "Unauthorized.") };
-  if (res.status === 404) return { errorResult: err(data.error ?? "Not found — the fitness add-on may be disabled.") };
-  if (!res.ok) return { errorResult: err(`Board returned ${res.status}: ${data.error ?? "unknown error"}`) };
-  return { data };
-}
+// The shared board wrapper (mcp-kit): x-actor + {actor:"agent"} on writes, x-device on every
+// request, and `detail ?? error` on the generic branch — the schema-guard 503's remediation
+// reaches the agent (cos-ops#138; the copy this replaces rendered the slug only).
+const healthApi = makeBoardApi("fitness record", CRM_BASE_URL);
 
 // ── Tool definitions ────────────────────────────────────────────────────────
 

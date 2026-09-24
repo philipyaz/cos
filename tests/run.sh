@@ -266,6 +266,17 @@
 #      supplied by hand (that is device-mirrors.test.ts mirror #3's job). Board-free,
 #      root-install-only: SKIPs gracefully (exit 0) if the board server's deps aren't
 #      installed (fresh checkout), mirroring [13b2]. Run UNCONDITIONALLY (self-skips).
+#  13b4. mcp-fitness-wrapper — pins the fold of fitness's hand-rolled healthApi onto
+#      mcp-kit's shared makeBoardApi() (cos-ops#138): (1) a spawned fitness server's 503
+#      isError text CONTAINS the schema-guard's `detail` remediation, not just the bare
+#      `error` slug; (2) with COS_DEVICE_ID/COS_DEVICE_ROLE set, its outbound request
+#      carries x-device/x-device-role (device keys scrubbed from the inherited env in
+#      both arms); (3) tools/list is still EXACTLY the 20 fixed tool names (sorted-set
+#      compare; green on main already, a forward pin); (4) source pins: no `async
+#      function healthApi`, no `fetch(`, no `res.status === 401`, `makeBoardApi(`
+#      present. Board-free, root-install-only: SKIPs gracefully (exit 0) if the fitness
+#      server's deps aren't installed (fresh checkout), mirroring [13b2]/[13b3]. Run
+#      UNCONDITIONALLY (self-skips).
 #  13d. api-schema-guard — ONLY against the auto-started sandbox board (it must
 #      rewrite the store FILE, so it skips under COS_TEST_BOARD_URL): the
 #      FAIL-CLOSED schema guard. A store whose on-disk schemaVersion is AHEAD of
@@ -1770,6 +1781,22 @@ else
   echo "mcp-device-headers: FAIL"
   fail=1
   fail_reasons="${fail_reasons} mcp-device-headers"
+fi
+
+# --- 13b4. fitness healthApi→makeBoardApi fold (no board, no LLM, no key) ----
+# Pins cos-ops#138: the schema-guard 503's detail remediation reaches the agent through
+# fitness, a spawned fitness wrapper sends x-device/x-device-role, the 20 tools are
+# unchanged, and the source shows the fold (no healthApi/fetch(/401 branch). SKIPs
+# gracefully if root workspace deps aren't installed (mirrors [13b2]/[13b3]). Run
+# UNCONDITIONALLY (self-skips).
+echo
+echo "--- [13b4] fitness healthApi fold (no board/LLM/key) ---------"
+if node "${SCRIPT_DIR}/mcp-fitness-wrapper.mjs"; then
+  echo "mcp-fitness-wrapper: PASS"
+else
+  echo "mcp-fitness-wrapper: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} mcp-fitness-wrapper"
 fi
 
 # --- 13c. api-vault-route (only when a board is healthy) ---------------------
