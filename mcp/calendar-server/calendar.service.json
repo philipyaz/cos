@@ -14,7 +14,9 @@
     "${REPO_ROOT}/mcp/calendar-server/server.mjs"
   ],
   "env": {
-    "CRM_BASE_URL": "${BOARD_URL}"
+    "CRM_BASE_URL": "${BOARD_URL}",
+    "COS_DEVICE_ID": "${COS_DEVICE_ID}",
+    "COS_DEVICE_ROLE": "${COS_DEVICE_ROLE}"
   },
   "idleExit": true,
   "clients": [

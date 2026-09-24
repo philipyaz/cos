@@ -127,8 +127,9 @@ node "$REPO_ROOT/scripts/gen-launchd.mjs" --install body
 ```
 The bridge runs supergateway DIRECTLY around the node child (no launch wrapper — this server needs **no
 secret**). The generated plist's env (from the descriptor) is: a `PATH` starting with `$BREW_PREFIX/bin`,
-`CRM_BASE_URL=${BOARD_URL}`, and `COS_MCP_IDLE_EXIT_MS=300000` (the idle-exit **OPT-IN**, on the bridge
-only, never in the Cowork config).
+`CRM_BASE_URL=${BOARD_URL}`, `COS_DEVICE_ID`/`COS_DEVICE_ROLE` (this machine's identity — the
+multi-device Devices last-seen signal), and `COS_MCP_IDLE_EXIT_MS=300000` (the idle-exit **OPT-IN**, on
+the bridge only, never in the Cowork config).
 - **CHECKPOINT** — an MCP `initialize` on `:8012` returns `serverInfo.name == "body"`:
   ```sh
   source "$(git rev-parse --show-toplevel)/config/load-config.sh"

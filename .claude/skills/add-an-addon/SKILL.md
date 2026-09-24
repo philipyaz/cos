@@ -136,7 +136,8 @@ committed plist template, **no** `ensure-bridges.sh` edit, **no** second port ma
   canonical port on every OS.
 - Drop **ONE** descriptor `mcp/<name>-server/<name>.service.json` (`schemaVersion:1`,
   `kind/runtime:"bridge"`, `addon:"<id>"`, `portVar:"<NAME>_BRIDGE_PORT"`, `stdio:["${NODE_BIN}",
-  "${REPO_ROOT}/mcp/<name>-server/server.mjs"]`, `env:{CRM_BASE_URL:"${BOARD_URL}"}`,
+  "${REPO_ROOT}/mcp/<name>-server/server.mjs"]`, `env:{CRM_BASE_URL:"${BOARD_URL}",
+  COS_DEVICE_ID:"${COS_DEVICE_ID}", COS_DEVICE_ROLE:"${COS_DEVICE_ROLE}"}`,
   `clients:["claude-code","cowork"]`, `probe:{type:"httpListen"}`, `idleExit:true`). Copy
   `mcp/nutrition-server/nutrition.service.json` beat for beat. The `addon:"<id>"` field is what makes
   the probe treat the bridge as **OPTIONAL** and skip it silently on a board that never installed it —

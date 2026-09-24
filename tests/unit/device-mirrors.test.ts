@@ -27,6 +27,12 @@
 // scripts/pack-skills.mjs) — it is pinned by its OWN test (tests/unit/cowork-skills.test.ts),
 // not repeated here, so this file's count stays the six that didn't already have one.
 //
+// cos-ops#137 joined config/load-config.sh's own COS_DEVICE_ID default to the id chain
+// mirror #2 already pins — it does not add a seventh mirror site here (the mirror stays
+// board/lib/cos-env.ts ↔ backup/config.mjs), but the loader's new default must resolve to
+// the SAME identity as backup's existing hostname fallback, so it is pinned by its own
+// "B1 pin" test below, alongside mirror #2, rather than silently trusted from source.
+//
 // ADR 0014 already settled whether any of these could instead be deleted
 // (loosening board/tsconfig.json for cross-boundary imports): rejected, for all
 // of them — "mirrored and pinned by a test running both copies over one fixture
@@ -125,6 +131,33 @@ fs.writeFileSync(
 const FIXTURE_B = fs.mkdtempSync(path.join(os.tmpdir(), "cos-device-mirrors-b-"));
 fs.mkdirSync(path.join(FIXTURE_B, "board"), { recursive: true });
 
+// ── Fixture for the B1 pin (config/load-config.sh's own COS_DEVICE_ID default) ─
+// A THIRD fixture, distinct from A/B: the loader (unlike the board driver) resolves
+// REPO_ROOT via `git rev-parse --show-toplevel`, falling back to a BASH_SOURCE walk-up
+// only outside a git checkout — os.tmpdir() lives outside this repo, so sourcing the
+// COPIED loader from here (never this hub's own config/load-config.sh) anchors REPO_ROOT
+// to the fixture and the loader reads the FIXTURE's config/cos.env, never this hub's.
+// Starts with no cos.env (the "no fixture cos.env, no env id" default case); the B1 test
+// below writes one partway through to cover the other two cases against the SAME fixture.
+const FIXTURE_C = fs.mkdtempSync(path.join(os.tmpdir(), "cos-device-mirrors-c-"));
+fs.mkdirSync(path.join(FIXTURE_C, "config"), { recursive: true });
+fs.copyFileSync(path.join(COS_ROOT, "config", "load-config.sh"), path.join(FIXTURE_C, "config", "load-config.sh"));
+
+// Source the fixture's OWN copy of load-config.sh and print the resolved COS_DEVICE_ID.
+// bash, not sh: load-config.sh's non-git REPO_ROOT fallback anchors on ${BASH_SOURCE},
+// which only bash provides (plain `sh -c` falls back to $0 and resolves the wrong root).
+// config/load-config.mjs itself still runs the loader under `sh` (dash on CI) — the
+// construct is plain POSIX, so behaviour agrees; bash here is only for this fixture's anchor.
+// The fixture path is a positional param ($1), never string-interpolated into the script,
+// matching config/load-config.mjs's own loadSecrets() convention.
+function runLoaderId(fixtureDir: string, overrides: Record<string, string> = {}): string {
+  return execFileSync(
+    "bash",
+    ["-c", '. "$1/config/load-config.sh" && printf %s "$COS_DEVICE_ID"', "bash", fixtureDir],
+    { cwd: fixtureDir, env: cleanEnv(overrides), encoding: "utf8" },
+  );
+}
+
 // ── Fixture backup repo for mirrors #4 + #5 ─────────────────────────────────────
 // Set COS_BACKUP_REPO BEFORE the dynamic imports below: board/lib/backup-status.ts
 // binds its BACKUP_REPO constant from that env var ONCE, at module load. Importing
@@ -151,6 +184,7 @@ else process.env.COS_BACKUP_REPO = _prevBackupRepoEnv;
 after(() => {
   fs.rmSync(FIXTURE_A, { recursive: true, force: true });
   fs.rmSync(FIXTURE_B, { recursive: true, force: true });
+  fs.rmSync(FIXTURE_C, { recursive: true, force: true });
   fs.rmSync(FIXTURE_REPO, { recursive: true, force: true });
 });
 
@@ -194,6 +228,41 @@ test("mirror #2 — device id/role chain: env > cos.env > default (board cos-env
     parseCosEnv(FIXTURE_A),
     { COS_DEVICE_ID: "Philip's Mini #2", COS_DEVICE_ROLE: "  spoke  " },
     "board parseCosEnv strips one layer of quotes, keeping inner punctuation and padding",
+  );
+});
+
+// ── B1 pin — config/load-config.sh's COS_DEVICE_ID default vs backup's hostname fallback ─
+// cos-ops#137 gives the shell loader its own default (the RAW hostname, so a descriptor
+// ${COS_DEVICE_ID} ref always resolves) — B1 (the pm-technical-review verdict) required this
+// be pinned equal, before and after, to backup/config.mjs's existing hostname fallback on a
+// machine whose cos.env sets no COS_DEVICE_ID, since both key a manifests/<id>.json producer
+// identity (cos-ops#69's incident class). This is that pin, made executable rather than argued.
+test("B1 pin — config/load-config.sh's COS_DEVICE_ID default agrees with backup/config.mjs's hostname fallback (cos-ops#137)", () => {
+  const id = runLoaderId(FIXTURE_C);
+  const mjsId = runConfigMjs({ COS_BACKUP_REPO_ROOT: FIXTURE_B }).id;
+
+  // Split from the drift assert below on purpose: an EMPTY id here means hostname(1) is
+  // missing from PATH — an ENVIRONMENT failure (cleanEnv() keeps PATH, so this resolves in
+  // practice) — not implementation drift, which the equality assert below is for.
+  assert.ok(
+    id.length > 0,
+    `the loader's COS_DEVICE_ID default is non-empty (got ${JSON.stringify(id)}) — an empty value means hostname(1) is missing from PATH, an ENVIRONMENT issue, not implementations drift (backup/config.mjs's own fallback resolved ${JSON.stringify(mjsId)})`,
+  );
+  assert.equal(
+    slugifyDeviceId(id),
+    mjsId,
+    `IMPLEMENTATIONS DRIFTED (loader default vs backup/config.mjs's hostname fallback) — edit BOTH config/load-config.sh and backup/config.mjs (loader printed ${JSON.stringify(id)}, backup resolved ${JSON.stringify(mjsId)})`,
+  );
+
+  // cos.env wins over the default — same fixture, now with a cos.env written into it.
+  fs.writeFileSync(path.join(FIXTURE_C, "config", "cos.env"), 'COS_DEVICE_ID="from-cos-env"\n');
+  assert.equal(runLoaderId(FIXTURE_C), "from-cos-env", "a fixture cos.env value wins over the hostname default");
+
+  // env wins over cos.env — same fixture + cos.env, plus a pre-set process env value.
+  assert.equal(
+    runLoaderId(FIXTURE_C, { COS_DEVICE_ID: "from-env" }),
+    "from-env",
+    "a pre-set process env value wins over cos.env (env > cos.env > default, matching the role chain)",
   );
 });
 

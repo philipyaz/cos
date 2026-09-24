@@ -24,8 +24,12 @@
 #     via config/load-config.mjs's loadSecrets(), by the Cowork/services tooling — never here.
 #     Sourcing it into every skill shell would broadcast the secret to every child process a
 #     skill spawns.
-#   - It is NOT wired into any launchd plist — launchd does not inherit a shell env; the bridges
-#     get their paths from their own plists. This file is for the runbooks, not the daemons.
+#   - It is NOT wired into most launchd plists — launchd does not inherit a shell env; the
+#     bridges get their paths from their own plists. This file is for the runbooks, not the
+#     daemons — with ONE exception: mcp/vault-server/launch.sh (the vault bridge's
+#     secret-sourcing wrapper, run BY the plist) sources this loader before exec'ing, so that
+#     one supervised process DOES inherit whatever this file exports (harmless today — it
+#     imports no board API wrapper).
 
 # --- 1. REPO_ROOT: git first (the anchor), then this file's own location (non-git fallback) ----
 if _git_root="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$_git_root" ]; then
@@ -77,13 +81,16 @@ fi
 # objective) that nutrition + fitness read; gated per-board via Settings.addons (it hard auto-enables
 # under either consumer). This default only seeds the supergateway HTTP bridge port.
 : "${BODY_BRIDGE_PORT:=8012}"
-# Device role (multi-device): "hub" runs the state machine (board, sidecars, backups, routines);
-# "spoke" is a stateless client whose board-facing services point at the hub's BOARD_URL. The
-# default is hub so a solo machine never meets the concept. Precedence + validation happen in
-# section 4 (AFTER cos.env is sourced) so the value the loader validates + exports is the final
-# one — and so a pre-set process env wins over cos.env, matching every other reader (cos-env.ts,
-# backup/config.mjs, ensure-bridges.mjs). Capture any pre-set env value here first.
+# Device role + id (multi-device): "hub" runs the state machine (board, sidecars, backups,
+# routines); "spoke" is a stateless client whose board-facing services point at the hub's
+# BOARD_URL. The role default is hub so a solo machine never meets the concept; the id gets
+# its default in section 4 below (after cos.env is sourced — see the comment there).
+# Precedence + validation for BOTH happen in section 4 (AFTER cos.env is sourced) so the value
+# the loader validates + exports is the final one — and so a pre-set process env wins over
+# cos.env, matching every other reader (cos-env.ts, backup/config.mjs, ensure-bridges.mjs).
+# Capture any pre-set env value here first.
 _cos_env_role_override="${COS_DEVICE_ROLE:-}"
+_cos_env_id_override="${COS_DEVICE_ID:-}"
 
 # --- 3. Override defaults with the real machine config (once cos-setup has written it) ---------
 if [ -f "$REPO_ROOT/config/cos.env" ]; then
@@ -105,6 +112,18 @@ case "$COS_DEVICE_ROLE" in
     return 1 2>/dev/null || exit 1
     ;;
 esac
+
+# Device id: same precedence as the role above (env override wins over cos.env), then default
+# to the RAW hostname — the same gethostname() every other fallback already computes
+# (board/lib/cos-env.ts machineValue("COS_DEVICE_ID", os.hostname()), backup/config.mjs). NOT
+# slugified here (deliberately): board/lib/cos-env.ts slugifyDeviceId, packages/mcp-kit's
+# x-device producer, and backup/config.mjs each already sanitize at their own edge, and a
+# shell slug would be a FOURTH copy. A descriptor ${COS_DEVICE_ID} ref just needs a NON-EMPTY
+# value on every machine — mcp/service-manifest.mjs's interpolate() fails loudly on an
+# unresolved (undefined OR EMPTY) ${VAR}. The `|| echo unknown-device` arm mirrors the board's
+# own terminal fallback (cos-env.ts) and the BREW_PREFIX default's shape above.
+if [ -n "$_cos_env_id_override" ]; then COS_DEVICE_ID="$_cos_env_id_override"; fi
+: "${COS_DEVICE_ID:=$(hostname 2>/dev/null || echo unknown-device)}"
 
 # A blank VAULT_NAME (e.g. before setup-vault fills it) is treated as unset → the template vault.
 [ -n "${VAULT_NAME:-}" ] || VAULT_NAME=example-vault
@@ -145,15 +164,13 @@ export WHATSAPP_MCP_DIR WHATSAPP_MCP_BRIDGE_PORT WHATSAPP_GO_PORT WHATSAPP_MCP_B
 export NUTRITION_BRIDGE_PORT NUTRITION_BRIDGE_URL
 export FITNESS_BRIDGE_PORT FITNESS_BRIDGE_URL
 export BODY_BRIDGE_PORT BODY_BRIDGE_URL
-export COS_DEVICE_ROLE
+export COS_DEVICE_ROLE COS_DEVICE_ID
 # These have NO default (they only exist on a configured machine) — export each only
-# when set. COS_DEVICE_ID: the stable per-machine id (setup mints it; backup tooling
-# falls back to a sanitized hostname). COS_HUB_PUBLIC_URL: the hub's externally-
-# reachable URL (the `tailscale serve` MagicDNS name) — HUB-side only, so the Devices
-# UI can emit a cos-join:// blob for a new spoke. BACKUP_REPO_REF: the private backup
-# repo ref (e.g. owner/cos-backups) a warm-standby spoke may clone — carried in the blob.
+# when set. COS_HUB_PUBLIC_URL: the hub's externally-reachable URL (the `tailscale serve`
+# MagicDNS name) — HUB-side only, so the Devices UI can emit a cos-join:// blob for a new
+# spoke. BACKUP_REPO_REF: the private backup repo ref (e.g. owner/cos-backups) a
+# warm-standby spoke may clone — carried in the blob.
 # (Trailing `if`s, not `[ ] &&`: a bare failed test as the file's last statement would
 # make the whole `source` report non-zero — fatal under set -e.)
-if [ -n "${COS_DEVICE_ID:-}" ]; then export COS_DEVICE_ID; fi
 if [ -n "${COS_HUB_PUBLIC_URL:-}" ]; then export COS_HUB_PUBLIC_URL; fi
 if [ -n "${BACKUP_REPO_REF:-}" ]; then export BACKUP_REPO_REF; fi

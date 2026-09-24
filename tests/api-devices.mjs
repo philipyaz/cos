@@ -14,8 +14,21 @@
 //     POST with x-device shows up in the list too;
 //   • the join blob reflects COS_HUB_PUBLIC_URL: absent on the sandbox board (unset)
 //     — a null joinBlob, not a crash.
+//   • (cos-ops#137, AC 4) the MCP round trip: a REAL spawn of the board MCP server, its env
+//     taken from mcp/service-manifest.mjs's resolved 'board' entry and pointed at THIS
+//     sandbox board, calling get_device_status (the ONE tool that both registers the caller
+//     AND renders it — a plain read tool records nothing) actually registers a device here.
+//     getManifest() runs INSIDE this section's own guarded branch: a mid-edit config/cos.env
+//     degrades it to a self-scoped NOT RUN line instead of reddening this whole file — a
+//     broken manifest is [13b3]'s subject, not this one's.
 //
 // Env: CRM_BASE_URL (board url).
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const BOARD_SERVER = path.join(HERE, "..", "mcp", "board-server", "server.mjs");
 const BASE = (process.env.CRM_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
 
 let failures = 0;
@@ -44,6 +57,41 @@ const POST = (p, body, headers = {}) =>
   }).then(json);
 
 const devIds = (b) => (b.devices ?? []).map((d) => d.deviceId);
+
+// newline-delimited JSON-RPC client over a spawned MCP server's stdio (same framing as
+// api-vault.mjs / mcp-kit-idle.mjs / mcp-device-headers.mjs).
+function makeMcpClient(child) {
+  let nextId = 1;
+  const pending = new Map();
+  let buf = "";
+  child.stdout.on("data", (chunk) => {
+    buf += chunk.toString("utf8");
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let msg;
+      try { msg = JSON.parse(line); } catch { continue; }
+      if (msg.id !== undefined && pending.has(msg.id)) {
+        const { resolve } = pending.get(msg.id);
+        pending.delete(msg.id);
+        resolve(msg.result);
+      }
+    }
+  });
+  const request = (method, params) => {
+    const id = nextId++;
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+    return new Promise((resolve) => {
+      pending.set(id, { resolve });
+      setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve(null); } }, 5000);
+    });
+  };
+  const notify = (method, params) =>
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n");
+  return { request, notify };
+}
 
 async function main() {
   console.log(`api-devices · board=${BASE}`);
@@ -111,6 +159,68 @@ async function main() {
     await fetch(`${BASE}/api/cases/${encodeURIComponent(c.body.case.id)}?hard=1`, { method: "DELETE", headers: { "x-actor": "agent" } });
   } else {
     check(false, `could not create a throwaway case to test write-path recording (status ${c.status})`);
+  }
+
+  // ── AC 4 (cos-ops#137): the MCP round trip actually registers a device ────
+  // A REAL spawn of the board MCP server, its env taken from the manifest's resolved
+  // 'board' entry (only CRM_BASE_URL is overridden, to THIS sandbox board) — proving
+  // get_device_status reaches a running board through a real wrapper, not just that the
+  // HTTP route works when a header is hand-set (the sections above). getManifest() is
+  // called INSIDE this guarded branch: a mid-edit config/cos.env can make it throw for a
+  // config reason that is [13b3]'s subject, not this file's — that degrades to a
+  // self-scoped NOT RUN line rather than reddening this file's overall verdict.
+  try {
+    const { getManifest } = await import("../mcp/service-manifest.mjs");
+    const entry = getManifest().find((e) => e.name === "board");
+    if (!entry) {
+      console.log("  NOT RUN (manifest has no 'board' entry): MCP round-trip");
+    } else {
+      const env = { ...process.env };
+      delete env.COS_DEVICE_ID;
+      delete env.COS_DEVICE_ROLE;
+      Object.assign(env, entry.env, { CRM_BASE_URL: BASE });
+
+      const child = spawn(process.execPath, [BOARD_SERVER], { env, stdio: ["pipe", "pipe", "pipe"] });
+      let stderr = "";
+      child.stderr.on("data", (d) => (stderr += d.toString("utf8")));
+      try {
+        const early = await Promise.race([
+          new Promise((res) => child.on("exit", () => res("exit"))),
+          new Promise((res) => setTimeout(() => res("up"), 2500)),
+        ]);
+        if (early === "exit") {
+          if (/Cannot find package|ERR_MODULE_NOT_FOUND/.test(stderr)) {
+            console.log("  NOT RUN (board server deps not installed): MCP round-trip");
+          } else {
+            check(false, `MCP round-trip: the board server exited early — ${(stderr.split("\n")[0] || "no stderr").trim()}`);
+          }
+        } else {
+          const client = makeMcpClient(child);
+          await client.request("initialize", {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: { name: "api-devices-test", version: "1.0.0" },
+          });
+          client.notify("notifications/initialized", {});
+          await client.request("tools/call", { name: "get_device_status", arguments: {} });
+
+          // The expectation comes from entry.env, NEVER r.body.deviceId: run.sh:415 gives
+          // this sandbox board its own COS_DEVICE_ID="test-board" as a spawn prefix, so the
+          // envelope's own identity is not the wrapper's — the wrapper is a separate caller
+          // registering itself, exactly like the hand-set-header sections above.
+          const expectedId = String(entry.env.COS_DEVICE_ID).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64);
+          r = await GET("/api/devices");
+          check(
+            devIds(r.body).includes(expectedId),
+            `MCP round-trip: get_device_status through a REAL spawned board wrapper registers ${expectedId} (got [${devIds(r.body).join(", ")}])`,
+          );
+        }
+      } finally {
+        child.kill();
+      }
+    }
+  } catch (e) {
+    console.log(`  NOT RUN (${String(e?.message || e).split("\n")[0]}): MCP round-trip`);
   }
 
   if (failures > 0) {

@@ -62,9 +62,11 @@ A machine's role is one per-machine setting in `config/cos.env`:
   write chokepoint refuses every write with a typed `SpokeRoleError` (HTTP 503 `spoke-role-refusal`),
   so even `npx next dev` cannot fork the store.
 
-`COS_DEVICE_ID` is a stable per-machine id (a sanitized hostname until setup mints one). Both are read
-by `board/lib/cos-env.ts` (`getDeviceRole()` / `getDeviceId()`), mirrored in `backup/config.mjs`, and
-validated loudly by `config/load-config.sh`.
+`COS_DEVICE_ID` is a stable per-machine id (a sanitized hostname until setup mints one —
+`config/load-config.sh` itself now defaults it to this machine's hostname at resolution time, so a
+wrapper descriptor's `${COS_DEVICE_ID}` ref always resolves; a setup-minted value in `cos.env` still
+wins). Both are read by `board/lib/cos-env.ts` (`getDeviceRole()` / `getDeviceId()`), mirrored in
+`backup/config.mjs`, and validated loudly by `config/load-config.sh`.
 
 ## What runs where
 
@@ -93,7 +95,9 @@ schemaVersion, the lease) and `GET /api/devices` (the richer envelope: identity 
 ephemeral last-seen of devices whose agents have talked to this board + the join blob). The board's
 **Devices** page renders that envelope; the `get_device_status` board MCP tool reads it; and a spoke's
 browser shows a bottom-right "Connected to &lt;hub&gt;" reachability chip. Last-seen is keyed on the
-`x-device` header the wrappers send, so it is *agent* last-seen — a plain browser sends none.
+`x-device` header the wrappers send, so it is *agent* last-seen — a plain browser sends none. The
+hub's own wrappers carry the id too, so the hub machine appears in its own list — the envelope's
+separate `deviceId`/`role` fields still identify the machine serving the page.
 
 The same envelope also carries **Cowork skill drift**: `board/lib/cowork-skills.ts` compares each
 operator skill this repo bundles (`board/.claude/skills/<skill>/`) against the copy Claude Cowork

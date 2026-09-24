@@ -109,7 +109,7 @@ source "$(git rev-parse --show-toplevel)/config/load-config.sh"
 CRM_BASE_URL="$BOARD_URL" "$NODE_BIN" "$REPO_ROOT/mcp/fitness-server/server.mjs"   # Ctrl-C
 # prints "fitness MCP server v1 ready (tools: push_health_data, list_health_data, …; CRM_BASE_URL=…)"
 ```
-- **CHECKPOINT** — the ready line prints the 18 tool names and echoes the `CRM_BASE_URL` it will talk
+- **CHECKPOINT** — the ready line prints the 20 tool names and echoes the `CRM_BASE_URL` it will talk
   to. (This only proves the server boots; §3 proves the bridge serves it, §7 proves a tool
   round-trips against the board.)
 
@@ -147,6 +147,7 @@ board/calendar/nutrition, because this server needs **no secret**). The generate
 the descriptor) is:
 - `PATH` starting with `$BREW_PREFIX/bin` (launchd can't see an nvm/asdf shim),
 - `CRM_BASE_URL=${BOARD_URL}` (the board; from `env` in the descriptor, pinned so it doesn't depend on the launchd cwd),
+- `COS_DEVICE_ID`/`COS_DEVICE_ROLE` (this machine's identity — the multi-device Devices last-seen signal),
 - `COS_MCP_IDLE_EXIT_MS=300000` — the idle-exit **OPT-IN** (`idleExit:true`), on the bridge only, never in
   the direct-stdio Cowork config (see Gotchas).
 
@@ -314,7 +315,7 @@ echo "Uninstalled the fitness bridge + the Cowork entry. ⌘Q + reopen Cowork to
   the **`/addons` catalog link stays reachable**. So "push_health_data keeps failing with Not found."
   is almost always *the add-on is off* (§6), not a bridge fault — check `/api/addons`.
 - **The COACHING intelligence is NOT in the MCP — the `save_*` tools PERSIST, they don't generate.**
-  The 18 tools push/read health data, read/set the athlete profile, read the board-computed form
+  The 20 tools push/read health data, read/set the athlete profile, read the board-computed form
   score + correlations, compose a vault report, and **persist/list/delete already-built
   coaching artifacts**. The four `save_*` tools (`save_training_plan` / `save_weekly_review` /
   `save_pre_workout_brief` / `save_correlation_report`) take a structured artifact the CALLER built

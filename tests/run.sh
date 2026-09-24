@@ -254,6 +254,29 @@
 #      enforced BEFORE the agent runs). The server hard-imports the Agent SDK at module
 #      top, so when its deps aren't installed the test SKIPs gracefully (exit 0) — so it
 #      is run UNCONDITIONALLY (it self-skips, like guard-quarantine-release).
+#  13b3. mcp-device-headers — the multi-device x-device/x-device-role PRODUCER contract
+#      (cos-ops#137): (a) each of the five board-facing descriptors' env carries
+#      COS_DEVICE_ID/COS_DEVICE_ROLE as the LITERAL ${VAR} ref, never a resolved value; (b)
+#      the resolved manifest's set of entries carrying CRM_BASE_URL is EXACTLY
+#      [board, body, calendar, fitness, nutrition] (a fixed pin — a 6th wrapper must extend
+#      it deliberately) with both keys PRESENT in each one's resolved env; (c) a REAL spawn
+#      of the board server, pointed at a loopback stub via its manifest-resolved env, is
+#      asserted to actually SEND x-device/x-device-role — proving the header is PRODUCED by
+#      a spawned wrapper, not only that three slug implementations agree on a value the test
+#      supplied by hand (that is device-mirrors.test.ts mirror #3's job). Board-free,
+#      root-install-only: SKIPs gracefully (exit 0) if the board server's deps aren't
+#      installed (fresh checkout), mirroring [13b2]. Run UNCONDITIONALLY (self-skips).
+#  13b4. mcp-fitness-wrapper — pins the fold of fitness's hand-rolled healthApi onto
+#      mcp-kit's shared makeBoardApi() (cos-ops#138): (1) a spawned fitness server's 503
+#      isError text CONTAINS the schema-guard's `detail` remediation, not just the bare
+#      `error` slug; (2) with COS_DEVICE_ID/COS_DEVICE_ROLE set, its outbound request
+#      carries x-device/x-device-role (device keys scrubbed from the inherited env in
+#      both arms); (3) tools/list is still EXACTLY the 20 fixed tool names (sorted-set
+#      compare; green on main already, a forward pin); (4) source pins: no `async
+#      function healthApi`, no `fetch(`, no `res.status === 401`, `makeBoardApi(`
+#      present. Board-free, root-install-only: SKIPs gracefully (exit 0) if the fitness
+#      server's deps aren't installed (fresh checkout), mirroring [13b2]/[13b3]. Run
+#      UNCONDITIONALLY (self-skips).
 #  13d. api-schema-guard — ONLY against the auto-started sandbox board (it must
 #      rewrite the store FILE, so it skips under COS_TEST_BOARD_URL): the
 #      FAIL-CLOSED schema guard. A store whose on-disk schemaVersion is AHEAD of
@@ -271,7 +294,11 @@
 #      leaseStaleHours), the x-device ephemeral last-seen tracker (a header registers +
 #      bumps a device, a header-less request invents nothing, a malformed id is
 #      sanitized, a write path records via resolveActor), and the null join blob when
-#      COS_HUB_PUBLIC_URL is unset. In-memory + read-only (net-zero).
+#      COS_HUB_PUBLIC_URL is unset. Also (cos-ops#137, AC 4) an MCP round trip: a REAL
+#      spawn of the board server, env taken from the manifest's resolved 'board' entry,
+#      calling get_device_status against this sandbox board actually registers a device
+#      (self-scoped NOT RUN on a getManifest()/spawn-deps failure, never a red). In-memory
+#      + read-only (net-zero).
 #  13d4. api-vault-coverage — ONLY if a board is running: the v15 vault-ingest RECEIPT +
 #      coverage-read contract (GET /api/cases/vault-coverage + POST /api/cases/vault-receipt):
 #      a case with vaultLinks and no receipt is a gap (reason "never"); a case with NO
@@ -1738,6 +1765,38 @@ else
   echo "mcp-kit-idle: FAIL"
   fail=1
   fail_reasons="${fail_reasons} mcp-kit-idle"
+fi
+
+# --- 13b3. multi-device x-device/x-device-role producer contract (no board) --
+# Pins the fix for cos-ops#137: the five board-facing wrapper descriptors carry the
+# COS_DEVICE_ID/COS_DEVICE_ROLE ${VAR} refs, the resolved manifest's carrier set is exactly
+# [board, body, calendar, fitness, nutrition] with both keys present, and a REAL spawned
+# board wrapper's outbound request actually carries the headers. SKIPs gracefully if root
+# workspace deps aren't installed (mirrors [13b2]). Run UNCONDITIONALLY (self-skips).
+echo
+echo "--- [13b3] multi-device x-device producer (no board/LLM/key) -"
+if node "${SCRIPT_DIR}/mcp-device-headers.mjs"; then
+  echo "mcp-device-headers: PASS"
+else
+  echo "mcp-device-headers: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} mcp-device-headers"
+fi
+
+# --- 13b4. fitness healthApi→makeBoardApi fold (no board, no LLM, no key) ----
+# Pins cos-ops#138: the schema-guard 503's detail remediation reaches the agent through
+# fitness, a spawned fitness wrapper sends x-device/x-device-role, the 20 tools are
+# unchanged, and the source shows the fold (no healthApi/fetch(/401 branch). SKIPs
+# gracefully if root workspace deps aren't installed (mirrors [13b2]/[13b3]). Run
+# UNCONDITIONALLY (self-skips).
+echo
+echo "--- [13b4] fitness healthApi fold (no board/LLM/key) ---------"
+if node "${SCRIPT_DIR}/mcp-fitness-wrapper.mjs"; then
+  echo "mcp-fitness-wrapper: PASS"
+else
+  echo "mcp-fitness-wrapper: FAIL"
+  fail=1
+  fail_reasons="${fail_reasons} mcp-fitness-wrapper"
 fi
 
 # --- 13c. api-vault-route (only when a board is healthy) ---------------------
