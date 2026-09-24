@@ -26,15 +26,17 @@ export function MobileNav({
   unreadCount,
   addonGroups,
   coworkStaleCount,
+  pendingCount,
 }: {
   unreadCount?: number;
   addonGroups?: AddonNavGroup[];
   // Cowork-installed-skill drift count (lib/cowork-skills.ts) — see sidebar.tsx's prop
   // comment for why this is NOT threaded through useNavLive.
   coworkStaleCount?: number;
+  pendingCount?: number;
 }) {
   const path = usePathname() ?? "/";
-  const { unread, addons } = useNavLive({ unreadCount, addonGroups });
+  const { unread, addons, pending } = useNavLive({ unreadCount, addonGroups, pendingCount });
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // Sheet rows are all Links, so a route change already means the tap landed —
@@ -153,6 +155,10 @@ export function MobileNav({
     system: renderSystemSection,
   };
 
+  // Every tab-bar badge, keyed by href — the third badge (ops#136) is where the two
+  // byte-identical hardcoded pill arms (this file, cos#189/#190) become data.
+  const tabBadge: Record<string, number> = { "/inbox": unread, "/my-issues": pending };
+
   return (
     <>
       <nav
@@ -172,11 +178,7 @@ export function MobileNav({
               >
                 <span className="relative w-4 h-4">
                   {navIcon(it.icon)}
-                  {it.href === "/inbox" && unread > 0 && (
-                    <span className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-violet-600 text-white text-[9px] leading-[15px] text-center tabular-nums">
-                      {unread > 99 ? "99+" : unread}
-                    </span>
-                  )}
+                  <CountPill count={tabBadge[it.href] ?? 0} />
                 </span>
                 <span>{it.label}</span>
               </Link>
@@ -193,11 +195,7 @@ export function MobileNav({
           >
             <span className="relative w-4 h-4">
               <IconMore />
-              {(coworkStaleCount ?? 0) > 0 && (
-                <span className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-violet-600 text-white text-[9px] leading-[15px] text-center tabular-nums">
-                  {coworkStaleCount! > 99 ? "99+" : coworkStaleCount}
-                </span>
-              )}
+              <CountPill count={coworkStaleCount ?? 0} />
             </span>
             <span>More</span>
           </button>
@@ -249,5 +247,17 @@ function SheetItem({
       <span className={`w-4 h-4 ${active ? "text-ink-900" : "text-ink-500"}`}>{icon}</span>
       <span className="flex-1">{label}</span>
     </Link>
+  );
+}
+
+// One count pill for every tab-bar badge (inbox unread, My Issues pending, More
+// staleness) — extracted when the third badge landed (ops#136) so the geometry
+// stays single-sourced. Renders nothing at zero: an empty queue leaves the tab clean.
+function CountPill({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-violet-600 text-white text-[9px] leading-[15px] text-center tabular-nums">
+      {count > 99 ? "99+" : count}
+    </span>
   );
 }

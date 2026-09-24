@@ -30,6 +30,7 @@ import type {
   BackupStatus,
   DeviceStatus,
   VaultStatus,
+  PendingMutation,
 } from "./types";
 import type { TreeNode, TaskListRow, TaskBucket } from "./selectors";
 
@@ -452,6 +453,48 @@ export function fetchUnansweredCount(): Promise<UnansweredCountResponse> {
 // row leaves the unanswered view). Rides the message PATCH; no dedicated route.
 export function markAnswered(id: string): Promise<MessageResponse> {
   return updateMessage(id, { answered: true });
+}
+
+// ── Approval queue (agent-proposed mutations awaiting a human decision) ───────
+// db.pending — an agent proposes via the propose MCP tool / POST /api/pending (no
+// client wrapper needed yet, nothing in board/ writes one); a human decides via
+// the tray below. Approve commits through lib/case-writes.ts (the same cores the
+// direct routes call, per cos-ops#119); reject settles the row with no board change.
+export interface PendingResponse extends VersionedResponse {
+  pending: PendingMutation[];
+}
+export interface PendingDecisionResponse extends VersionedResponse {
+  pending: PendingMutation;
+  case?: CaseRecord;
+}
+
+// The full queue, every status — the tray filters to "pending". See GET /api/pending.
+export function fetchPending(): Promise<PendingResponse> {
+  return request<PendingResponse>("/api/pending");
+}
+
+// Decide one proposal. Approve commits through lib/case-writes (the same cores the
+// direct routes call); the route's 400 carries the commit's own refusal text, which
+// request() throws as Error(message) — the tray renders it as the row's own state.
+export function decidePending(id: string, decision: "approve" | "reject"): Promise<PendingDecisionResponse> {
+  return request<PendingDecisionResponse>(`/api/pending/${encodeURIComponent(id)}`, {
+    method: "POST",
+    ...jsonBody({ decision }),
+  });
+}
+
+// Cheap pending tally for the tab-bar badge. Never throws — null on failure, and the
+// caller keeps its last-known count on null. NOTE this is deliberately NOT
+// fetchEnabledAddonGroups's posture: that one resolves [] on failure and its consumer
+// setAddons CLEARS the nav with it. board-client now carries THREE failure postures:
+// throw (request), [] (addon groups), null (this) — each stated at its own definition.
+export async function fetchPendingCount(): Promise<number | null> {
+  try {
+    const res = await fetchPending();
+    return res.pending.filter((p) => p.status === "pending").length;
+  } catch {
+    return null;
+  }
 }
 
 // ── Calendar events ──────────────────────────────────────────────────────────

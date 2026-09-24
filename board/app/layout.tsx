@@ -23,15 +23,17 @@ export const viewport: Viewport = {
 };
 
 // Read-only at the shell level: we need the inbox unread count for the sidebar
-// badge AND the enabled add-ons' nav items for the "Add-ons" group. Both come from
-// one JSON read (the DB), so the badge and the nav stay honest without making the
-// Inbox / the catalog own a second source of truth. The add-on group is then kept
-// LIVE in the client via subscribeToBoard (a toggle bumps db.version → SSE).
+// badge, the enabled add-ons' nav items for the "Add-ons" group, AND the pending-
+// approval count for the phone tab bar's My Issues badge. All three come from one
+// JSON read (the DB), so the badges and the nav stay honest without a second
+// source of truth. The add-on group is then kept LIVE in the client via
+// subscribeToBoard (a toggle bumps db.version → SSE).
 export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   let unreadCount = 0;
   let addonGroups: AddonNavGroup[] = [];
+  let pendingCount = 0;
   // SSR seed for the schema-guard banner: correct on first paint (the SSE frames
   // keep it live after mount — see SchemaAheadBanner). Passed raw and
   // unconditionally; the banner derives degraded-ness itself.
@@ -49,6 +51,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       icon: a.icon,
       navItems: a.navItems,
     }));
+    pendingCount = (db.pending ?? []).filter((p) => p.status === "pending").length;
   } catch {
     // Degrade gracefully — a missing/locked DB shouldn't blank the whole shell.
   }
@@ -72,7 +75,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </main>
         </div>
         {/* Bottom tab bar + More sheet below `md` — shares Sidebar's SSR seeds + nav model. */}
-        <MobileNav unreadCount={unreadCount} addonGroups={addonGroups} coworkStaleCount={coworkStaleCount} />
+        <MobileNav
+          unreadCount={unreadCount}
+          addonGroups={addonGroups}
+          coworkStaleCount={coworkStaleCount}
+          pendingCount={pendingCount}
+        />
         {/* Global Cmd/Ctrl+K palette — a self-sufficient client island; needs no props. */}
         <CommandPalette />
       </body>
