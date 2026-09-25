@@ -59,10 +59,11 @@ jobs:
       # assert every descriptor still resolves, and that the committed .mcp.json equals generator
       # output (so a hand-edit of .mcp.json — or a drifted descriptor — fails the build instead of
       # silently diverging). Mirrors the gen-labels-doc generated-file discipline. Needs only node + sh.
-      - name: Check service manifest + generated .mcp.json
+      - name: Check service manifest + generated .mcp.json + labels doc
         run: |
           node mcp/service-manifest.mjs --json > /dev/null
           node scripts/gen-mcp-json.mjs --check
+          node scripts/gen-labels-doc.mjs --check
 
       # The Cowork skill bundles (board/.claude/skill-bundles/*.zip) AND the automation catalog
       # spliced into board/.claude/skills/README.md are both build artifacts of
