@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 // Generate docs/reference/labels.md — the human-readable taxonomy + design doc — from the single
 // source of truth (board/lib/label-bundles.ts). Re-run after regenerating bundles.
+//
+//   node scripts/gen-labels-doc.mjs            # write docs/reference/labels.md
+//   node scripts/gen-labels-doc.mjs --check    # exit 1 if committed page != generated (CI guard)
+// --check guards the RENDERED page: a source field the template never reads (today: `domain`)
+// can change in label-bundles.ts without tripping it.
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +13,7 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
 const SRC = readFileSync(path.join(REPO, "board", "lib", "label-bundles.ts"), "utf8");
-const match = SRC.match(/= (\[[\s\S]*\]);/);
+const match = SRC.match(/export const LABEL_BUNDLES: LabelBundle\[\] = (\[[\s\S]*?\]);/);
 if (!match) {
   console.error(
     "Could not find the LABEL_BUNDLES array literal in board/lib/label-bundles.ts — " +
@@ -122,5 +127,24 @@ node scripts/gen-labels-doc.mjs
 ## The bundles
 ${section("Role bundles", "role")}${section("Life bundles", "life")}${section("Universal", "universal")}`;
 
-writeFileSync(path.join(REPO, "docs", "reference", "labels.md"), doc, "utf8");
-console.log(`Wrote docs/reference/labels.md — ${BUNDLES.length} bundles, ${totalLabels} labels.`);
+const TARGET = path.join(REPO, "docs", "reference", "labels.md");
+
+if (process.argv.includes("--check")) {
+  let current = "";
+  try {
+    current = readFileSync(TARGET, "utf8");
+  } catch {
+    /* missing file → mismatch */
+  }
+  if (current !== doc) {
+    console.error(
+      "[gen-labels-doc] docs/reference/labels.md is OUT OF SYNC with board/lib/label-bundles.ts.\n" +
+        "Run `node scripts/gen-labels-doc.mjs` and commit the result (do not hand-edit labels.md).",
+    );
+    process.exit(1);
+  }
+  console.log("[gen-labels-doc] docs/reference/labels.md is in sync with board/lib/label-bundles.ts.");
+} else {
+  writeFileSync(TARGET, doc, "utf8");
+  console.log(`Wrote docs/reference/labels.md — ${BUNDLES.length} bundles, ${totalLabels} labels.`);
+}
