@@ -10,6 +10,11 @@
 // The mode is inferred from the text and the user can also force COMMAND with a
 // leading ">". Keyboard-first: ↑/↓ move, Enter activates, Esc closes. ARIA
 // combobox/listbox roles wire the input to the result list for screen readers.
+// That keyboard framing is the fine-pointer half only: on coarse pointers the
+// hint footer and the esc <kbd> are hidden wholesale (iOS has no Esc or arrow
+// keys) and a 44px "Close" button takes their place in the input row; below
+// `sm` the dialog docks to the top instead of centering, and both offsets use
+// `dvh` rather than a raw `vh` length (cos-ops#141).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -295,7 +300,7 @@ export function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh] px-4"
+      className="fixed inset-0 z-50 flex items-start justify-center sm:pt-[12dvh] px-4"
       role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) closePalette();
@@ -342,11 +347,23 @@ export function CommandPalette() {
             autoComplete="off"
             spellCheck={false}
           />
-          <kbd className="text-[10px] px-1.5 py-0.5 rounded bg-ink-100 text-ink-500 font-mono">esc</kbd>
+          <kbd className="text-[10px] px-1.5 py-0.5 rounded bg-ink-100 text-ink-500 font-mono pointer-coarse:hidden">esc</kbd>
+          {/* Coarse-pointer twin of the esc kbd — exactly one of the pair renders per
+              pointer class. iOS has no Esc, and the backdrop's onMouseDown dismiss is
+              undocumented + unverified on touch (cos-ops#141), so touch gets a real
+              labeled exit. Token run mirrors drawer.tsx's CLOSE_CLASS minus ml-auto,
+              plus the display gating. */}
+          <button
+            onClick={closePalette}
+            aria-label="Close"
+            className="hidden pointer-coarse:inline-flex items-center justify-center text-[12px] text-ink-500 hover:text-ink-900 px-2 py-1 rounded hover:bg-ink-50 active:bg-ink-100 transition pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+          >
+            Close
+          </button>
         </div>
 
         {/* Results / command preview */}
-        <div ref={listRef} id="cp-listbox" role="listbox" aria-label="Results" className="max-h-[52vh] overflow-y-auto py-1.5">
+        <div ref={listRef} id="cp-listbox" role="listbox" aria-label="Results" className="max-h-[52dvh] overflow-y-auto py-1.5">
           {isCommand ? (
             <CommandPreview
               command={stripCommandPrefix(text)}
@@ -372,8 +389,8 @@ export function CommandPalette() {
           )}
         </div>
 
-        {/* Footer hint */}
-        <div className="flex items-center gap-3 px-3.5 h-8 border-t border-ink-100 text-[11px] text-ink-400">
+        {/* Footer hint — hidden wholesale on coarse pointers, keys iOS lacks (cos-ops#141) */}
+        <div className="flex items-center gap-3 px-3.5 h-8 border-t border-ink-100 text-[11px] text-ink-400 pointer-coarse:hidden">
           <Hint k="↑↓" label="Navigate" />
           <Hint k="↵" label={isCommand ? "Run" : "Open"} />
           <Hint k="esc" label="Close" />
