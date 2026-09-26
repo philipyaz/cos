@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 // backup-hardening.mjs — hermetic end-to-end test of the multi-producer backup
 // pipeline (backup/backup.mjs + backup/restore.mjs). NO board, NO Keychain, NO
-// network, NO live data: everything runs in a mktemp sandbox — a synthetic
-// repo-root skeleton (COS_BACKUP_REPO_ROOT), a local BARE git repo as the
-// "remote", per-device clones (COS_BACKUP_REPO + COS_BACKUP_ALLOW_NONDEFAULT=1,
-// the documented disposable-repo escape hatch), COS_BACKUP_KEY for the key, and
-// HOME pointed into the sandbox so the pre-restore snapshot never touches the
-// real ~/cos-recovery.
+// network, NO live data: everything runs in a mktemp sandbox (plus one
+// read-only structural census of the checked-out `backup/` source, section
+// [0]) — a synthetic repo-root skeleton (COS_BACKUP_REPO_ROOT), a local BARE
+// git repo as the "remote", per-device clones (COS_BACKUP_REPO +
+// COS_BACKUP_ALLOW_NONDEFAULT=1, the documented disposable-repo escape
+// hatch), COS_BACKUP_KEY for the key, and HOME pointed into the sandbox so
+// the pre-restore snapshot never touches the real ~/cos-recovery.
 //
 // Asserts the hardening + HUB-lease contract (multi-device PRs 2 + 3). The
 // archive is SINGLE-PRODUCER by lease: exactly one machine (the hub) produces;
 // a second machine joins the archive but is lease-refused (exit 4) until it
 // legitimately takes over a stale lease — the modeled hub handover.
+//   • single-flight lock: ONE implementation (lib/util.mjs, structurally censused); a fresh
+//     foreign lock → benign exit 3, no commit; a stale (>120 s) lock is reclaimed; restore
+//     refuses while the lock is held;
 //   • per-device manifests: a producer writes ONLY manifests/<deviceId>.json
 //     (deviceId + schemaVersion + vaultPath recorded); no MANIFEST.json minted;
 //     a corrupt manifest is recovered from git HEAD, never clobbered;
@@ -40,6 +44,7 @@ import path from "node:path";
 import http from "node:http";
 import { execFileSync, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { acquireRepoLock, releaseRepoLock } from "../backup/lib/util.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const COS_ROOT = path.resolve(HERE, "..");
@@ -124,6 +129,48 @@ async function main() {
   console.log(`backup-hardening · sandbox=${TMP}`);
   fs.mkdirSync(path.join(TMP, "home"), { recursive: true });
 
+  // ── [0] structural: ONE lock implementation (ops#146) ─────────────────────
+  // The single-flight lock lives in backup/lib/util.mjs and NOWHERE else. Two
+  // census keys, each covering the other's blind spot: openSync( catches a
+  // hand-rolled lock under any filename (deliberately WIDER than the lock rule
+  // — any new raw open under backup/ either routes through lib/util.mjs or
+  // consciously widens this gate); the quoted ".backup.lock" literal catches
+  // filename coupling that never calls openSync (e.g. a writeFileSync-wx
+  // re-roll, or a second hardcoded path). backup.mjs's ONE licensed literal
+  // is the .gitignore maintenance entry; restore.mjs's error MESSAGE says
+  // "(.backup.lock held)" with no leading quote, so it deliberately does not
+  // match — do not "fix" the message into a match. The corpus resolves against
+  // the GIT INDEX, never the working tree (CLAUDE.md; ADR 0045 bought this with
+  // a CI red — the hub holds dirs a fresh checkout lacks, e.g. backup/logs/),
+  // so hub and CI census the same files; content is read from disk so the gate
+  // sees uncommitted edits. Structural lint over source text — the properties
+  // an import cannot see.
+  const trackedMjs = git(COS_ROOT, "ls-files", "-z", "--", "backup")
+    .split("\0")
+    .filter((f) => f.endsWith(".mjs"));
+  const srcOf = new Map(trackedMjs.map((f) => [f, fs.readFileSync(path.join(COS_ROOT, f), "utf8")]));
+  check(
+    ["backup/backup.mjs", "backup/restore.mjs", "backup/lib/util.mjs"].every((f) => srcOf.has(f)),
+    `census corpus: ${srcOf.size} tracked .mjs under backup/ incl. all three lock parties`,
+  );
+  const openers = [...srcOf].filter(([, s]) => s.includes("openSync(")).map(([f]) => f);
+  check(openers.length === 1 && openers[0] === "backup/lib/util.mjs",
+    `openSync( appears ONLY in the shared helper (got: ${openers.join(", ") || "none"})`);
+  const LOCK_LIT = '".backup.lock"';
+  const litCount = (f) => srcOf.get(f).split(LOCK_LIT).length - 1;
+  check(litCount("backup/lib/util.mjs") >= 1, "the helper OWNS the lock filename (a rename here must visit this gate)");
+  check(litCount("backup/backup.mjs") === 1, `backup.mjs names the lock file exactly once — the .gitignore entry (got ${litCount("backup/backup.mjs")})`);
+  const strays = [...srcOf].filter(([f, s]) => f !== "backup/lib/util.mjs" && f !== "backup/backup.mjs" && s.includes(LOCK_LIT)).map(([f]) => f);
+  check(strays.length === 0, `no other backup/ module hardcodes the lock filename (got: ${strays.join(", ") || "none"})`);
+  check(srcOf.get("backup/backup.mjs").includes("acquireRepoLock") && srcOf.get("backup/backup.mjs").includes("releaseRepoLock"),
+    "backup.mjs locks through the shared helper (BOTH scripts, as util.mjs's header says)");
+  check(srcOf.get("backup/restore.mjs").includes("acquireRepoLock"),
+    "restore.mjs locks through the shared helper");
+  check(
+    srcOf.get("backup/lib/util.mjs").includes("staleMs = 120_000") && srcOf.get("backup/backup.mjs").includes("older than 120s"),
+    "the 120s stale default (util.mjs) and the reclaim log line narrating it (backup.mjs) move together",
+  );
+
   // ── the "GitHub" remote + the founding producer's clone ─────────────────────
   sh("git", ["init", "--quiet", "--bare", REMOTE]);
   const repoA = cloneBackupRepo(path.join(TMP, "backupA"));
@@ -165,6 +212,57 @@ async function main() {
   check(/recovered .* from git HEAD|recovered \d+ entries/.test(r.out), "corruption recovered from git HEAD (logged)");
   const postCorrupt = JSON.parse(fs.readFileSync(manAPath, "utf8")).backups.length;
   check(postCorrupt === preCorrupt + 1, `catalog preserved: ${preCorrupt}+1 entries after recovery (got ${postCorrupt})`);
+
+  // ── [1d] single-flight lock: helper states, busy skip, stale reclaim, restore refusal (ops#146)
+  // (i) the helper's three-way contract, driven directly.
+  const lockDir = path.join(TMP, "lockdir");
+  fs.mkdirSync(lockDir, { recursive: true });
+  const lockFile = path.join(lockDir, ".backup.lock");
+  check(acquireRepoLock(lockDir) === "acquired", "free lock → 'acquired'");
+  check(acquireRepoLock(lockDir) === "busy", "fresh lock → 'busy'");
+  const past = new Date(Date.now() - 600_000);
+  fs.utimesSync(lockFile, past, past);
+  check(acquireRepoLock(lockDir) === "reclaimed", "stale (>120s) lock → 'reclaimed'");
+  releaseRepoLock(lockDir);
+  check(!fs.existsSync(lockFile), "release removes the lock");
+  let releaseAbsentThrew = false;
+  try {
+    releaseRepoLock(lockDir); // absent lock: must be a no-op
+  } catch {
+    releaseAbsentThrew = true;
+  }
+  check(!releaseAbsentThrew, "release on an absent lock is a no-op (does not throw)");
+  fs.mkdirSync(lockFile); // a DIRECTORY at the lock path
+  check(acquireRepoLock(lockDir) === "busy", "fresh directory at the lock path → 'busy'");
+  fs.writeFileSync(path.join(lockFile, "x"), "x");
+  fs.utimesSync(lockFile, past, past);
+  check(acquireRepoLock(lockDir) === "busy", "stale non-empty directory → 'busy' (permanent refusal, never a crash)");
+  fs.rmSync(lockFile, { recursive: true, force: true });
+
+  // (ii) backup.mjs's exit-code protocol over the SAME lock (AC 5).
+  const lockA = path.join(repoA, ".backup.lock");
+  const headBeforeBusy = git(repoA, "rev-parse", "HEAD").trim();
+  fs.writeFileSync(lockA, "");
+  r = await runScript(BACKUP_MJS, devA);
+  check(r.code === 3, `backup under a FRESH foreign lock exits 3 (got ${r.code})`);
+  check(/another backup in progress, skipping/.test(r.out), "the busy skip is logged");
+  check(git(repoA, "rev-parse", "HEAD").trim() === headBeforeBusy, "a busy run writes NO commit");
+  check(fs.existsSync(lockA), "a busy run leaves the holder's lock in place");
+
+  // (iii) restore refuses over the same held lock (AC 6 — pins the === 'busy' form:
+  // a truthy-string regression at restore.mjs's !… would run straight through).
+  r = await runScript(RESTORE_MJS, { ...devA, argv: ["--list"] });
+  check(r.code !== 0, `restore --list under a held lock refuses (exit ${r.code})`);
+  check(/a backup run is in progress on this repo/.test(r.out), "the refusal names the lock");
+  check(fs.existsSync(lockA), "a refused restore does not release the foreign lock");
+
+  // (ii cont.) stale lock: reclaimed, run proceeds and releases.
+  fs.utimesSync(lockA, past, past);
+  r = await runScript(BACKUP_MJS, devA);
+  check(r.code === 0, `backup over a STALE lock reclaims and completes (exit ${r.code})`);
+  check(/reclaiming stale backup lock \(older than 120s\)/.test(r.out), "the reclaim is logged");
+  check(git(repoA, "rev-parse", "HEAD").trim() !== headBeforeBusy, "the reclaimed run produced (new commit)");
+  check(!fs.existsSync(lockA), "the lock is released after the reclaimed run");
 
   // ── [2] second machine, SAME key: ADMITTED to the archive but LEASE-refused —
   // A holds a fresh lease, so B quarantines its state once and exits 4.

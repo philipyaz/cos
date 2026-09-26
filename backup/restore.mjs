@@ -401,7 +401,7 @@ async function main() {
 // with a concurrent backup run's rebase/commit/push on the same repo.
 async function lockedMain() {
   const canLock = fs.existsSync(BACKUP_REPO);
-  if (canLock && !acquireRepoLock(BACKUP_REPO)) {
+  if (canLock && acquireRepoLock(BACKUP_REPO) === "busy") {
     throw new Error("a backup run is in progress on this repo (.backup.lock held) — retry in a minute.");
   }
   try {
