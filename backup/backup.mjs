@@ -26,20 +26,10 @@ import { encrypt, decrypt } from "./lib/crypto.mjs";
 import { resolveKey } from "./lib/key.mjs";
 import { deviceManifestPath, readAllManifests, MANIFESTS_DIR } from "./lib/manifests.mjs";
 import { readLease, writeLease, leaseIsStale, coerceLease, LEASE_FILE } from "./lib/lease.mjs";
-import { firstLine } from "./lib/util.mjs";
+import { firstLine, acquireRepoLock, releaseRepoLock } from "./lib/util.mjs";
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: "utf8", ...opts });
-
-// Single-flight lock: serializes the THREE callers of this script — the launchd
-// 03:30 agent, the board's manual "Back up now", and the board's opportunistic
-// top-up — so two runs can never interleave a git add/commit/push on the same repo.
-// `wx` is an atomic create-or-fail; a lock older than this is considered orphaned
-// (a crashed/killed run) and reclaimed. Kept inside backup.mjs because launchd runs
-// this file DIRECTLY, never through any board code — the board-side gate cannot
-// serialize against the cron run, only this lock can.
-const LOCK_PATH = path.join(BACKUP_REPO, ".backup.lock");
-const LOCK_STALE_MS = 120_000;
 
 // Fail-CLOSED sandbox/identity guard. The real off-site backup repo is the one
 // configured in config/cos.env (BACKUP_REPO), defaulting to ~/.cos-backups; anything
@@ -81,50 +71,30 @@ function main() {
     process.exit(1);
   }
 
-  // Acquire the single-flight lock. Reclaim it if it's orphaned (older than 120s),
-  // otherwise another run owns it — log + exit with code 3 ("busy"). Code 3 is a BENIGN
-  // skip, NOT a failure: a duplicate run that collided with an in-flight one did nothing
-  // wrong. The board run-gate maps exit 3 -> skipped:'busy', and the board's health view
-  // treats a (rare) launchd 03:30 lock-skip as benign. The whole body runs inside a
-  // finally that releases the lock so a throw can't leave it wedged.
-  let haveLock = false;
-  try {
-    fs.openSync(LOCK_PATH, "wx");
-    haveLock = true;
-  } catch (e) {
-    if (e && e.code === "EEXIST") {
-      let mtimeMs = 0;
-      try {
-        mtimeMs = fs.statSync(LOCK_PATH).mtimeMs;
-      } catch {
-        /* lock vanished between open and stat — treat as reclaimable */
-      }
-      if (Date.now() - mtimeMs > LOCK_STALE_MS) {
-        // Orphaned lock from a crashed run — reclaim it.
-        log("reclaiming stale backup lock (older than 120s)");
-        try {
-          fs.rmSync(LOCK_PATH, { force: true });
-          fs.openSync(LOCK_PATH, "wx");
-          haveLock = true;
-        } catch {
-          log("another backup in progress, skipping");
-          process.exitCode = 3; // busy: lock held by a live run — a benign skip, not a failure
-          return;
-        }
-      } else {
-        log("another backup in progress, skipping");
-        process.exitCode = 3; // busy: lock held by a live run — a benign skip, not a failure
-        return;
-      }
-    } else {
-      throw e;
-    }
+  // Acquire the single-flight lock (lib/util.mjs — the ONE implementation, shared
+  // with restore.mjs). It serializes the THREE callers of this script — the launchd
+  // 03:30 agent, the board's manual "Back up now", and the board's opportunistic
+  // top-up — so two runs can never interleave a git add/commit/push on the same
+  // repo. It must be taken HERE because launchd runs this file DIRECTLY, never
+  // through any board code — the board-side gate cannot serialize against the cron
+  // run, only this lock can. A stale (>120s) orphan is reclaimed; otherwise another
+  // run owns it — log + exit 3 ("busy"). Code 3 is a BENIGN skip, NOT a failure:
+  // a duplicate run that collided with an in-flight one did nothing wrong (the
+  // board run-gate maps exit 3 -> skipped:'busy'). runBackup() runs inside a
+  // finally that releases the lock so a throw can't leave it wedged; the acquire
+  // sits OUTSIDE that try so a refused acquire can never release the OTHER run's
+  // lock.
+  const lock = acquireRepoLock(BACKUP_REPO);
+  if (lock === "busy") {
+    log("another backup in progress, skipping");
+    process.exitCode = 3; // busy: lock held by a live run — a benign skip, not a failure
+    return;
   }
-
+  if (lock === "reclaimed") log("reclaiming stale backup lock (older than 120s)");
   try {
     runBackup();
   } finally {
-    if (haveLock) fs.rmSync(LOCK_PATH, { force: true });
+    releaseRepoLock(BACKUP_REPO);
   }
 }
 
