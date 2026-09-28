@@ -149,6 +149,9 @@ node scripts/mark-skill-uploaded.mjs <skill>|--all|--list   # per-machine receip
   green here and red in CI.
 - **A new `mcp/*-server` is a root workspace member** — `npm install` at the repo root and commit
   `package-lock.json`, or CI's `npm ci` fails fast.
+- **Gate a committed generated artifact with a `--check` flag on its own generator, wired into
+  `.github/workflows/ci.yml`** — never a new `tests/run.sh` step. The generator is the only
+  implementation of the artifact's shape, so the gate runs it rather than re-deriving it.
 - **Never `next build` in `board/` while a `next dev` is running** — they share `.next` and the running
   board 500s until restarted; verify with `npx tsc --noEmit` instead.
 
