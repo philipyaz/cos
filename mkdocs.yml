@@ -141,6 +141,7 @@ nav:
       - Semantic search: reference/search.md
       - Encrypted backup: reference/backup.md
   - Reference:
+      - Optional web research: reference/web-research.md
       - Deep feature tour: reference/deep-features.md
       - Async vault ingest: reference/vault-async.md
       - Labels: reference/labels.md

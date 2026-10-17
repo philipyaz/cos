@@ -192,6 +192,8 @@ those writes hit.
 
 ## Where to go next
 
+- [Optional web research in Claude Code](../reference/web-research.md) — public
+  meeting background through an opt-in Parallel Search MCP connection.
 - [Platform API](platform-api.md) — the board HTTP API these wrappers sit on.
 - [The vault agent](vault-agent.md) — the embedded-Agent-SDK server in depth.
 - [Triage skills](triage-skills.md) — the operator skills that drive these tools.
